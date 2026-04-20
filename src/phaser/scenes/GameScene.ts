@@ -60,36 +60,141 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createBackdrop(): void {
+    const encounter = this.bridge.encounter;
     const sky = this.add.graphics();
-    sky.fillGradientStyle(0x081529, 0x081529, 0x27518f, 0xf6ab54, 1);
+    sky.fillGradientStyle(0x091524, 0x091524, 0x345d8f, 0xf2a35e, 1);
     sky.fillRect(0, 0, 4600, VIEW_HEIGHT);
     sky.setScrollFactor(0);
 
-    this.add.circle(930, 118, 70, 0xffd98b, 0.88).setScrollFactor(0.08);
+    this.add.circle(980, 122, 86, 0xffd89a, 0.92).setScrollFactor(0.08);
+    this.add.ellipse(980, 122, 260, 120, 0xffc27a, 0.22).setScrollFactor(0.08);
 
-    const farCity = this.add.graphics();
-    farCity.fillStyle(0x22314a, 0.85);
-    for (let index = 0; index < 26; index += 1) {
-      const x = index * 190;
-      const height = 120 + ((index * 37) % 140);
-      farCity.fillRect(x, 320 - height, 110, height);
-      farCity.fillTriangle(x + 8, 320 - height, x + 55, 290 - height, x + 105, 320 - height);
-    }
-    farCity.setScrollFactor(0.22);
+    const haze = this.add.graphics();
+    haze.fillGradientStyle(0xffcb8a, 0xffcb8a, 0xffffff, 0xffffff, 0.12);
+    haze.fillRect(0, 230, 4600, 220);
+    haze.setScrollFactor(0.1);
 
-    const midCity = this.add.graphics();
-    midCity.fillStyle(0x314563, 0.95);
+    this.createDomLuisBridge(0.18, 300, 0.26);
+    this.createSkylineSilhouette(0.16, 330, 0x1a2740, 0.4);
+    this.createClerigosTower(910, 302, 0.16, 0.7);
+
+    this.createRibeiraLayer(0.24, 0.84, 430, 20, ["bg.facadeGranite", "bg.facadeBlue", "bg.facadeOchre"]);
+    this.createDomLuisBridge(0.28, 360, 0.44);
+    this.createRibeiraLayer(0.36, 0.94, 498, 70, ["bg.facadeBlue", "bg.facadeRose", "bg.facadeOchre", "bg.facadeGranite"]);
+
+    this.add.tileSprite(encounter.worldWidth / 2, 566, encounter.worldWidth + 500, 126, "bg.quay")
+      .setScrollFactor(0.62)
+      .setAlpha(0.86);
+    this.add.rectangle(encounter.worldWidth / 2, 536, encounter.worldWidth + 500, 8, 0x9ea9b5, 0.42).setScrollFactor(0.62);
+
+    this.createRiverTraffic();
+
+    this.waterLayer = this.add.tileSprite(encounter.worldWidth / 2, 656, encounter.worldWidth + 500, 150, "bg.water")
+      .setScrollFactor(0.8)
+      .setAlpha(0.9);
+    this.add.rectangle(encounter.worldWidth / 2, 682, encounter.worldWidth + 500, 96, 0x07101e, 0.46).setScrollFactor(1);
+    this.add.rectangle(encounter.worldWidth / 2, 610, encounter.worldWidth + 500, 16, 0xe7c07f, 0.12).setScrollFactor(0.85);
+  }
+
+  private createSkylineSilhouette(
+    scrollFactor: number,
+    baseY: number,
+    color: number,
+    alpha: number,
+  ): void {
+    const skyline = this.add.graphics();
+    skyline.fillStyle(color, alpha);
     for (let index = 0; index < 24; index += 1) {
-      const x = index * 200 + 60;
-      const height = 120 + ((index * 29) % 170);
-      midCity.fillRect(x, 405 - height, 134, height);
-      midCity.fillRect(x + 18, 385 - height, 18, height * 0.25);
+      const x = index * 190;
+      const width = 94 + ((index * 17) % 42);
+      const height = 90 + ((index * 31) % 120);
+      skyline.fillRect(x, baseY - height, width, height);
+      skyline.fillTriangle(x + 8, baseY - height, x + width / 2, baseY - height - 26, x + width - 8, baseY - height);
     }
-    midCity.setScrollFactor(0.36);
+    skyline.setScrollFactor(scrollFactor);
+  }
 
-    this.add.tileSprite(2100, 554, 4600, 180, "bg.bridge").setScrollFactor(0.48).setAlpha(0.35);
-    this.waterLayer = this.add.tileSprite(2100, 658, 4600, 124, "bg.water").setScrollFactor(0.8);
-    this.add.rectangle(2100, 680, 4600, 84, 0x081529, 0.5).setScrollFactor(1);
+  private createRibeiraLayer(
+    scrollFactor: number,
+    alpha: number,
+    baseY: number,
+    startX: number,
+    facadeKeys: string[],
+  ): void {
+    let x = startX;
+    let index = 0;
+    while (x < this.bridge.encounter.worldWidth + 320) {
+      const width = 104 + ((index * 19) % 34);
+      const height = 170 + ((index * 23) % 66);
+      const key = facadeKeys[index % facadeKeys.length];
+      const house = this.add.image(x + width / 2, baseY, key);
+      house.setOrigin(0.5, 1);
+      house.setDisplaySize(width, height);
+      house.setAlpha(alpha);
+      house.setScrollFactor(scrollFactor);
+      x += width - 12;
+      index += 1;
+    }
+  }
+
+  private createDomLuisBridge(scrollFactor: number, y: number, alpha: number): void {
+    const bridge = this.add.graphics();
+    bridge.setScrollFactor(scrollFactor);
+    bridge.lineStyle(8, 0x66778d, alpha);
+    bridge.strokeLineShape(new Phaser.Geom.Line(260, y, 3930, y));
+    bridge.lineStyle(6, 0x90a4be, alpha * 0.85);
+    bridge.strokeLineShape(new Phaser.Geom.Line(260, y - 18, 3930, y - 18));
+
+    for (let x = 300; x <= 3880; x += 180) {
+      bridge.lineStyle(4, 0x6c7c94, alpha * 0.78);
+      bridge.strokeLineShape(new Phaser.Geom.Line(x, y - 18, x + 90, y));
+      bridge.strokeLineShape(new Phaser.Geom.Line(x + 90, y - 18, x, y));
+      bridge.strokeLineShape(new Phaser.Geom.Line(x + 45, y - 18, x + 45, y));
+    }
+
+    bridge.lineStyle(7, 0x536170, alpha * 0.72);
+    for (let arch = 0; arch < 6; arch += 1) {
+      const start = 420 + arch * 540;
+      bridge.beginPath();
+      bridge.moveTo(start, y);
+      bridge.lineTo(start + 110, y + 38);
+      bridge.lineTo(start + 250, y + 52);
+      bridge.lineTo(start + 420, y);
+      bridge.strokePath();
+    }
+
+    bridge.lineStyle(6, 0x4d5965, alpha * 0.68);
+    for (let support = 420; support <= 3700; support += 420) {
+      bridge.strokeLineShape(new Phaser.Geom.Line(support, y, support, y + 132));
+    }
+  }
+
+  private createClerigosTower(x: number, baseY: number, scrollFactor: number, alpha: number): void {
+    const tower = this.add.graphics();
+    tower.setScrollFactor(scrollFactor);
+    tower.fillStyle(0x25334d, alpha);
+    tower.fillRect(x, baseY - 168, 34, 168);
+    tower.fillRoundedRect(x - 16, baseY - 216, 66, 48, 12);
+    tower.fillTriangle(x - 10, baseY - 216, x + 17, baseY - 254, x + 44, baseY - 216);
+    tower.fillRect(x + 10, baseY - 244, 12, 26);
+    tower.fillStyle(0xa9b8ca, alpha * 0.12);
+    tower.fillRect(x + 6, baseY - 170, 6, 150);
+  }
+
+  private createRiverTraffic(): void {
+    const boats = [
+      { x: 620, y: 610, scale: 0.72, scroll: 0.73, alpha: 0.8 },
+      { x: 1760, y: 626, scale: 0.94, scroll: 0.79, alpha: 0.86 },
+      { x: 3090, y: 616, scale: 0.78, scroll: 0.75, alpha: 0.76 },
+    ];
+    for (const boat of boats) {
+      this.add.image(boat.x, boat.y, "bg.rabelo")
+        .setScale(boat.scale)
+        .setAlpha(boat.alpha)
+        .setScrollFactor(boat.scroll);
+      this.add.ellipse(boat.x, boat.y + 24, 180 * boat.scale, 18 * boat.scale, 0xe9c07b, 0.08)
+        .setScrollFactor(boat.scroll);
+    }
   }
 
   private createLevelGeometry(): void {
@@ -107,23 +212,69 @@ export class GameScene extends Phaser.Scene {
       );
       this.platformGraphics.lineStyle(2, 0xd6e6ff, 0.3);
       this.platformGraphics.strokeRect(platform.x, platform.y, platform.width, platform.height);
+
+      if (platform.kind === "ground") {
+        this.add.rectangle(platform.x + platform.width / 2, platform.y + 8, platform.width, 10, 0xe1c78e, 0.14);
+      }
     }
 
-    this.add.text(180, 448, "Ribeira training dock", {
-      fontFamily: "Trebuchet MS, Verdana, sans-serif",
+    this.createSceneryProps();
+
+    this.add.text(180, 448, "Ribeira dock", {
+      fontFamily: "Georgia, Times New Roman, serif",
       fontSize: "24px",
       color: "#f3e7c2",
+      stroke: "#17263a",
+      strokeThickness: 5,
     });
     this.add.text(998, 430, "Broken girders", {
-      fontFamily: "Trebuchet MS, Verdana, sans-serif",
+      fontFamily: "Georgia, Times New Roman, serif",
       fontSize: "22px",
       color: "#fff5d6",
+      stroke: "#17263a",
+      strokeThickness: 5,
     });
-    this.add.text(2428, 256, "Rough stone / wall-bounce lane", {
-      fontFamily: "Trebuchet MS, Verdana, sans-serif",
+    this.add.text(2432, 256, "Granite climb line", {
+      fontFamily: "Georgia, Times New Roman, serif",
       fontSize: "22px",
       color: "#dcf3ff",
+      stroke: "#17263a",
+      strokeThickness: 5,
     });
+  }
+
+  private createSceneryProps(): void {
+    const lamps = [
+      { x: 120, y: 618 },
+      { x: 560, y: 618 },
+      { x: 1710, y: 618 },
+      { x: 2860, y: 618 },
+      { x: 3320, y: 618 },
+    ];
+    for (const lamp of lamps) {
+      this.add.image(lamp.x, lamp.y, "bg.lamp").setOrigin(0.5, 1).setAlpha(0.82);
+    }
+
+    const azulejos = [
+      { x: 420, y: 576, scale: 0.78 },
+      { x: 1610, y: 576, scale: 0.72 },
+      { x: 2800, y: 576, scale: 0.72 },
+    ];
+    for (const tile of azulejos) {
+      this.add.image(tile.x, tile.y, "bg.azulejo").setScale(tile.scale).setAlpha(0.72);
+    }
+
+    const posts = this.add.graphics();
+    posts.fillStyle(0x382619, 0.92);
+    for (const x of [140, 220, 300, 1700, 1780, 1860, 3270, 3350]) {
+      posts.fillRect(x, 562, 12, 58);
+      posts.fillRect(x - 2, 556, 16, 8);
+    }
+    posts.lineStyle(3, 0xaa8354, 0.55);
+    posts.strokeLineShape(new Phaser.Geom.Line(146, 572, 226, 572));
+    posts.strokeLineShape(new Phaser.Geom.Line(226, 572, 306, 572));
+    posts.strokeLineShape(new Phaser.Geom.Line(1706, 572, 1786, 572));
+    posts.strokeLineShape(new Phaser.Geom.Line(1786, 572, 1866, 572));
   }
 
   private createPickups(): void {
@@ -192,6 +343,7 @@ export class GameScene extends Phaser.Scene {
     this.bossFace.setScale(1.05);
     this.bossFace.setVisible(false);
     this.telegraphGraphics = this.add.graphics();
+    this.add.ellipse(encounter.bossArena.end + 10, 572, 620, 76, 0xdcb36e, 0.1);
   }
 
   override update(_time: number, delta: number): void {
@@ -290,6 +442,7 @@ export class GameScene extends Phaser.Scene {
     this.bossFace.setVisible(view.boss.active);
     this.bossFace.setTint(view.boss.weakPointOpen ? 0xfff1a6 : 0xffffff);
     this.bossFace.setScale(view.boss.weakPointOpen ? 1.18 : 1.05);
+    this.bossBody.setAlpha(view.boss.phase === "bridgeShake" ? 0.82 : 0.94);
 
     this.telegraphGraphics.clear();
     if (!view.boss.active || view.status === "menu") {

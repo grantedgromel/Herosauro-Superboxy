@@ -3,4 +3,5 @@ dist/
 coverage/
 .vite/
 *.log
-
+devserver*.err
+devserver*.log

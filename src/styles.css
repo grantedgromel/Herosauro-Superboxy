@@ -1,9 +1,10 @@
 :root {
   --ink: #f5f0db;
-  --gold: #d8b36c;
+  --gold: #dcb46d;
   --sea: #12365a;
-  --tile: #1f3f68;
-  --tile-soft: rgba(31, 63, 104, 0.78);
+  --tile: #2b5f91;
+  --tile-soft: rgba(33, 78, 124, 0.78);
+  --granite: #334559;
   --shadow: rgba(4, 10, 20, 0.58);
   --danger: #ef6a4c;
   --success: #79d2a6;
@@ -24,7 +25,8 @@ body {
   font-family: "Trebuchet MS", "Segoe UI", Verdana, sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at top, rgba(244, 179, 88, 0.18), transparent 35%),
+    radial-gradient(circle at top, rgba(244, 179, 88, 0.2), transparent 35%),
+    linear-gradient(135deg, rgba(31, 95, 145, 0.12), transparent 30%),
     linear-gradient(180deg, #06111d 0%, #0b1830 45%, #08101a 100%);
 }
 
@@ -127,7 +129,14 @@ body {
 .chip {
   background:
     linear-gradient(180deg, rgba(10, 24, 42, 0.9), rgba(18, 42, 72, 0.72)),
-    linear-gradient(90deg, rgba(232, 190, 120, 0.12), transparent 50%);
+    linear-gradient(90deg, rgba(232, 190, 120, 0.12), transparent 50%),
+    repeating-linear-gradient(
+      45deg,
+      rgba(110, 168, 212, 0.06),
+      rgba(110, 168, 212, 0.06) 10px,
+      rgba(12, 24, 39, 0.02) 10px,
+      rgba(12, 24, 39, 0.02) 20px
+    );
   border: 1px solid rgba(225, 205, 153, 0.36);
   box-shadow: 0 16px 34px var(--shadow);
   border-radius: 18px;
@@ -141,7 +150,7 @@ body {
   font-size: 0.72rem;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #c3d7ef;
+  color: #cde3f8;
   margin-bottom: 8px;
 }
 
@@ -224,7 +233,14 @@ body {
   border-radius: 28px;
   background:
     linear-gradient(180deg, rgba(13, 31, 53, 0.95), rgba(9, 20, 36, 0.93)),
-    linear-gradient(140deg, rgba(246, 171, 84, 0.12), transparent 35%);
+    linear-gradient(140deg, rgba(246, 171, 84, 0.12), transparent 35%),
+    repeating-linear-gradient(
+      45deg,
+      rgba(85, 141, 187, 0.05),
+      rgba(85, 141, 187, 0.05) 14px,
+      rgba(11, 29, 48, 0.02) 14px,
+      rgba(11, 29, 48, 0.02) 28px
+    );
   border: 1px solid rgba(238, 219, 167, 0.36);
   box-shadow: 0 28px 58px rgba(0, 0, 0, 0.42);
   text-align: center;
@@ -333,4 +349,3 @@ body {
     padding: 24px;
   }
 }
-
