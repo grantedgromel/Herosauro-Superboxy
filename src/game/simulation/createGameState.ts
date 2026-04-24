@@ -115,7 +115,6 @@ export function createGameState(
     activeSection: "tutorial",
     cameraTargetX: encounter.startX + 120,
     prompt: "J attack, K special, L dodge, Q or Shift swap",
-    message: "A retro action-platformer prototype on the Douro.",
+    message: "Command center online. Route board is live.",
   };
 }
-

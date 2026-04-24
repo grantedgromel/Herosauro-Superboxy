@@ -2,7 +2,7 @@ import Phaser from "phaser";
 
 import { gameBus } from "../../game/events";
 import { createInputCollector } from "../../game/input/bindings";
-import type { BreakableState, InputFrame, PickupState, ViewModel } from "../../game/types";
+import type { BreakableState, DashboardSectionId, InputFrame, PickupState, ViewModel } from "../../game/types";
 import { createSceneBridge, type SceneBridge } from "../adapters/sceneBridge";
 
 const VIEW_WIDTH = 1280;
@@ -21,6 +21,11 @@ export class GameScene extends Phaser.Scene {
   private bossBody!: Phaser.GameObjects.Ellipse;
   private bossFace!: Phaser.GameObjects.Image;
   private telegraphGraphics!: Phaser.GameObjects.Graphics;
+  private checkpointCallouts = new Map<string, Phaser.GameObjects.Text>();
+  private hazardCallouts = new Map<string, Phaser.GameObjects.Text>();
+  private sectionSignal!: Phaser.GameObjects.Text;
+  private bossSignal!: Phaser.GameObjects.Text;
+  private lastSectionSignal: DashboardSectionId | null = null;
   private unsubscribers: Array<() => void> = [];
 
   constructor() {
@@ -42,6 +47,7 @@ export class GameScene extends Phaser.Scene {
     this.createPickups();
     this.createActors();
     this.createBoss();
+    this.createCommandSignals();
 
     this.unsubscribers.push(
       gameBus.on("game:start", () => this.pushView(this.bridge.start())),
@@ -219,6 +225,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.createSceneryProps();
+    this.createRouteCallouts();
 
     this.add.text(180, 448, "Ribeira dock", {
       fontFamily: "Georgia, Times New Roman, serif",
@@ -275,6 +282,69 @@ export class GameScene extends Phaser.Scene {
     posts.strokeLineShape(new Phaser.Geom.Line(226, 572, 306, 572));
     posts.strokeLineShape(new Phaser.Geom.Line(1706, 572, 1786, 572));
     posts.strokeLineShape(new Phaser.Geom.Line(1786, 572, 1866, 572));
+  }
+
+  private createRouteCallouts(): void {
+    for (const checkpoint of this.bridge.encounter.checkpoints) {
+      const label = this.add.text(checkpoint.x, checkpoint.y - 92, checkpoint.id.replace("cp-", "").toUpperCase(), {
+        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontSize: "16px",
+        color: "#f2f6fa",
+        backgroundColor: "#0f1c2bcc",
+        padding: { left: 8, right: 8, top: 4, bottom: 4 },
+      });
+      label.setOrigin(0.5);
+      label.setAlpha(0.42);
+      this.checkpointCallouts.set(checkpoint.id, label);
+    }
+
+    for (const hazard of this.bridge.encounter.hazards) {
+      const label = this.add.text(hazard.x + hazard.width / 2, Math.max(96, hazard.y + 28), hazard.kind === "fallingRock" ? "ROCK LANE" : "SURGE LANE", {
+        fontFamily: "Trebuchet MS, Verdana, sans-serif",
+        fontSize: "16px",
+        color: "#ffbf62",
+        backgroundColor: "#160e09cc",
+        padding: { left: 8, right: 8, top: 4, bottom: 4 },
+      });
+      label.setOrigin(0.5, 0);
+      label.setAlpha(0.54);
+      this.hazardCallouts.set(hazard.id, label);
+    }
+
+    this.add.text(this.bridge.encounter.bossArena.start + 196, 468, "ARENA LOCK", {
+      fontFamily: "Trebuchet MS, Verdana, sans-serif",
+      fontSize: "18px",
+      color: "#d8eaf7",
+      backgroundColor: "#102334cc",
+      padding: { left: 10, right: 10, top: 6, bottom: 6 },
+    }).setOrigin(0.5);
+  }
+
+  private createCommandSignals(): void {
+    this.sectionSignal = this.add.text(30, 28, "", {
+      fontFamily: "Trebuchet MS, Verdana, sans-serif",
+      fontSize: "18px",
+      fontStyle: "bold",
+      color: "#f2f6fa",
+      backgroundColor: "#102334dd",
+      padding: { left: 12, right: 12, top: 8, bottom: 8 },
+    });
+    this.sectionSignal.setScrollFactor(0);
+    this.sectionSignal.setDepth(40);
+    this.sectionSignal.setAlpha(0);
+
+    this.bossSignal = this.add.text(VIEW_WIDTH - 30, 28, "", {
+      fontFamily: "Trebuchet MS, Verdana, sans-serif",
+      fontSize: "18px",
+      fontStyle: "bold",
+      color: "#ffbf62",
+      backgroundColor: "#160e09dd",
+      padding: { left: 12, right: 12, top: 8, bottom: 8 },
+    });
+    this.bossSignal.setOrigin(1, 0);
+    this.bossSignal.setScrollFactor(0);
+    this.bossSignal.setDepth(40);
+    this.bossSignal.setAlpha(0);
   }
 
   private createPickups(): void {
@@ -360,6 +430,7 @@ export class GameScene extends Phaser.Scene {
     this.renderBreakables(view.breakables);
     this.renderHazards(view);
     this.renderBoss(view);
+    this.renderCommandSignals(view);
     this.cameras.main.scrollX = Phaser.Math.Linear(
       this.cameras.main.scrollX,
       view.cameraTargetX - VIEW_WIDTH / 2,
@@ -429,11 +500,17 @@ export class GameScene extends Phaser.Scene {
   private renderHazards(view: ViewModel): void {
     for (const hazard of view.hazards) {
       const sprite = this.hazardSprites.get(hazard.id);
+      const label = this.hazardCallouts.get(hazard.id);
       if (!sprite) {
         continue;
       }
       sprite.setVisible(hazard.active);
       sprite.setAlpha(hazard.active ? 0.38 : 0);
+      label?.setAlpha(hazard.active ? 1 : 0.54);
+      if (label) {
+        label.setColor(hazard.active ? "#ffe7af" : "#ffbf62");
+        label.setBackgroundColor(hazard.active ? "#3a1e10dd" : "#160e09cc");
+      }
     }
   }
 
@@ -471,5 +548,49 @@ export class GameScene extends Phaser.Scene {
         );
       }
     }
+  }
+
+  private renderCommandSignals(view: ViewModel): void {
+    const liveSection = view.navSections.find((section) => section.live)?.id ?? null;
+    if (liveSection && this.lastSectionSignal !== liveSection) {
+      this.lastSectionSignal = liveSection;
+      this.sectionSignal.setText(`${view.runSummary.activeSectionLabel.toUpperCase()} LIVE`);
+      this.tweens.killTweensOf(this.sectionSignal);
+      this.sectionSignal.setAlpha(0);
+      this.tweens.add({
+        targets: this.sectionSignal,
+        alpha: { from: 0, to: 1 },
+        duration: 180,
+        yoyo: true,
+        hold: 1100,
+      });
+    }
+
+    const checkpointId = this.bridge.getState().checkpoint.lastId;
+    for (const [id, label] of this.checkpointCallouts) {
+      label.setAlpha(id === checkpointId ? 1 : 0.42);
+      label.setBackgroundColor(id === checkpointId ? "#123a29dd" : "#0f1c2bcc");
+    }
+
+    if (!view.boss.active || view.status !== "playing") {
+      this.bossSignal.setAlpha(0);
+      return;
+    }
+
+    let label = "ADAMASTOR LIVE";
+    if (view.boss.phase === "bridgeShake") {
+      label = "ADAMASTOR RISING";
+    } else if (view.boss.phase === "finisher") {
+      label = "FINISHER LIVE";
+    } else if (view.boss.weakPointOpen) {
+      label = "WEAK POINT OPEN";
+    } else if (view.boss.pattern === "slam") {
+      label = "SLAM INBOUND";
+    } else {
+      label = "SWEEP INBOUND";
+    }
+
+    this.bossSignal.setText(label);
+    this.bossSignal.setAlpha(1);
   }
 }

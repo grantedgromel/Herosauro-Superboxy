@@ -1,4 +1,6 @@
 export type HeroKind = "herosauro" | "superBoxy";
+export type DashboardSectionId = "overview" | "route" | "threats" | "boss";
+export type DashboardTone = "neutral" | "positive" | "warning" | "critical";
 export type BossPhase =
   | "dormant"
   | "bridgeShake"
@@ -227,6 +229,59 @@ export interface HeroViewData {
   invulnerability: number;
 }
 
+export interface DashboardNavSection {
+  id: DashboardSectionId;
+  label: string;
+  live: boolean;
+  available: boolean;
+  note: string;
+}
+
+export interface RunSummary {
+  progressPercent: number;
+  elapsedLabel: string;
+  checkpointLabel: string;
+  collectiblesFound: number;
+  collectiblesTotal: number;
+  collectiblesLabel: string;
+  bossReadinessPercent: number;
+  bossStatus: string;
+  activeSectionLabel: string;
+}
+
+export interface HeroRoleTag {
+  label: "Power" | "Mobility" | "Survivability";
+  value: "High" | "Medium" | "Low";
+}
+
+export interface HeroProfile {
+  kind: HeroKind;
+  displayName: string;
+  active: boolean;
+  isDown: boolean;
+  healthPercent: number;
+  condition: string;
+  readiness: string;
+  tone: DashboardTone;
+  roleTags: HeroRoleTag[];
+}
+
+export interface AlertItem {
+  id: string;
+  label: string;
+  detail: string;
+  tone: DashboardTone;
+}
+
+export interface UpcomingItem {
+  id: string;
+  kind: "checkpoint" | "hazard" | "breakable" | "boss";
+  label: string;
+  detail: string;
+  distanceLabel: string;
+  tone: DashboardTone;
+}
+
 export interface BossViewData {
   active: boolean;
   phase: BossPhase;
@@ -249,6 +304,11 @@ export interface ViewModel {
   message: string;
   cameraTargetX: number;
   collectibles: CollectibleState;
+  navSections: DashboardNavSection[];
+  runSummary: RunSummary;
+  heroProfiles: HeroProfile[];
+  alerts: AlertItem[];
+  upcoming: UpcomingItem[];
   heroes: Record<HeroKind, HeroViewData>;
   boss: BossViewData;
   golems: GolemState[];
@@ -256,4 +316,3 @@ export interface ViewModel {
   pickups: PickupState[];
   breakables: BreakableState[];
 }
-

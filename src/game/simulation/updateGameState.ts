@@ -1,4 +1,11 @@
 import { createGameState } from "./createGameState";
+import {
+  deriveAlerts,
+  deriveHeroProfiles,
+  deriveNavSections,
+  deriveRunSummary,
+  deriveUpcoming,
+} from "./deriveCommandCenterData";
 import type {
   BossPattern,
   EncounterDefinition,
@@ -100,7 +107,7 @@ function applyDamageToHero(
 
   hero.health = clamp(hero.health - amount, 0, hero.maxHealth);
   hero.abilities.invulnerability = 0.75;
-  state.prompt = prompt ?? "Keep moving. Adamastor punishes hesitation.";
+  state.prompt = prompt ?? "Keep the route moving. Hesitation compounds risk.";
 
   if (hero.health > 0) {
     return;
@@ -111,7 +118,7 @@ function applyDamageToHero(
   hero.vx = 0;
   hero.vy = 0;
   hero.attackStyle = "idle";
-  state.prompt = `${hero.displayName} is down. Hold on for the revive window.`;
+  state.prompt = `${hero.displayName} is down. Protect the lane through the revive window.`;
 
   const otherKind = getOtherHero(heroKind);
   if (!state.heroes[otherKind].isDown) {
@@ -166,28 +173,28 @@ function updateObjectiveText(state: GameState, encounter: EncounterDefinition): 
 
   switch (state.activeSection) {
     case "tutorial":
-      state.prompt = state.swapCooldown > 0 ? "Swap cooling down..." : "Swap freely to feel the brothers' rhythm.";
+      state.prompt = state.swapCooldown > 0 ? "Swap system cooling..." : "Swap freely to stabilize the opening route.";
       break;
     case "hazard":
-      state.prompt = "Jump the broken girders and watch the falling stone.";
+      state.prompt = "Read the broken girders early and clear the hazard lane cleanly.";
       break;
     case "warmup":
-      state.prompt = "Herosauro crushes crates. Boxy threads tight routes.";
+      state.prompt = "Herosauro opens the route. Boxy keeps tempo through the tight lanes.";
       break;
     case "boss":
       if (state.boss.phase === "bridgeShake") {
-        state.prompt = "Adamastor is rising. Hold steady on the bridge.";
+        state.prompt = "Boss rise detected. Hold the bridge and keep the lane centered.";
       } else if (state.boss.phase === "combat" && state.boss.weakPointOpen) {
-        state.prompt = "Weak point open. Strike his brow before he resets.";
+        state.prompt = "Weak point open. Convert the window before the board resets.";
       } else if (state.boss.phase === "finisher") {
         state.prompt =
           state.boss.finisherStep === 0
-            ? "Lead with Herosauro, then tag Super Boxy for the finisher."
-            : "Switch to Super Boxy and uppercut the weak point.";
+            ? "Lead with Herosauro, then tag Super Boxy to close the finisher chain."
+            : "Switch to Super Boxy and close the exposed brow.";
       }
       break;
     case "victory":
-      state.prompt = "Adamastor falls back into the Douro.";
+      state.prompt = "Objective secured. Route pressure is cleared.";
       break;
   }
 }
@@ -205,7 +212,7 @@ function maybeCaptureCheckpoint(state: GameState, encounter: EncounterDefinition
       bossHealth: state.boss.health,
       bossPhase: state.boss.phase,
     };
-    state.message = `Checkpoint reached at ${checkpoint.id}.`;
+    state.message = `Checkpoint secured at ${checkpoint.id}.`;
   }
 }
 
@@ -232,7 +239,7 @@ function resetToCheckpoint(state: GameState, encounter: EncounterDefinition): Ga
   fresh.heroes.herosauro.y = state.checkpoint.y;
   fresh.heroes.superBoxy.x = state.checkpoint.x;
   fresh.heroes.superBoxy.y = state.checkpoint.y;
-  fresh.message = "Back on your feet. Porto still needs you.";
+  fresh.message = "Route reset at the latest anchor.";
   updateObjectiveText(fresh, encounter);
   return fresh;
 }
@@ -390,7 +397,7 @@ function damageGolemsInBox(state: GameState, box: Rect, damage: number): void {
     golem.hitFlash = 0.18;
     if (golem.health === 0) {
       golem.alive = false;
-      state.message = "Stone golem shattered.";
+      state.message = "Threat unit removed from the board.";
     }
   }
 }
@@ -434,7 +441,7 @@ function hitBossWeakPoint(state: GameState, hero: HeroState, damage: number, enc
   state.boss.weakPointOpen = false;
   state.boss.staggerTimer = 0;
   state.boss.telegraphTimer = 1.15;
-  state.message = "Direct hit on Adamastor's brow.";
+  state.message = "Direct hit confirmed on Adamastor's brow.";
 }
 
 function breakCrates(state: GameState, box: Rect): void {
@@ -581,7 +588,7 @@ function updateBoss(state: GameState, encounter: EncounterDefinition, dt: number
     state.boss.locked = true;
     state.boss.phase = "bridgeShake";
     state.boss.shakeTimer = 2.2;
-    state.message = "Adamastor rises from the Douro.";
+    state.message = "Boss board active. Adamastor is rising.";
   }
 
   if (!state.boss.active) {
@@ -643,7 +650,7 @@ function updateBoss(state: GameState, encounter: EncounterDefinition, dt: number
     state.status = "victory";
     state.activeSection = "victory";
     state.objective = encounter.objectiveText.victory;
-    state.message = "Primal Roar unlocked for the next chapter.";
+    state.message = "Objective secured. Boss lane cleared.";
   }
 }
 
@@ -768,6 +775,12 @@ export function stepGameState(
 }
 
 export function createViewModel(state: GameState, encounter: EncounterDefinition): ViewModel {
+  const navSections = deriveNavSections(state, encounter);
+  const runSummary = deriveRunSummary(state, encounter);
+  const heroProfiles = deriveHeroProfiles(state);
+  const alerts = deriveAlerts(state, encounter);
+  const upcoming = deriveUpcoming(state, encounter);
+
   return {
     status: state.status,
     encounterName: encounter.name,
@@ -778,6 +791,11 @@ export function createViewModel(state: GameState, encounter: EncounterDefinition
     message: state.message,
     cameraTargetX: state.cameraTargetX,
     collectibles: state.collectibles,
+    navSections,
+    runSummary,
+    heroProfiles,
+    alerts,
+    upcoming,
     heroes: {
       herosauro: {
         kind: "herosauro",
