@@ -8,9 +8,12 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "podcast:word": "node scripts/listennotes_to_word.mjs",
+    "podcast:transcribe": "python scripts/transcribe_podcast_manifest.py"
   },
   "dependencies": {
+    "docx": "^9.6.1",
     "phaser": "^3.90.0"
   },
   "devDependencies": {
@@ -21,4 +24,3 @@
     "vitest": "^3.2.4"
   }
 }
-
