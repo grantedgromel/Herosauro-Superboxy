@@ -1,0 +1,20 @@
+[gd_resource type="ShaderMaterial" load_steps=4 format=3]
+
+[ext_resource type="Shader" path="res://assets/shaders/toon.gdshader" id="1_toon"]
+[ext_resource type="Shader" path="res://assets/shaders/toon_outline.gdshader" id="2_outline"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_outline"]
+shader = ExtResource("2_outline")
+shader_parameter/outline_color = Color(0.04, 0.04, 0.05, 1)
+shader_parameter/outline_width = 0.06
+
+[resource]
+shader = ExtResource("1_toon")
+shader_parameter/albedo_color = Color(0.412, 0.412, 0.412, 1)
+shader_parameter/bands = 3
+shader_parameter/ambient_floor = 0.3
+shader_parameter/emission_color = Color(0, 0, 0, 1)
+shader_parameter/emission_energy = 0.0
+shader_parameter/rim_amount = 0.15
+shader_parameter/rim_color = Color(1, 0.6, 0.4, 1)
+next_pass = SubResource("ShaderMaterial_outline")

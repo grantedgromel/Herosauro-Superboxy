@@ -1,0 +1,11 @@
+# Godot 4 editor data / import cache (regenerated on open)
+.godot/
+
+# Exported builds
+/build/
+/export/
+*.tmp
+
+# OS cruft
+.DS_Store
+Thumbs.db
