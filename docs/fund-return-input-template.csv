@@ -1,4 +1,0 @@
-fundCode,fundName,returnSourceType,returnSourceNameContains,returnSourceId,notes
-ABC123,,FundAccounting,,,Preferred accounting source
-,Example Fund LP,FundHybrid,Net,,Fallback to exact fundName match
-XYZ789,,,Monthly,4567,Pin a specific return source when type alone is not enough

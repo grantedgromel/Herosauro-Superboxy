@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/boss/adamastor.gd" id="1_boss"]
+
+[sub_resource type="BoxShape3D" id="Box_boss"]
+size = Vector3(5, 9, 4)
+
+[node name="Adamastor" type="CharacterBody3D"]
+script = ExtResource("1_boss")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.5, 0)
+shape = SubResource("Box_boss")
