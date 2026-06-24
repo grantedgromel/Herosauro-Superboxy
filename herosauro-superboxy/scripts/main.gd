@@ -40,8 +40,8 @@ func _ready() -> void:
 	_spawn_player(SuperBoxyScene, 2, P2_SPAWN)
 
 	var boss := AdamastorScene.instantiate()
-	boss.global_position = BOSS_SPAWN
 	add_child(boss)
+	boss.global_position = BOSS_SPAWN
 
 	var ui := CanvasLayer.new()
 	ui.name = "UI"
@@ -64,8 +64,8 @@ func _spawn_player(scene: PackedScene, id: int, spawn: Vector3) -> void:
 	var p: PlayerBase = scene.instantiate()
 	p.player_id = id
 	p.spawn_position = spawn
-	p.global_position = spawn
 	add_child(p)
+	p.global_position = spawn
 
 
 func _unhandled_input(event: InputEvent) -> void:
