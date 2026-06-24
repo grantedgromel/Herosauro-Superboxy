@@ -33,7 +33,16 @@ heroes fall, Porto is lost.
 ## Exporting for Web (HTML5) — the primary target
 
 The project renders with the **GL Compatibility** backend so it runs in browsers via
-WebGL 2. A `Web` export preset is included (`export_presets.cfg`).
+WebGL 2. A `Web` export preset is included (`export_presets.cfg`), and a **prebuilt,
+ready-to-host HTML5 build is committed under [`web/`](web/)** (no-threads variant, so it
+needs no special COOP/COEP headers and works on any static host, e.g. GitHub Pages).
+
+```bash
+# Play the prebuilt version locally:
+python3 -m http.server --directory web 8000   # then open http://localhost:8000
+```
+
+To rebuild it yourself:
 
 ```bash
 # One-time: install the matching export templates via the Godot editor
