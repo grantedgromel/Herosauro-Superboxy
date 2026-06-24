@@ -1,0 +1,12 @@
+[gd_scene load_steps=3 format=3 uid="uid://b0xysuperboxy01"]
+
+[ext_resource type="Script" path="res://scripts/players/superboxy.gd" id="1_boxy"]
+
+[sub_resource type="BoxShape3D" id="Box_body"]
+size = Vector3(1.1, 1.7, 1.1)
+
+[node name="SuperBoxy" type="CharacterBody3D"]
+script = ExtResource("1_boxy")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+shape = SubResource("Box_body")

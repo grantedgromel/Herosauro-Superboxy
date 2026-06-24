@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3 uid="uid://b0xydashtrail01"]
+
+[ext_resource type="Script" path="res://scripts/abilities/boxy_dash.gd" id="1_trail"]
+
+[sub_resource type="BoxMesh" id="Box_ghost"]
+size = Vector3(1.1, 1.7, 1.1)
+
+[node name="DashTrail" type="MeshInstance3D"]
+mesh = SubResource("Box_ghost")
+script = ExtResource("1_trail")
