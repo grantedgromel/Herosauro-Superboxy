@@ -8,6 +8,10 @@ extends RigidBody3D
 @export var lifetime: float = 2.0
 @export var damage: int = 50
 
+const TRexModel: PackedScene = preload("res://assets/models/trex.glb")
+const TREX_SCALE := 1.3
+const TREX_YAW_OFFSET := 0.0   # model faces +Z; tweak if it flies tail-first
+
 var direction: Vector3 = Vector3.RIGHT
 var source_player: int = 1
 
@@ -31,9 +35,16 @@ func _ready() -> void:
 
 
 func _apply_visuals() -> void:
+	# Hide the placeholder orb; the summoned green T-Rex spectrum is the visual.
 	var orb := get_node_or_null("Mesh") as MeshInstance3D
 	if orb:
-		orb.material_override = ToonFactory.glow(Color(0.2, 1.0, 0.3), 4.0)
+		orb.visible = false
+
+	var trex := TRexModel.instantiate()
+	trex.scale = Vector3.ONE * TREX_SCALE
+	# Aim the dino head-first along its flight direction (model faces +Z).
+	trex.rotation.y = atan2(direction.x, direction.z) + TREX_YAW_OFFSET
+	add_child(trex)
 
 	var trail := get_node_or_null("Trail") as CPUParticles3D
 	if trail:
