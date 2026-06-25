@@ -33,6 +33,8 @@ func _build_visuals() -> void:
 	model.scale = Vector3.ONE * MODEL_SCALE
 	model.position.y = MODEL_Y
 	_model_root.add_child(model)
+	# "jab" matches the model's jab clip (the "Right Jab From Guard" animation);
+	# "cast" is the Dino Energy summon. Substring match, so full names also resolve.
 	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "cast", "attack": "jab"})
 
 
