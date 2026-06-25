@@ -67,7 +67,7 @@ jobs:
           godot --headless --export-release "${EXPORT_PRESET}" web/index.html
           test -f web/index.pck && test -f web/index.wasm
 
-      - name: Commit refreshed web export
+      - name: Commit refreshed web export to the branch
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -79,3 +79,16 @@ jobs:
             git commit -m "chore(web): rebuild Godot web export from source [skip ci]"
             git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
+
+      # Publish the build to gh-pages so the live GitHub Pages preview always
+      # reflects the latest source. force_orphan keeps gh-pages a single commit
+      # so the large wasm/pck don't bloat history. Pushing gh-pages does not
+      # retrigger this workflow (it only runs on main / claude/**).
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./${{ env.PROJECT_DIR }}/web
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "Deploy web build from ${{ github.sha }}"
