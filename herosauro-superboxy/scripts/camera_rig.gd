@@ -1,16 +1,18 @@
 extends Node3D
-## CameraRig: a Node3D that owns a single Camera3D child and smoothly frames
-## both players, widening as they separate. Also handles screen shake (via the
-## GameManager.camera_shake_requested signal) and a victory zoom-out.
+## CameraRig: a Node3D that owns a single Camera3D child and frames both heroes
+## at an arcade-fighter scale — a close, low, near-side-on shot (à la Street
+## Fighter / Tekken) so the characters read large. Widens a little as players
+## separate, handles screen shake, and pulls out for the victory pose.
 
 @export var follow_speed: float = 4.0
-@export var base_distance: float = 18.0
-@export var height: float = 10.0
-@export var separation_factor: float = 0.35
-@export var look_offset_x: float = -4.0
-@export var min_distance: float = 14.0   # hard floor: heroes never shrink below this
-@export var max_distance: float = 24.0   # hard ceiling: separation can't dolly out forever
-@export var boss_focus_weight: float = 0.5  # how much the boss pulls the frame toward it
+@export var base_distance: float = 9.5    # close in, so the heroes fill the frame
+@export var height: float = 5.0           # low, near-side-on — kept above the y4 near rail so it never occludes
+@export var separation_factor: float = 0.28
+@export var look_offset_x: float = -2.0
+@export var look_height: float = 2.2      # eyeline target above the focus (chest height)
+@export var min_distance: float = 8.0     # hard floor: heroes never shrink below this
+@export var max_distance: float = 15.0    # hard ceiling: separation can't dolly out forever
+@export var boss_focus_weight: float = 0.15  # keep the heroes dominant; the giant just looms in
 
 var camera: Camera3D
 var _last_focus: Vector3 = Vector3(0.0, 2.0, 0.0)
@@ -27,7 +29,7 @@ func _ready() -> void:
 		camera = Camera3D.new()
 		camera.name = "Camera3D"
 		add_child(camera)
-	camera.fov = 58.0
+	camera.fov = 50.0   # slightly telephoto -> flatter, more "fighting game" perspective
 	camera.current = true
 	GameManager.camera_shake_requested.connect(_on_shake_requested)
 	GameManager.game_over.connect(_on_game_over)
@@ -57,7 +59,7 @@ func _process(delta: float) -> void:
 		var k: float = _shake_strength * (_shake_time / max(0.0001, _shake_total))
 		shake_off = Vector3(randf_range(-k, k), randf_range(-k, k), 0.0)
 	camera.position = shake_off
-	camera.look_at(focus + Vector3(0.0, 2.0, 0.0), Vector3.UP)
+	camera.look_at(focus + Vector3(0.0, look_height, 0.0), Vector3.UP)
 
 
 func _focus_point(players: Array) -> Vector3:
