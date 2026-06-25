@@ -18,16 +18,24 @@ extends RefCounted
 ## Movement speed, aggression and decision cadence scale with GameManager
 ## difficulty and tighten again in phase two.
 
-enum { IDLE, CHASE, SLAM, ROCK_THROW, RETREAT, PHASE_TWO }
+enum { IDLE, CHASE, SLAM, ROCK_THROW, RETREAT, PHASE_TWO, CHARGE }
 
 const ShockwaveScene: PackedScene = preload("res://scenes/fx/shockwave.tscn")
 const RockScene: PackedScene = preload("res://scenes/fx/rock_projectile.tscn")
 const SlamTelegraph: GDScript = preload("res://scripts/fx/slam_telegraph.gd")
+const ImpactMarker: GDScript = preload("res://scripts/fx/impact_marker.gd")
 
 # Slam timing/extent — shared by the wind-up, the danger telegraph and the
 # shockwave so the warning footprint always matches the blast.
 const SLAM_WINDUP := 0.5
 const SLAM_RADIUS := 15.0
+
+# Charge: a telegraphed straight-line rush across the bridge. Wind-up plants and
+# flashes a danger lane, then the giant explodes forward and bowls heroes over.
+const CHARGE_WINDUP := 0.55
+const CHARGE_SPEED := 26.0
+const CHARGE_TIME := 0.5
+const DECK_Y := 2.05   # bridge deck top (y=2) + a hair, so lane markers lie on the deck
 
 var boss: Node3D
 var state: int = IDLE
@@ -47,6 +55,11 @@ var _retreat_timer: float = 0.0
 var _strafe: float = 0.0
 var _attack_tween: Tween = null
 
+# Charge runs per-frame (not as a tween) since it drives sustained velocity.
+var _charge_dir: Vector3 = Vector3.ZERO
+var _charge_windup: float = 0.0
+var _charge_active: float = 0.0
+
 
 func _init(p_boss: Node3D) -> void:
 	boss = p_boss
@@ -65,6 +78,9 @@ func reset() -> void:
 	_busy = false
 	_retreat_timer = 0.0
 	_strafe = 0.0
+	_charge_dir = Vector3.ZERO
+	_charge_windup = 0.0
+	_charge_active = 0.0
 	_kill_attack_tween()
 
 
@@ -99,6 +115,8 @@ func update(delta: float) -> void:
 			_update_chase(delta)
 		RETREAT:
 			_update_retreat(delta)
+		CHARGE:
+			_update_charge(delta)
 		SLAM, ROCK_THROW:
 			# Attacks run as tween chains; the boss plants (velocity stays zeroed),
 			# apart from the slam's nudge-driven lunge.
@@ -108,6 +126,12 @@ func update(delta: float) -> void:
 # --- PHASE_TWO -------------------------------------------------------------
 
 func _enter_phase_two_now() -> void:
+	# Clean any in-flight attack so an interrupted slam/rock/charge can't leave the
+	# brain stuck busy when the phase-two transition fires mid-attack.
+	_kill_attack_tween()
+	_busy = false
+	_charge_windup = 0.0
+	_charge_active = 0.0
 	_decide_interval = maxf(1.2, _decide_interval * 0.6)
 	_decide_timer = minf(_decide_timer, _decide_interval)
 	_move_speed *= 1.25
@@ -155,9 +179,12 @@ func _update_chase(delta: float) -> void:
 	_decide_timer -= delta
 	if _decide_timer <= 0.0:
 		_decide_timer = _decide_interval
-		# Held off at distance, or rolling aggression -> lob a rock.
-		if dist >= _rock_range or randf() < _aggression * 0.5:
+		# Far off -> lob a rock. In the mid band, an aggressive roll commits to a
+		# telegraphed charge to close the gap; otherwise keep striding in.
+		if dist >= _rock_range:
 			_start_rock_throw()
+		elif randf() < _aggression * 0.6:
+			_start_charge()
 
 
 # --- RETREAT ---------------------------------------------------------------
@@ -185,6 +212,66 @@ func _update_retreat(delta: float) -> void:
 	_retreat_timer -= delta
 	if _retreat_timer <= 0.0:
 		state = CHASE
+
+
+# --- CHARGE ----------------------------------------------------------------
+
+func _start_charge() -> void:
+	state = CHARGE
+	_busy = true
+	boss.velocity.x = 0.0
+	boss.velocity.z = 0.0
+
+	var target: Node3D = boss.nearest_player()
+	if target == null:
+		_begin_retreat()
+		return
+
+	boss.face_toward(target.global_position, 1.0)
+	var to: Vector3 = target.global_position - boss.global_position
+	to.y = 0.0
+	_charge_dir = to.normalized() if to.length() > 0.01 else Vector3.RIGHT
+	_charge_windup = CHARGE_WINDUP
+	_charge_active = 0.0
+
+	# Flash a danger lane of converging markers from the giant to the target so the
+	# rush is readable and the heroes can step out of the line.
+	_spawn_charge_telegraph(target.global_position)
+
+
+func _update_charge(delta: float) -> void:
+	if _charge_windup > 0.0:
+		# Wind-up: plant and telegraph, then explode forward.
+		_charge_windup -= delta
+		boss.velocity.x = 0.0
+		boss.velocity.z = 0.0
+		if _charge_windup <= 0.0:
+			_charge_active = CHARGE_TIME
+			AudioManager.play_boss_slam()
+			GameManager.request_shake(0.3, 0.2)
+		return
+
+	# Active rush: drive sustained velocity; the boss's own contact check bowls
+	# over any hero it runs through.
+	_charge_active -= delta
+	boss.velocity.x = _charge_dir.x * CHARGE_SPEED
+	boss.velocity.z = _charge_dir.z * CHARGE_SPEED
+	if _charge_active <= 0.0:
+		boss.velocity.x = 0.0
+		boss.velocity.z = 0.0
+		_begin_retreat()
+
+
+func _spawn_charge_telegraph(target_pos: Vector3) -> void:
+	var from := boss.global_position
+	from.y = DECK_Y
+	var to := Vector3(target_pos.x, DECK_Y, target_pos.z)
+	var steps := 6
+	for i in range(1, steps + 1):
+		var p: Vector3 = from.lerp(to, float(i) / float(steps))
+		var mk: Node3D = ImpactMarker.new()
+		mk.setup(1.6, CHARGE_WINDUP)
+		_spawn(mk, p)
 
 
 # --- SLAM ------------------------------------------------------------------

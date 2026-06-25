@@ -110,7 +110,9 @@ func _update_animation() -> void:
 ## True while the giant is committed to a slam or rock-throw wind-up (lets the
 ## camera ease out to reveal the telegraph / AoE).
 func is_attacking() -> bool:
-	return _fsm != null and (_fsm.state == AdamastorStateMachine.SLAM or _fsm.state == AdamastorStateMachine.ROCK_THROW)
+	return _fsm != null and (_fsm.state == AdamastorStateMachine.SLAM \
+		or _fsm.state == AdamastorStateMachine.ROCK_THROW \
+		or _fsm.state == AdamastorStateMachine.CHARGE)
 
 
 func nearest_player() -> Node3D:

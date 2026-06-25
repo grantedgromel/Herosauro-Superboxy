@@ -138,7 +138,11 @@ web-export-verified before merge.
     it reads as a distinct escalation rather than just a red tint.
   - **Recovery windows** — post-attack exposure scales with difficulty (more punish time on Easy,
     relentless in phase two), so aggression is rewarded.
-- _Next:_ attack variety — a telegraphed **charge** across the bridge so the fight isn't slam/rock binary.
+  - **Telegraphed charge** — a third attack: at mid-range the giant rears (flashing a danger lane of
+    converging markers), then rushes in a straight line and bowls heroes over, so the fight isn't
+    slam/rock binary. The camera now also reveals the charge wind-up.
+- _Awaiting playtest:_ tune feel of the above in the web build (telegraph sizes/timings, charge speed,
+  phase-2 cadence), then move to Phase 2 (juice: damage numbers, hit sparks, dissolve, music/buses).
 - Tune the encounter loop: pacing, punish/reward windows, fairness of slam/rock tells, difficulty
   curve across Easy/Normal/Hard (the `difficulty_scalar` already exists).
 - Optional light touch: extract the level's spawn/boss/music into a small `LevelConfig` resource so
