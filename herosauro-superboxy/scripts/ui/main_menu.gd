@@ -1,65 +1,144 @@
 extends Control
-## Main menu overlay — sits over the live 3D arena. Polished: comic-style title,
-## soft scrims for legibility, a pulsing start prompt, and a clean controls bar.
+## Main menu — a real, full-screen menu (NOT an overlay on a live arena). Draws its
+## own opaque Porto golden-hour backdrop, then lets the player choose player count,
+## difficulty and (in 1P) which hero to control before starting the fight. Every
+## selection writes straight to GameManager, which the spawner + boss read at start.
 
-var _prompt: Control
+var _hero_row: Control
+var _start_btn: Button
+var _hint: Label
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_scrim(true, 380.0)
-	_scrim(false, 240.0)
+	_build_backdrop()
 
-	var title := UIStyle.title("HEROSAURO & SUPER BOXY", 74)
+	var title := UIStyle.title("HEROSAURO & SUPER BOXY", 68)
 	title.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	title.offset_top = 78.0
+	title.offset_top = 56.0
 	add_child(title)
 
-	var subtitle := UIStyle.label("LEGENDS OF PORTO", 30, UIStyle.CREAM, true)
+	var subtitle := UIStyle.label("LEGENDS OF PORTO", 28, UIStyle.CREAM, true)
 	subtitle.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	subtitle.offset_top = 168.0
+	subtitle.offset_top = 140.0
 	add_child(subtitle)
 
-	var tagline := UIStyle.label("Defend the Dom Luís Bridge", 20, UIStyle.GOLD)
+	var tagline := UIStyle.label("Defend the Dom Luís Bridge", 19, UIStyle.GOLD)
 	tagline.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	tagline.offset_top = 210.0
+	tagline.offset_top = 178.0
 	add_child(tagline)
 
-	# Pulsing start prompt in a subtle pill.
-	_prompt = _pill("PRESS ENTER TO START")
-	_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_prompt.offset_left = -190.0
-	_prompt.offset_right = 190.0
-	_prompt.offset_top = 50.0
-	_prompt.offset_bottom = 108.0
-	add_child(_prompt)
-	var pulse := create_tween().set_loops()
-	pulse.tween_property(_prompt, "modulate:a", 0.35, 0.75).set_trans(Tween.TRANS_SINE)
-	pulse.tween_property(_prompt, "modulate:a", 1.0, 0.75).set_trans(Tween.TRANS_SINE)
+	# Centred column of selectors + start.
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 18)
+	col.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	col.offset_left = -360.0
+	col.offset_right = 360.0
+	col.offset_top = -110.0
+	col.offset_bottom = 200.0
+	add_child(col)
+
+	var on_players := func(i: int) -> void:
+		GameManager.set_player_count(i + 1)
+		_hero_row.visible = (i == 0)
+	col.add_child(_segment("PLAYERS", ["1 PLAYER", "2 PLAYERS"], GameManager.player_count - 1, on_players))
+
+	var on_difficulty := func(i: int) -> void:
+		GameManager.set_difficulty(i)
+	col.add_child(_segment("DIFFICULTY", ["EASY", "NORMAL", "HARD"], GameManager.difficulty, on_difficulty))
+
+	var on_hero := func(i: int) -> void:
+		GameManager.set_human_hero(i + 1)
+	_hero_row = _segment("HERO (1P)", ["HEROSAURO", "SUPER BOXY"], GameManager.human_hero - 1, on_hero)
+	_hero_row.visible = (GameManager.player_count == 1)
+	col.add_child(_hero_row)
+
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 12)
+	col.add_child(spacer)
+
+	_start_btn = UIStyle.button("▶  START", true)
+	_start_btn.pressed.connect(_on_start)
+	col.add_child(_start_btn)
 
 	# Controls footer.
-	var p1 := UIStyle.label("HEROSAURO   ·   WASD move   ·   Shift jump   ·   E summon", 19, UIStyle.CREAM)
-	p1.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	p1.offset_top = -98.0
-	p1.offset_bottom = -68.0
-	add_child(p1)
-	var p2 := UIStyle.label("SUPER BOXY   ·   Arrows move   ·   / jump   ·   Space dash", 19, UIStyle.CREAM)
-	p2.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	p2.offset_top = -64.0
-	p2.offset_bottom = -34.0
-	add_child(p2)
+	_hint = UIStyle.label(_controls_text(), 17, UIStyle.MUTED)
+	_hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_hint.offset_top = -52.0
+	_hint.offset_bottom = -22.0
+	add_child(_hint)
+
+	_start_btn.call_deferred("grab_focus")
 
 
-func _pill(text: String) -> Control:
-	var pc := PanelContainer.new()
-	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var sb := UIStyle.panel(Color(0.08, 0.06, 0.12, 0.6), 30, 12)
-	sb.border_color = UIStyle.GOLD
-	sb.border_width_left = 2; sb.border_width_right = 2; sb.border_width_top = 2; sb.border_width_bottom = 2
-	pc.add_theme_stylebox_override("panel", sb)
-	var l := UIStyle.label(text, 28, UIStyle.GOLD, true)
-	pc.add_child(l)
-	return pc
+func _controls_text() -> String:
+	return "P1 Herosauro  ·  WASD  ·  Shift jump  ·  E special  ·  Q attack        " \
+		+ "P2 Super Boxy  ·  Arrows  ·  / jump  ·  Space special  ·  . attack"
+
+
+# --- Selectors -------------------------------------------------------------
+
+## A labelled row of mutually-exclusive option buttons. `cb` is called with the
+## chosen index; the chosen button is highlighted and the rest dimmed.
+func _segment(label_text: String, options: Array, initial: int, cb: Callable) -> Control:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+
+	var lbl := UIStyle.label(label_text, 20, UIStyle.MUTED, true, HORIZONTAL_ALIGNMENT_RIGHT)
+	lbl.custom_minimum_size = Vector2(170, 0)
+	row.add_child(lbl)
+
+	var btns: Array = []
+	for i in options.size():
+		var b := UIStyle.button(options[i])
+		b.custom_minimum_size = Vector2(160, 52)
+		b.add_theme_font_size_override("font_size", 22)
+		var idx := i
+		var handler := func() -> void:
+			cb.call(idx)
+			_highlight(btns, idx)
+		b.pressed.connect(handler)
+		row.add_child(b)
+		btns.append(b)
+
+	_highlight(btns, initial)
+	return row
+
+
+func _highlight(btns: Array, selected: int) -> void:
+	for i in btns.size():
+		var b: Button = btns[i]
+		b.modulate = Color(1, 1, 1, 1) if i == selected else Color(0.62, 0.6, 0.66, 0.8)
+
+
+# --- Backdrop --------------------------------------------------------------
+
+func _build_backdrop() -> void:
+	# Opaque Porto golden-hour gradient so no gameplay (and nothing else) shows through.
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.45, 1.0])
+	grad.colors = PackedColorArray([
+		Color(0.30, 0.20, 0.34),   # dusk purple (top)
+		Color(0.55, 0.32, 0.34),   # warm rose
+		Color(0.86, 0.55, 0.36),   # terracotta glow (bottom)
+	])
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 8
+	gt.height = 256
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(0, 1)
+	var bg := TextureRect.new()
+	bg.texture = gt
+	bg.stretch_mode = TextureRect.STRETCH_SCALE
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(bg)
+	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	# Soft dark scrims top and bottom for title / footer legibility.
+	_scrim(true, 300.0)
+	_scrim(false, 200.0)
 
 
 func _scrim(top: bool, height: float) -> void:
@@ -82,6 +161,12 @@ func _scrim(top: bool, height: float) -> void:
 		tr.offset_bottom = height
 	else:
 		tr.offset_top = -height
+
+
+# --- Start -----------------------------------------------------------------
+
+func _on_start() -> void:
+	GameManager.start_game()
 
 
 func _unhandled_input(event: InputEvent) -> void:

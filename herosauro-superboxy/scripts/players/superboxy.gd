@@ -31,6 +31,11 @@ func _ready() -> void:
 	move_speed = 8.0
 	jump_velocity = 13.0
 	ability_cooldown = 1.5
+	# Basic attack: a fast, light standing jab (shares the punch clip with the dash).
+	attack_cooldown = 0.38
+	attack_damage = 7
+	attack_range = 2.8
+	attack_hold = 0.28
 
 
 func _build_visuals() -> void:
@@ -40,7 +45,7 @@ func _build_visuals() -> void:
 	model.scale = Vector3.ONE * MODEL_SCALE
 	model.position.y = MODEL_Y
 	_model_root.add_child(model)
-	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "punch1"})
+	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "punch1", "attack": "punch1"})
 
 
 func _perform_ability() -> void:

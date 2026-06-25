@@ -4,10 +4,13 @@ extends Node3D
 ## GameManager.camera_shake_requested signal) and a victory zoom-out.
 
 @export var follow_speed: float = 4.0
-@export var base_distance: float = 30.0
-@export var height: float = 16.0
-@export var separation_factor: float = 0.55
+@export var base_distance: float = 18.0
+@export var height: float = 10.0
+@export var separation_factor: float = 0.35
 @export var look_offset_x: float = -4.0
+@export var min_distance: float = 14.0   # hard floor: heroes never shrink below this
+@export var max_distance: float = 24.0   # hard ceiling: separation can't dolly out forever
+@export var boss_focus_weight: float = 0.5  # how much the boss pulls the frame toward it
 
 var camera: Camera3D
 var _last_focus: Vector3 = Vector3(0.0, 2.0, 0.0)
@@ -34,8 +37,16 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	var players := get_tree().get_nodes_in_group("players")
 	var focus := _focus_point(players)
+	# Pull the frame toward the boss so the giant and the heroes share one tight shot,
+	# rather than centring on empty deck while the boss sits off-screen.
+	var boss := get_tree().get_first_node_in_group("boss")
+	if boss and is_instance_valid(boss):
+		focus = focus.lerp((boss as Node3D).global_position, boss_focus_weight)
+
 	var sep := _separation(players)
-	var dist := base_distance + sep * separation_factor + _extra_zoom
+	# Deadzone (sep-6): normal co-op spread doesn't dolly at all; the clamp caps the worst case.
+	# Victory _extra_zoom rides on top so the celebratory pull-out still reads.
+	var dist := clampf(base_distance + maxf(sep - 6.0, 0.0) * separation_factor, min_distance, max_distance) + _extra_zoom
 
 	var target := focus + Vector3(look_offset_x, height + _extra_zoom * 0.4, dist)
 	global_position = global_position.lerp(target, clamp(follow_speed * delta, 0.0, 1.0))

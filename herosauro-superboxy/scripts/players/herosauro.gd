@@ -19,6 +19,11 @@ func _ready() -> void:
 	move_speed = 8.0
 	jump_velocity = 13.0
 	ability_cooldown = 2.0
+	# Basic attack: a slower, heavier jab (his "cast" stays the big special).
+	attack_cooldown = 0.55
+	attack_damage = 10
+	attack_range = 3.2
+	attack_hold = 0.34
 
 
 func _build_visuals() -> void:
@@ -28,7 +33,7 @@ func _build_visuals() -> void:
 	model.scale = Vector3.ONE * MODEL_SCALE
 	model.position.y = MODEL_Y
 	_model_root.add_child(model)
-	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "cast"})
+	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "cast", "attack": "jab"})
 
 
 func _perform_ability() -> void:
