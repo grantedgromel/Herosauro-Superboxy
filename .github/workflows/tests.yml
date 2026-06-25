@@ -1,0 +1,57 @@
+name: Tests
+
+# Headless regression gate: runs the GDScript test harness
+# (herosauro-superboxy/tests/test_runner.gd) on every source push. Catches parse
+# errors across the codebase and verifies GameManager's core rules before the web
+# export job rebuilds the preview. No export templates needed (we only run a script).
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths-ignore:
+      - "herosauro-superboxy/web/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.3"
+  GODOT_RELEASE: "4.3-stable"
+  PROJECT_DIR: herosauro-superboxy
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} (headless)
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -O /tmp/godot.zip
+          unzip -o /tmp/godot.zip -d /tmp/godot
+          sudo mv "/tmp/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Import project resources
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          # Import so script preloads (scenes/materials/shaders) resolve.
+          # Import can exit non-zero after a clean import, so don't fail here.
+          timeout 300 godot --headless --import . || true
+
+      - name: Run headless test harness
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          godot --headless --script res://tests/test_runner.gd

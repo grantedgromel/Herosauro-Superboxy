@@ -116,9 +116,13 @@ Each phase is independently shippable so the live web preview never regresses. E
 web-export-verified before merge.
 
 ### Phase 0 — Quality gate & guardrails (foundation)
-- Add **GUT/GdUnit4** + **Godot Doctor** to the existing GitHub Actions workflow; headless smoke test
-  (boot → spawn → boss to phase-2 → death → victory) gates every later change.
-- Move the handful of UI strings behind Godot's **built-in localization** (EN now, PT-PT stub).
+- **[done]** Headless test harness (`herosauro-superboxy/tests/test_runner.gd`) + CI job
+  (`.github/workflows/tests.yml`): a compile gate that `load()`s every script (catching parse breakage
+  across the codebase) plus logic tests for `GameManager`'s score/combo/phase/win-loss rules. Gates
+  every push to `main` / `claude/**`. Started as a self-contained `SceneTree` harness (no external dep,
+  fully deterministic in headless CI); **GUT/GdUnit4** can layer on top later without changing the CI shape.
+- _Next:_ add **Godot Doctor** scene/resource validation to the job; move the handful of UI strings
+  behind Godot's **built-in localization** (EN now, PT-PT stub).
 - _Outcome:_ changes are regression-guarded; localization is free from here on.
 
 ### Phase 1 — Make the boss fight *great* (the core of a one-level game)
