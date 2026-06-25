@@ -22,6 +22,12 @@ enum { IDLE, CHASE, SLAM, ROCK_THROW, RETREAT, PHASE_TWO }
 
 const ShockwaveScene: PackedScene = preload("res://scenes/fx/shockwave.tscn")
 const RockScene: PackedScene = preload("res://scenes/fx/rock_projectile.tscn")
+const SlamTelegraph: GDScript = preload("res://scripts/fx/slam_telegraph.gd")
+
+# Slam timing/extent — shared by the wind-up, the danger telegraph and the
+# shockwave so the warning footprint always matches the blast.
+const SLAM_WINDUP := 0.5
+const SLAM_RADIUS := 15.0
 
 var boss: Node3D
 var state: int = IDLE
@@ -194,10 +200,15 @@ func _start_slam() -> void:
 		if dir.length() > 0.01:
 			boss.nudge(dir.normalized(), 2.0)
 
+	# Flare a danger zone on the deck so the slam is readable and dodgeable.
+	var tg: Node3D = SlamTelegraph.new()
+	tg.setup(SLAM_RADIUS, SLAM_WINDUP)
+	_spawn(tg, boss.global_position)
+
 	_attack_tween = boss.create_tween()
 	# Windup: raise both arms.
 	_attack_tween.tween_callback(func() -> void: boss.raise_arms(true))
-	_attack_tween.tween_interval(0.5)
+	_attack_tween.tween_interval(SLAM_WINDUP)
 	# Slam down.
 	_attack_tween.tween_callback(_do_slam_impact)
 	_attack_tween.tween_interval(0.45)   # recover
@@ -211,6 +222,7 @@ func _do_slam_impact() -> void:
 		return
 	boss.slam_arms_down()
 	var wave := ShockwaveScene.instantiate()
+	wave.max_radius = SLAM_RADIUS   # keep the blast matched to the telegraph footprint
 	if state == PHASE_TWO or _double_rocks:
 		wave.damage = 20
 	_spawn(wave, boss.global_position)

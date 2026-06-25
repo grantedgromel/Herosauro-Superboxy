@@ -126,8 +126,14 @@ web-export-verified before merge.
 - _Outcome:_ changes are regression-guarded; localization is free from here on.
 
 ### Phase 1 — Make the boss fight *great* (the core of a one-level game)
-- Rebuild Adamastor's brain on **LimboAI** (fallback **Beehave**): clearer attack telegraphs, more
-  attack variety, readable phase-1 → phase-2 escalation, recovery windows that reward aggression.
+- **Decision:** deepen the existing hand-rolled GDScript FSM rather than adopt LimboAI — a single
+  hand-authored boss on a web-first build doesn't justify a C++ GDExtension on the fragile web-export
+  pipeline (LimboAI's payoff is authoring *many* enemies, which is the deprioritised multi-level future).
+- **[in progress]** Readability/fairness first: a slam **danger telegraph** (`scripts/fx/slam_telegraph.gd`)
+  flares the blast footprint on the deck during the wind-up so the shockwave can be dodged on reaction;
+  wind-up/radius are shared constants so the warning always matches the blast.
+- _Next:_ clearer attack variety, a rock-throw landing marker, readable phase-1 → phase-2 escalation,
+  and recovery windows that reward aggression.
 - Tune the encounter loop: pacing, punish/reward windows, fairness of slam/rock tells, difficulty
   curve across Easy/Normal/Hard (the `difficulty_scalar` already exists).
 - Optional light touch: extract the level's spawn/boss/music into a small `LevelConfig` resource so
