@@ -9,20 +9,20 @@ extends Node3D
 ## clamped, so characters stay readable at both extremes.
 
 @export var follow_speed: float = 4.0
-@export var fov: float = 50.0             # slightly telephoto -> flat "fighting game" perspective
-@export var height: float = 5.0           # low, near-side-on (kept above the y4 near rail so it never occludes)
+@export var fov: float = 45.0             # telephoto magnification -> heroes read large, faces visible
+@export var height: float = 4.0           # low, in among the heroes (kept above the y4 near rail so it never occludes)
 @export var look_offset_x: float = -2.0
-@export var look_height: float = 2.2      # eyeline target above the focus (chest height)
+@export var look_height: float = 2.0      # eyeline target above the focus (chest height)
 
-@export var min_distance: float = 7.0     # melee punch-in: heroes fill the frame
-@export var max_distance: float = 20.0    # spread / boss-windup ceiling: keep everyone on screen
-@export var close_pad: float = 1.5        # breathing room added to the fitted distance
-@export var player_pad: float = 2.5       # keep heroes off the very edge
-@export var boss_pad: float = 4.0         # the giant's body extent
-@export var boss_attack_pad: float = 6.0  # extra reveal while the boss winds up an attack
-@export var boss_near: float = 9.0        # boss fully framed when within this of a hero
-@export var boss_far: float = 26.0        # boss ignored beyond this (heroes stay tight)
-@export var boss_focus_bias: float = 0.4  # how far the focus shifts toward an engaged boss
+@export var min_distance: float = 4.5     # extreme close-up: a hero nearly fills the frame
+@export var max_distance: float = 13.0    # hard cap: even a big spread / boss can't pull the heroes small
+@export var close_pad: float = 1.0        # breathing room added to the fitted distance
+@export var player_pad: float = 1.6       # hug the heroes (they sit large, near the edges)
+@export var boss_pad: float = 2.5         # the giant's body extent (it's allowed to crop)
+@export var boss_attack_pad: float = 3.0  # modest reveal while the boss winds up an attack
+@export var boss_near: float = 7.0        # boss only folds in when it's right on top of a hero
+@export var boss_far: float = 16.0        # boss ignored beyond this -> heroes stay tight
+@export var boss_focus_bias: float = 0.2  # keep the focus on the heroes, not the giant
 
 var camera: Camera3D
 var _last_focus: Vector3 = Vector3(0.0, 2.0, 0.0)
