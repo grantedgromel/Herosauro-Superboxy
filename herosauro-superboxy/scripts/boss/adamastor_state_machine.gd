@@ -39,6 +39,7 @@ var _double_rocks: bool = false
 var _busy: bool = false
 var _retreat_timer: float = 0.0
 var _strafe: float = 0.0
+var _attack_tween: Tween = null
 
 
 func _init(p_boss: Node3D) -> void:
@@ -58,6 +59,7 @@ func reset() -> void:
 	_busy = false
 	_retreat_timer = 0.0
 	_strafe = 0.0
+	_kill_attack_tween()
 
 
 ## Called by the boss when GameManager.boss_phase_changed(2) fires.
@@ -69,6 +71,13 @@ func stop() -> void:
 	# Used on death: park and stay quiet.
 	_busy = true
 	state = IDLE
+	_kill_attack_tween()
+
+
+func _kill_attack_tween() -> void:
+	if _attack_tween and _attack_tween.is_valid():
+		_attack_tween.kill()
+	_attack_tween = null
 
 
 func update(delta: float) -> void:
@@ -185,16 +194,16 @@ func _start_slam() -> void:
 		if dir.length() > 0.01:
 			boss.nudge(dir.normalized(), 2.0)
 
-	var tween := boss.create_tween()
+	_attack_tween = boss.create_tween()
 	# Windup: raise both arms.
-	tween.tween_callback(func() -> void: boss.raise_arms(true))
-	tween.tween_interval(0.5)
+	_attack_tween.tween_callback(func() -> void: boss.raise_arms(true))
+	_attack_tween.tween_interval(0.5)
 	# Slam down.
-	tween.tween_callback(_do_slam_impact)
-	tween.tween_interval(0.45)   # recover
-	tween.tween_callback(func() -> void: boss.raise_arms(false))
-	tween.tween_interval(0.25)
-	tween.tween_callback(_finish_attack)
+	_attack_tween.tween_callback(_do_slam_impact)
+	_attack_tween.tween_interval(0.45)   # recover
+	_attack_tween.tween_callback(func() -> void: boss.raise_arms(false))
+	_attack_tween.tween_interval(0.25)
+	_attack_tween.tween_callback(_finish_attack)
 
 
 func _do_slam_impact() -> void:
@@ -221,15 +230,15 @@ func _start_rock_throw() -> void:
 	if target:
 		boss.face_toward(target.global_position, 1.0)
 
-	var tween := boss.create_tween()
+	_attack_tween = boss.create_tween()
 	# Windup: cock one arm back.
-	tween.tween_callback(func() -> void: boss.raise_arms(true))
-	tween.tween_interval(0.4)
-	tween.tween_callback(_do_rock_throw)
-	tween.tween_interval(0.35)
-	tween.tween_callback(func() -> void: boss.raise_arms(false))
-	tween.tween_interval(0.2)
-	tween.tween_callback(_finish_attack)
+	_attack_tween.tween_callback(func() -> void: boss.raise_arms(true))
+	_attack_tween.tween_interval(0.4)
+	_attack_tween.tween_callback(_do_rock_throw)
+	_attack_tween.tween_interval(0.35)
+	_attack_tween.tween_callback(func() -> void: boss.raise_arms(false))
+	_attack_tween.tween_interval(0.2)
+	_attack_tween.tween_callback(_finish_attack)
 
 
 func _do_rock_throw() -> void:

@@ -330,9 +330,11 @@ func _find_anim_player(node: Node) -> AnimationPlayer:
 
 ## Play a one-shot action clip (e.g. an ability), holding off locomotion for `hold` seconds.
 func play_action_anim(key: String, hold: float = 0.5) -> void:
+	# Set the busy window up front so it gates other actions (e.g. a basic attack
+	# during a special/dash) even if the clip can't be resolved on this model.
+	_action_timer = hold
 	if _anim == null or not _anim_clips.has(key):
 		return
-	_action_timer = hold
 	_cur_anim = _anim_clips[key]
 	_anim.play(_cur_anim)
 

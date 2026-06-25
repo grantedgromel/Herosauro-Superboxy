@@ -15,7 +15,7 @@ const NUDGE_DECAY := 22.0
 
 # Compact arena (single source of truth — main.gd's BOSS_SPAWN matches SPAWN).
 const SPAWN := Vector3(16.0, 2.0, 0.0)
-const ARENA_X_MIN := -6.0
+const ARENA_X_MIN := -14.0   # reaches past the player spawn zone (-12/-8) so chase can close
 const ARENA_X_MAX := 24.0
 const ARENA_Z := 5.0
 
@@ -47,6 +47,7 @@ var _right_arm: Node3D = null
 var _arm_base_y: float = 0.0
 
 var _dead: bool = false
+var _death_tween: Tween = null
 var _contact_cd: float = 0.0
 var _nudge: Vector3 = Vector3.ZERO
 
@@ -139,6 +140,10 @@ func nudge(world_dir: Vector3, amount: float) -> void:
 
 func reset_boss() -> void:
 	_dead = false
+	# Kill any in-flight death fall so it can't keep tipping the model after a Play Again.
+	if _death_tween and _death_tween.is_valid():
+		_death_tween.kill()
+	_death_tween = null
 	collision_layer = 1 << 2   # restore "boss" layer (a previous _die() zeroed it)
 	global_position = SPAWN
 	rotation = Vector3.ZERO
@@ -162,6 +167,10 @@ func reset_boss() -> void:
 
 func _on_boss_damaged(_amount: int, new_health: int) -> void:
 	if _dead:
+		return
+	# start_game() emits a zero-damage boss_damaged purely to sync the HUD bar;
+	# don't play a hit reaction (sound / flinch / flash) for it.
+	if _amount <= 0:
 		return
 	AudioManager.play_boss_hit()
 	_flinch()
@@ -212,9 +221,9 @@ func _die() -> void:
 	GameManager.request_shake(0.4, 0.4)
 	collision_layer = 0
 	if _model:
-		var tween := create_tween().set_parallel(true)
-		tween.tween_property(_model, "rotation:z", deg_to_rad(82.0), 1.5)
-		tween.tween_property(_model, "position", Vector3(-3.0, -1.5, 0.0), 1.5)
+		_death_tween = create_tween().set_parallel(true)
+		_death_tween.tween_property(_model, "rotation:z", deg_to_rad(82.0), 1.5)
+		_death_tween.tween_property(_model, "position", Vector3(-3.0, -1.5, 0.0), 1.5)
 
 
 # --- Contact / clamp -------------------------------------------------------
