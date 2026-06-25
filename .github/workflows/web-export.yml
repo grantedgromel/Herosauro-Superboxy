@@ -13,7 +13,6 @@ on:
       - "claude/**"
     paths-ignore:
       - "herosauro-superboxy/web/**"
-      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
