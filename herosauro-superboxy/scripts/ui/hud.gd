@@ -3,6 +3,8 @@ extends Control
 ## score, fight timer, combo, i-frame indicators and pause overlay. Restyled
 ## with the shared UIStyle for a clean, professional look.
 
+const OptionsMenuScene: GDScript = preload("res://scripts/ui/options_menu.gd")
+
 var _p1_bar: ProgressBar
 var _p2_bar: ProgressBar
 var _boss_bar: ProgressBar
@@ -148,21 +150,51 @@ func _place(ctrl: Control, preset: int, pos: Vector2, dims: Vector2) -> Control:
 func _build_pause() -> void:
 	_pause = Control.new()
 	_pause.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_pause.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Interactive overlay that must work while the tree is paused.
+	_pause.process_mode = Node.PROCESS_MODE_ALWAYS
 	_pause.visible = false
 	add_child(_pause)
 	var dim := ColorRect.new()
-	dim.color = Color(0.02, 0.02, 0.05, 0.62)
+	dim.color = Color(0.02, 0.02, 0.05, 0.66)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause.add_child(dim)
+
 	var label := UIStyle.title("PAUSED", 70)
 	label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	label.offset_top = -70.0
-	label.offset_bottom = 10.0
+	label.offset_top = -150.0
+	label.offset_bottom = -70.0
 	_pause.add_child(label)
-	var hint := UIStyle.label("Press ESC to resume", 22, UIStyle.CREAM)
-	hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	hint.offset_top = 26.0
-	hint.offset_bottom = 60.0
+
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 14)
+	col.set_anchors_preset(Control.PRESET_CENTER)
+	col.offset_left = -160.0
+	col.offset_right = 160.0
+	col.offset_top = -40.0
+	col.offset_bottom = 160.0
+	_pause.add_child(col)
+
+	var resume := UIStyle.button("▶  RESUME", true)
+	resume.pressed.connect(func() -> void: GameManager.toggle_pause())
+	col.add_child(resume)
+
+	var opts := UIStyle.button("OPTIONS")
+	opts.pressed.connect(_on_pause_options)
+	col.add_child(opts)
+
+	var quit := UIStyle.button("QUIT TO MENU")
+	quit.pressed.connect(func() -> void: GameManager.go_to_menu())
+	col.add_child(quit)
+
+	var hint := UIStyle.label("ESC to resume", 18, UIStyle.MUTED)
+	hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	hint.offset_top = -48.0
+	hint.offset_bottom = -22.0
 	_pause.add_child(hint)
+
+
+func _on_pause_options() -> void:
+	var o: Control = OptionsMenuScene.new()
+	o.process_mode = Node.PROCESS_MODE_ALWAYS
+	_pause.add_child(o)

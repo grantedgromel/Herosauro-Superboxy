@@ -174,3 +174,7 @@ func _test_settings_persistence() -> void:
 	_check(b.shake_scale == 0.0, "shake_scale round-trips")
 	_check(b.hit_stop == false, "hit_stop round-trips")
 	_check(b.fullscreen == true, "fullscreen round-trips")
+
+	# Not in the tree, so free immediately to avoid leak-at-exit warnings.
+	a.free()
+	b.free()

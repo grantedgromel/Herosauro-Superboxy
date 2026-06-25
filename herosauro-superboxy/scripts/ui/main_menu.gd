@@ -4,6 +4,8 @@ extends Control
 ## difficulty and (in 1P) which hero to control before starting the fight. Every
 ## selection writes straight to GameManager, which the spawner + boss read at start.
 
+const OptionsMenu: GDScript = preload("res://scripts/ui/options_menu.gd")
+
 var _hero_row: Control
 var _start_btn: Button
 var _hint: Label
@@ -60,6 +62,11 @@ func _ready() -> void:
 	_start_btn = UIStyle.button("▶  START", true)
 	_start_btn.pressed.connect(_on_start)
 	col.add_child(_start_btn)
+
+	var opts_btn := UIStyle.button("OPTIONS")
+	opts_btn.custom_minimum_size = Vector2(300, 52)
+	opts_btn.pressed.connect(_on_options)
+	col.add_child(opts_btn)
 
 	# Controls footer.
 	_hint = UIStyle.label(_controls_text(), 17, UIStyle.MUTED)
@@ -167,6 +174,14 @@ func _scrim(top: bool, height: float) -> void:
 
 func _on_start() -> void:
 	GameManager.start_game()
+
+
+func _on_options() -> void:
+	var o: Control = OptionsMenu.new()
+	add_child(o)
+	o.closed.connect(func() -> void:
+		if is_instance_valid(_start_btn):
+			_start_btn.grab_focus())
 
 
 func _unhandled_input(event: InputEvent) -> void:
