@@ -1,0 +1,94 @@
+name: Web export
+
+# Rebuilds the Godot HTML5 export under herosauro-superboxy/web/ from source and
+# commits it back, so the web preview always matches the latest .gd/.tscn source.
+#
+# Triggers on source pushes only: changes under web/ are ignored (and the bot's
+# own commit is tagged [skip ci]) so the auto-commit can't retrigger the workflow.
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths-ignore:
+      - "herosauro-superboxy/web/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: web-export-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.3"
+  GODOT_RELEASE: "4.3-stable"
+  PROJECT_DIR: herosauro-superboxy
+  EXPORT_PRESET: "Web"
+
+jobs:
+  export-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} (headless) + export templates
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -O /tmp/godot.zip
+          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_export_templates.tpz" -O /tmp/templates.tpz
+
+          unzip -o /tmp/godot.zip -d /tmp/godot
+          sudo mv "/tmp/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$TEMPLATE_DIR"
+          unzip -o /tmp/templates.tpz -d /tmp/templates
+          mv /tmp/templates/templates/* "$TEMPLATE_DIR/"
+
+          godot --version
+
+      - name: Import project resources
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          # Headless import; can exit non-zero after importing, so don't fail the job here.
+          timeout 300 godot --headless --import . || true
+
+      - name: Export Web build
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          mkdir -p web
+          godot --headless --export-release "${EXPORT_PRESET}" web/index.html
+          test -f web/index.pck && test -f web/index.wasm
+
+      - name: Commit refreshed web export to the branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${PROJECT_DIR}/web"
+          if git diff --cached --quiet; then
+            echo "Web export unchanged — nothing to commit."
+          else
+            git commit -m "chore(web): rebuild Godot web export from source [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+      # Publish the build to gh-pages so the live GitHub Pages preview always
+      # reflects the latest source. force_orphan keeps gh-pages a single commit
+      # so the large wasm/pck don't bloat history. Pushing gh-pages does not
+      # retrigger this workflow (it only runs on main / claude/**).
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./${{ env.PROJECT_DIR }}/web
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "Deploy web build from ${{ github.sha }}"

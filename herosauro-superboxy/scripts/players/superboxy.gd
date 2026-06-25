@@ -45,7 +45,9 @@ func _build_visuals() -> void:
 	model.scale = Vector3.ONE * MODEL_SCALE
 	model.position.y = MODEL_Y
 	_model_root.add_child(model)
-	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "punch1", "attack": "punch1"})
+	# "punch" substring-matches the model's punch clip — baked as "punch1" (the
+	# "Punch Combo 1" animation). Both the basic attack and the dash play it.
+	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "punch", "attack": "punch"})
 
 
 func _perform_ability() -> void:
