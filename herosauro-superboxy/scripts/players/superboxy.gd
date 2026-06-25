@@ -82,6 +82,7 @@ func _custom_locomotion(delta: float) -> bool:
 					if boss.has_method("nudge"):
 						boss.nudge(_dash_dir, 1.2)
 					GameManager.hit_stop(0.06)
+					Burst.hit(self, global_position + _dash_dir + Vector3(0.0, 1.4, 0.0), Color(1.0, 0.55, 0.32))
 					_hit_boss = true
 		return true
 	return false

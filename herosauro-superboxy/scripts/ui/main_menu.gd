@@ -61,6 +61,10 @@ func _ready() -> void:
 	_start_btn.pressed.connect(_on_start)
 	col.add_child(_start_btn)
 
+	var opts_btn := UIStyle.button("OPTIONS")
+	opts_btn.pressed.connect(_open_options)
+	col.add_child(opts_btn)
+
 	# Controls footer.
 	_hint = UIStyle.label(_controls_text(), 17, UIStyle.MUTED)
 	_hint.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -165,13 +169,23 @@ func _scrim(top: bool, height: float) -> void:
 
 # --- Start -----------------------------------------------------------------
 
+func _open_options() -> void:
+	AudioManager.play_ui()
+	add_child(OptionsMenu.new())
+
+
 func _on_start() -> void:
+	AudioManager.play_ui()
 	GameManager.start_game()
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible:
 		return
+	# Don't start the game while the options overlay is open.
+	for c in get_children():
+		if c is OptionsMenu:
+			return
 	if event.is_action_pressed("ui_confirm"):
 		GameManager.start_game()
 		get_viewport().set_input_as_handled()

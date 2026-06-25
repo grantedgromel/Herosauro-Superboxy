@@ -34,6 +34,7 @@ func _ready() -> void:
 	_hud = HUDScene.instantiate()
 	_game_over = GameOverScene.instantiate()
 	ui.add_child(_hud)
+	ui.add_child(Banter.new())
 	ui.add_child(_game_over)
 	ui.add_child(_menu)
 
@@ -101,6 +102,15 @@ func _spawn_player(scene: PackedScene, id: int, spawn: Vector3) -> PlayerBase:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_pause"):
 		GameManager.toggle_pause()
+		return
+	# Global / debug shortcuts (F11 fullscreen anywhere; R restarts the fight in debug builds).
+	if event is InputEventKey and event.pressed and not event.echo:
+		match (event as InputEventKey).keycode:
+			KEY_F11:
+				Settings.toggle_fullscreen()
+			KEY_R:
+				if OS.is_debug_build() and GameManager.state == GameManager.State.PLAYING:
+					GameManager.start_game()
 
 
 func _on_state_changed(new_state: int) -> void:

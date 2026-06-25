@@ -37,6 +37,8 @@ var _ability_timer: float = 0.0
 var _attack_timer: float = 0.0
 var _attack_swing: float = 0.0    # active-frames window during which the swing can connect
 var _attack_landed: bool = false
+var _air_time: float = 0.0
+var _was_on_floor: bool = true
 var _knockback: Vector3 = Vector3.ZERO
 var _model_root: Node3D
 
@@ -78,6 +80,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	_face_movement(delta)
 	_process_attack_hit()
+	_handle_landing(delta)
 	_handle_fall()
 	_handle_flicker(delta)
 	_drive_anim()
@@ -233,7 +236,20 @@ func _process_attack_hit() -> void:
 	if boss.has_method("nudge"):
 		boss.nudge(facing_dir, 0.4)
 	GameManager.hit_stop(0.03)
+	Burst.hit(self, global_position + facing_dir * (attack_range * 0.6) + Vector3(0.0, 1.4, 0.0))
 	_attack_landed = true
+
+
+## Landing dust after a meaningful fall/jump.
+func _handle_landing(delta: float) -> void:
+	var on_floor := is_on_floor()
+	if not on_floor:
+		_air_time += delta
+	else:
+		if not _was_on_floor and _air_time > 0.2:
+			Burst.dust(self, global_position + Vector3(0.0, -0.9, 0.0))
+		_air_time = 0.0
+	_was_on_floor = on_floor
 
 
 ## Snap to face a world point (used by the AI ally so its swings/abilities aim true

@@ -66,6 +66,7 @@ func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("players"):
 		var dir := global_position.direction_to(body.global_position)
 		body.take_hit(damage, dir * 6.0 + Vector3.UP * 4.0)
+		Burst.hit(self, global_position + Vector3(0.0, 0.6, 0.0), Color(0.55, 0.5, 0.46))
 		queue_free()
 	elif not body.is_in_group("boss") and not body.is_in_group("projectiles"):
 		# Shattered on the deck / world - crumble away shortly after landing.
