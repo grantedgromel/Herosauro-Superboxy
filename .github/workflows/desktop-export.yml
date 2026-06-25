@@ -1,0 +1,77 @@
+name: Desktop export
+
+# Builds a native Linux desktop binary and uploads it as a downloadable artifact,
+# so the game can be playtested natively (no browser) from the Actions run page.
+#
+# Note: this uses the project's GL Compatibility renderer (same as the web build).
+# A higher-fidelity Forward+ desktop build is a deferred follow-up — it needs a
+# per-platform renderer override so the web export stays on Compatibility.
+
+on:
+  push:
+    branches:
+      - main
+      - "claude/**"
+    paths-ignore:
+      - "herosauro-superboxy/web/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-export-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.3"
+  GODOT_RELEASE: "4.3-stable"
+  PROJECT_DIR: herosauro-superboxy
+  EXPORT_PRESET: "Linux"
+
+jobs:
+  export-desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot ${{ env.GODOT_VERSION }} (headless) + export templates
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -O /tmp/godot.zip
+          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_export_templates.tpz" -O /tmp/templates.tpz
+
+          unzip -o /tmp/godot.zip -d /tmp/godot
+          sudo mv "/tmp/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mkdir -p "$TEMPLATE_DIR"
+          unzip -o /tmp/templates.tpz -d /tmp/templates
+          mv /tmp/templates/templates/* "$TEMPLATE_DIR/"
+
+          godot --version
+
+      - name: Import project resources
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          timeout 300 godot --headless --import . || true
+
+      - name: Export Linux build
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/desktop
+          godot --headless --export-release "${EXPORT_PRESET}" build/desktop/herosauro.x86_64
+          chmod +x build/desktop/herosauro.x86_64
+          test -f build/desktop/herosauro.x86_64
+
+      - name: Upload desktop build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: herosauro-linux-x86_64
+          path: ${{ env.PROJECT_DIR }}/build/desktop/
+          if-no-files-found: error
+          retention-days: 14

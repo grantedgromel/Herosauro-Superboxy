@@ -129,7 +129,7 @@ web-export-verified before merge.
 - **Decision:** deepen the existing hand-rolled GDScript FSM rather than adopt LimboAI — a single
   hand-authored boss on a web-first build doesn't justify a C++ GDExtension on the fragile web-export
   pipeline (LimboAI's payoff is authoring *many* enemies, which is the deprioritised multi-level future).
-- **[in progress]** Readability/fairness first:
+- **[done — awaiting playtest]** Readability/fairness first:
   - **Slam danger telegraph** (`scripts/fx/slam_telegraph.gd`) — blast footprint flares on the deck
     during the wind-up; wind-up/radius are shared constants so the warning matches the blast.
   - **Rock landing marker** (`scripts/fx/impact_marker.gd`) — a converging ring marks each lobbed
@@ -150,25 +150,33 @@ web-export-verified before merge.
 - _Outcome:_ a fight worth replaying — the single most important lever for a one-level game.
 
 ### Phase 2 — Juice & audiovisual high-grade
-- Adopt **Phantom Camera** for cinematic framing (tight duo framing, boss-engage reveal, phase-2 push).
-- Formalize hit-stop/shake (Juicee/Shaker patterns); add **damage numbers**, **hit sparks**,
-  **hit-flash / freeze / phase-2** status shaders, and a **dissolve** on boss death (VFX-library refs).
-- Add **real combat music** with explore → fight → phase-2 → victory transitions, **mix buses**, and a
-  richer SFX set; keep procedural audio as fallback.
-- _Outcome:_ the level *feels* premium on every hit.
+- **[done]** Audio **mix buses** (Master > Music + SFX) via the `Settings` autoload; SFX pool routed to
+  the SFX bus; a gentle, seamless **procedural music pad** on the Music bus during the fight.
+- **[done]** **Damage numbers** (`scripts/fx/damage_number.gd`) and **impact sparks**
+  (`scripts/fx/hit_spark.gd`, CPUParticles3D for GL-Compatibility) on every boss hit; phase-2 roar and
+  existing hit-flash carried over from Phase 1.
+- **Deferred (needs assets / renderer):** real licensed/adaptive **music** (procedural pad is a
+  placeholder); shader-based **death dissolve** (would need swapping the boss to a ShaderMaterial —
+  risky to author blind); **Phantom Camera** swap (the hand-tuned `camera_rig.gd` works well; revisit
+  only if framing needs more).
+- _Outcome:_ hits land with number + spark feedback and a real mixable soundscape.
 
 ### Phase 3 — The "real game" frame around the level
-- **Options menu**: Master/Music/SFX volume, fullscreen/resolution, **control remapping** (Input
-  Helper), accessibility toggles (screen-shake intensity, hit-stop off).
-- **Settings + best-time persistence** to `user://` (small save, Takin pattern); polished pause and
-  win/lose flow.
+- **[done]** **Options menu** (`scripts/ui/options_menu.gd`): Master/Music/SFX sliders, Screen-Shake
+  slider + Hit-Stop toggle (accessibility), Fullscreen — live-applied and **persisted to
+  `user://settings.cfg`** (`Settings` autoload). Reachable from the **main menu** and a now-interactive
+  **pause menu** (Resume / Options / Quit to Menu) that works while the tree is paused.
+- **Deferred:** full **control remapping** (Input Helper) — volumes/toggles shipped; key-rebinding UI
+  is a larger follow-up. Best-time persistence (small, slots into the same `Settings`/ConfigFile pattern).
 - _Outcome:_ the level is wrapped in the menus/options players expect from a shipped indie.
 
 ### Phase 4 — Ship-readiness for the slice
-- Controller-first UX pass, accessibility pass, performance budget on the web build.
-- _Optional:_ add the **Forward+ desktop CI artifact** so you can judge the premium-lighting tier
-  natively; if Steam later, layer **GodotSteam**.
-- _Outcome:_ a polished, demoable vertical slice.
+- **[done]** **Native desktop build** via CI (`.github/workflows/desktop-export.yml` + a `Linux` export
+  preset) → downloadable artifact, so the game can be playtested natively without a browser.
+- **[done]** Accessibility pass wired end-to-end (shake scale + hit-stop honoured by camera/GameManager).
+- **Deferred:** a true **Forward+** fidelity desktop build (needs a per-platform renderer override so
+  web stays on Compatibility); controller-first menu focus polish; **GodotSteam** if Steam is targeted.
+- _Outcome:_ a polished, demoable vertical slice with both a web and a native build.
 
 **Sequencing rationale:** Phase 0 makes the rest safe; Phase 1 (the boss fight) is where a single-level
 game lives or dies, so it precedes cosmetic juice; Phases 2–3 are the polish and the frame; Phase 4 is
