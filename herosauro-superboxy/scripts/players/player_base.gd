@@ -29,6 +29,14 @@ var _ability_timer: float = 0.0
 var _knockback: Vector3 = Vector3.ZERO
 var _model_root: Node3D
 
+# Skeletal animation driver (for rigged glTF models). Subclasses call
+# bind_animations() in _build_visuals() with a {key: clip_hint} map and
+# play_action_anim() for their ability.
+var _anim: AnimationPlayer = null
+var _anim_clips: Dictionary = {}
+var _action_timer: float = 0.0
+var _cur_anim: String = ""
+
 
 func _ready() -> void:
 	add_to_group("players")
@@ -57,6 +65,7 @@ func _physics_process(delta: float) -> void:
 	_face_movement(delta)
 	_handle_fall()
 	_handle_flicker(delta)
+	_drive_anim()
 
 
 # --- Movement --------------------------------------------------------------
@@ -171,6 +180,7 @@ func is_ability_ready() -> bool:
 
 func _update_timers(delta: float) -> void:
 	_ability_timer = max(0.0, _ability_timer - delta)
+	_action_timer = max(0.0, _action_timer - delta)
 	_knockback = _knockback.move_toward(Vector3.ZERO, knockback_decay * delta)
 
 
@@ -199,6 +209,75 @@ func reset_state() -> void:
 	rotation = Vector3.ZERO
 	if _model_root:
 		_model_root.visible = true
+
+
+# --- Skeletal animation ----------------------------------------------------
+
+## Find the model's AnimationPlayer and resolve a {logical_key: clip_hint} map
+## to actual clip names. Loops walk/run; leaves the model in an idle pose.
+func bind_animations(root: Node3D, mapping: Dictionary) -> void:
+	_anim = _find_anim_player(root)
+	if _anim == null:
+		return
+	for key in mapping:
+		for clip in _anim.get_animation_list():
+			if String(mapping[key]).to_lower() in String(clip).to_lower():
+				_anim_clips[key] = clip
+				break
+	for k in ["walk", "run"]:
+		if _anim_clips.has(k):
+			var an := _anim.get_animation(_anim_clips[k])
+			if an:
+				an.loop_mode = Animation.LOOP_LINEAR
+	_play_idle()
+
+
+func _find_anim_player(node: Node) -> AnimationPlayer:
+	if node is AnimationPlayer:
+		return node
+	for c in node.get_children():
+		var r := _find_anim_player(c)
+		if r:
+			return r
+	return null
+
+
+## Play a one-shot action clip (e.g. an ability), holding off locomotion for `hold` seconds.
+func play_action_anim(key: String, hold: float = 0.5) -> void:
+	if _anim == null or not _anim_clips.has(key):
+		return
+	_action_timer = hold
+	_cur_anim = _anim_clips[key]
+	_anim.play(_cur_anim)
+
+
+func _drive_anim() -> void:
+	if _anim == null or _action_timer > 0.0:
+		return
+	var hspeed := Vector2(velocity.x, velocity.z).length()
+	if hspeed > 4.0 and _anim_clips.has("run"):
+		_play_loop(_anim_clips["run"])
+	elif hspeed > 0.6 and _anim_clips.has("walk"):
+		_play_loop(_anim_clips["walk"])
+	else:
+		_play_idle()
+
+
+func _play_loop(clip: String) -> void:
+	if clip == _cur_anim and _anim.is_playing():
+		return
+	_cur_anim = clip
+	_anim.play(clip)
+
+
+func _play_idle() -> void:
+	var clip: String = _anim_clips.get("idle", _anim_clips.get("walk", ""))
+	if clip == "" or clip == _cur_anim:
+		return
+	_cur_anim = clip
+	_anim.play(clip)
+	_anim.seek(0.0, true)
+	_anim.pause()
 
 
 # --- Virtual hooks (override in subclasses) --------------------------------

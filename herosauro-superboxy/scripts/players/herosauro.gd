@@ -1,17 +1,17 @@
 extends PlayerBase
 ## Herosauro (Player 1): the green dino-suit hero. Taller, older brother to
-## Super Boxy. His signature move is the Dino Energy projectile.
+## Super Boxy. His signature move is the Dino Energy projectile — he summons a
+## green T-Rex spectrum to charge Adamastor, hadouken-style.
 ##
-## The visual is a Meshy-generated, web-optimized glTF model (assets/models),
-## replacing the original code-built primitive toon. Movement / jumping / combat
-## all come from PlayerBase.
+## Visual is a Meshy-generated, RIGGED + ANIMATED glTF (walk / run / cast),
+## driven by PlayerBase's animation driver.
 
 const DinoEnergyScene: PackedScene = preload("res://scenes/fx/dino_energy.tscn")
 const HerosauroModel: PackedScene = preload("res://assets/models/herosauro.glb")
 
-# Model orientation/scale to fit the CharacterBody3D (2.0u-tall collision box).
-const MODEL_YAW := PI / 2.0
-const MODEL_SCALE := 1.05
+const MODEL_YAW := PI / 2.0     # model faces +Z; player faces +X
+const MODEL_SCALE := 1.0        # rigged model ~2u tall
+const MODEL_Y := -1.0           # drop feet to the bottom of the 2.0u collision box
 
 
 func _ready() -> void:
@@ -24,18 +24,19 @@ func _ready() -> void:
 func _build_visuals() -> void:
 	var model := HerosauroModel.instantiate()
 	model.name = "HerosauroMesh"
-	# The glTF model faces +Z; the player faces +X, so yaw it a quarter turn.
 	model.rotation.y = MODEL_YAW
-	# Meshy model is ~1.9 units tall; scale so the feet rest on the deck.
 	model.scale = Vector3.ONE * MODEL_SCALE
+	model.position.y = MODEL_Y
 	_model_root.add_child(model)
+	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "cast"})
 
 
 func _perform_ability() -> void:
+	play_action_anim("ability", 0.7)   # the T-Rex summon gesture
+
 	var energy := DinoEnergyScene.instantiate()
 	energy.direction = facing_dir
 	energy.source_player = 1
-
 	var root := get_tree().get_first_node_in_group("spawn_root")
 	if root == null:
 		root = get_tree().current_scene
