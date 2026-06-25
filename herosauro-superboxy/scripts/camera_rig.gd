@@ -120,7 +120,11 @@ func _aspect() -> float:
 
 
 func _on_shake_requested(strength: float, duration: float) -> void:
-	_shake_strength = max(_shake_strength, strength)
+	# Accessibility: scale (or zero out) screen shake per the player's setting.
+	var scaled: float = strength * Settings.shake_scale
+	if scaled <= 0.001:
+		return
+	_shake_strength = max(_shake_strength, scaled)
 	_shake_time = duration
 	_shake_total = duration
 

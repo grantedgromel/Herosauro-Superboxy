@@ -37,6 +37,7 @@ func _run() -> void:
 	print("== headless test run ==")
 	_test_all_scripts_compile()
 	_test_game_manager_logic()
+	_test_settings_persistence()
 	print("\n%d checks, %d failure(s)." % [_checks, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -144,3 +145,32 @@ func _test_game_manager_logic() -> void:
 	_check(gm.difficulty_scalar() > 1.0, "HARD scalar > 1.0")
 
 	gm.queue_free()
+
+
+# --- Settings persistence --------------------------------------------------
+
+func _test_settings_persistence() -> void:
+	print("\n[Settings persistence]")
+	var S: GDScript = load("res://autoloads/settings_manager.gd")
+	if S == null:
+		_check(false, "could not load settings_manager.gd")
+		return
+
+	# Fresh instances are never added to the tree, so _ready()/AudioServer setup
+	# doesn't run — we exercise the pure save/load round-trip in isolation.
+	var a: Node = S.new()
+	a.set_master(0.42)
+	a.set_music(0.10)
+	a.set_sfx(0.77)
+	a.set_shake_scale(0.0)
+	a.set_hit_stop(false)
+	a.fullscreen = true
+	a.save_settings()
+
+	var b: Node = S.new()
+	b.load_settings()
+	_check(absf(b.master_volume - 0.42) < 0.001, "master volume round-trips")
+	_check(absf(b.sfx_volume - 0.77) < 0.001, "sfx volume round-trips")
+	_check(b.shake_scale == 0.0, "shake_scale round-trips")
+	_check(b.hit_stop == false, "hit_stop round-trips")
+	_check(b.fullscreen == true, "fullscreen round-trips")

@@ -177,6 +177,8 @@ func add_score(points: int) -> void:
 
 ## Brief engine-wide freeze on impactful hits ("hit-stop").
 func hit_stop(duration: float = 0.1) -> void:
+	if not Settings.hit_stop:   # accessibility toggle
+		return
 	if Engine.time_scale < 1.0:
 		return
 	Engine.time_scale = 0.0

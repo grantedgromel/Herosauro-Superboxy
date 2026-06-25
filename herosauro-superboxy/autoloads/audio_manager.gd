@@ -7,10 +7,13 @@ extends Node
 
 const MIX_RATE := 22050
 const POOL_SIZE := 10
+const SFX_BUS := "SFX"
+const MUSIC_BUS := "Music"
 
 var _streams: Dictionary = {}
 var _players: Array[AudioStreamPlayer] = []
 var _next_player: int = 0
+var _music: AudioStreamPlayer
 
 
 func _ready() -> void:
@@ -18,9 +21,39 @@ func _ready() -> void:
 	for i in POOL_SIZE:
 		var p := AudioStreamPlayer.new()
 		p.process_mode = Node.PROCESS_MODE_ALWAYS
+		if AudioServer.get_bus_index(SFX_BUS) != -1:
+			p.bus = SFX_BUS
 		add_child(p)
 		_players.append(p)
 	_build_library()
+	_setup_music()
+
+
+# --- Music bed -------------------------------------------------------------
+
+func _setup_music() -> void:
+	_music = AudioStreamPlayer.new()
+	_music.process_mode = Node.PROCESS_MODE_ALWAYS
+	if AudioServer.get_bus_index(MUSIC_BUS) != -1:
+		_music.bus = MUSIC_BUS
+	_music.stream = _make_music_loop()
+	add_child(_music)
+	# A calm pad during the fight; silent on the menu / after the bout.
+	GameManager.game_started.connect(start_music)
+	GameManager.game_over.connect(func(_v: bool) -> void: stop_music())
+	GameManager.state_changed.connect(func(s: int) -> void:
+		if s == GameManager.State.MENU:
+			stop_music())
+
+
+func start_music() -> void:
+	if _music and not _music.playing:
+		_music.play()
+
+
+func stop_music() -> void:
+	if _music and _music.playing:
+		_music.stop()
 
 
 # --- Public API ------------------------------------------------------------
@@ -58,6 +91,33 @@ func _build_library() -> void:
 	_streams["hurt"] = _make(_sweep(420.0, 160.0, 0.16, 0.5))
 	_streams["victory"] = _make(_fanfare([523.25, 659.25, 783.99, 1046.5, 1318.5], 0.18, true))
 	_streams["defeat"] = _make(_fanfare([659.25, 523.25, 440.0], 0.36, false))
+
+
+## A seamless calm pad: a few partials snapped to whole cycles over the loop so
+## it repeats without a click, with a slow tremolo for gentle movement.
+func _make_music_loop() -> AudioStreamWAV:
+	var dur := 4.0
+	var n := int(dur * MIX_RATE)
+	var step := 1.0 / dur   # snap freqs to multiples of this so cycles close on the loop
+	var partials := [110.0, 164.81, 220.0, 329.63]   # A2 · E3 · A3 · E4 — open and calm
+	var freqs := []
+	for f in partials:
+		freqs.append(round(f / step) * step)
+	var out := PackedFloat32Array()
+	out.resize(n)
+	for i in n:
+		var t := float(i) / MIX_RATE
+		var s := 0.0
+		for f in freqs:
+			s += sin(TAU * float(f) * t)
+		s /= float(freqs.size())
+		var trem: float = 0.85 + 0.15 * sin(TAU * step * t)   # one whole cycle over the loop
+		out[i] = s * trem * 0.5
+	var wav := _make(out)
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = n
+	return wav
 
 
 func _make(samples: PackedFloat32Array) -> AudioStreamWAV:
