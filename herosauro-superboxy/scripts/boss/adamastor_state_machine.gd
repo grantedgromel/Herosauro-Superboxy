@@ -164,7 +164,11 @@ func _update_chase(delta: float) -> void:
 
 func _begin_retreat() -> void:
 	_busy = false
-	_retreat_timer = 0.45
+	# Post-attack recovery: the giant is exposed and not attacking — the window the
+	# heroes punish. Longer on lower difficulty (more punish time), and shorter once
+	# enraged in phase two so it stays relentless. This is what rewards aggression.
+	var base := 0.7 if not _double_rocks else 0.45
+	_retreat_timer = base / clampf(GameManager.difficulty_scalar(), 0.75, 1.4)
 	state = RETREAT
 
 

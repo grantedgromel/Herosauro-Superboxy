@@ -158,6 +158,7 @@ func reset_boss() -> void:
 	if _model:
 		_model.position = Vector3.ZERO
 		_model.rotation = Vector3.ZERO
+		_model.scale = Vector3.ONE   # clear any interrupted phase-two roar puff
 	_phase2 = false
 	for i in _mesh_mats.size():
 		_mat_cur[i] = _mat_orig[i]
@@ -214,8 +215,20 @@ func _on_phase_changed(phase: int) -> void:
 		_mat_cur[i] = red
 		if not _flashing:
 			_mesh_mats[i].albedo_color = red
+	_phase_two_roar()
 	if _fsm:
 		_fsm.enter_phase_two()
+
+
+## Gear-shift cue at 50% health: a roar — a heavy screen shake and a quick scale
+## "puff" so the turn to phase two reads as a distinct escalation, not just a tint.
+func _phase_two_roar() -> void:
+	GameManager.request_shake(0.7, 0.5)
+	AudioManager.play_boss_slam()
+	if _model:
+		var t := create_tween()
+		t.tween_property(_model, "scale", Vector3.ONE * 1.12, 0.15)
+		t.tween_property(_model, "scale", Vector3.ONE, 0.25)
 
 
 func _die() -> void:

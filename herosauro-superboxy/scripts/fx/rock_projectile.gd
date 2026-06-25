@@ -8,6 +8,9 @@ extends RigidBody3D
 @export var lifetime: float = 5.0
 @export var arc_height: float = 6.0   # extra upward velocity for the lob
 
+const ImpactMarker: GDScript = preload("res://scripts/fx/impact_marker.gd")
+const DECK_Y := 2.05   # bridge deck top (y=2) + a hair, so the marker lies on the deck
+
 var _spin: Vector3 = Vector3.ZERO
 
 
@@ -55,6 +58,20 @@ func launch(target_pos: Vector3) -> void:
 	vel.y = (to.y + 0.5 * g * t_flight * t_flight) / t_flight + arc_height
 
 	linear_velocity = vel
+
+	# Telegraph the landing spot on the deck for the duration of the flight so the
+	# lob is dodgeable on reaction, matching the slam's danger-zone treatment.
+	_spawn_landing_marker(target_pos, t_flight)
+
+
+func _spawn_landing_marker(target_pos: Vector3, flight: float) -> void:
+	var parent := get_parent()   # spawn_root (rocks are spawned there by the boss FSM)
+	if parent == null:
+		return
+	var mk: Node3D = ImpactMarker.new()
+	mk.setup(3.0, flight)
+	parent.add_child(mk)
+	mk.global_position = Vector3(target_pos.x, DECK_Y, target_pos.z)
 
 
 func _on_lifetime_timeout() -> void:
