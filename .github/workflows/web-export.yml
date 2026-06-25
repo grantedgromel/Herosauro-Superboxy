@@ -53,11 +53,18 @@ jobs:
 
           godot --version
 
-      - name: Import project resources
+      - name: Import project resources + verify scripts compile
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          # Headless import; can exit non-zero after importing, so don't fail the job here.
-          timeout 300 godot --headless --import . || true
+          # Headless import can exit non-zero after importing, so don't fail on its
+          # exit code — but DO fail if Godot reports a GDScript parse/compile error,
+          # otherwise a broken script would ship silently (the export still packs).
+          set -uo pipefail
+          timeout 300 godot --headless --import . 2>&1 | tee /tmp/import.log || true
+          if grep -E "SCRIPT ERROR|Parse Error|is not compiling|Failed to load script" /tmp/import.log; then
+            echo "::error::GDScript parse/compile error detected during import — see log above."
+            exit 1
+          fi
 
       - name: Export Web build
         working-directory: ${{ env.PROJECT_DIR }}

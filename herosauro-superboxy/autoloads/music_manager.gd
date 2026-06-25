@@ -37,14 +37,14 @@ func _ready() -> void:
 	GameManager.game_over.connect(func(_v: bool) -> void: stop())
 
 	# Pre-build the tracks so there's no stutter when the fight starts.
-	_get("menu")
+	_track("menu")
 	call_deferred("_prewarm")
 	_on_state_changed(GameManager.state)
 
 
 func _prewarm() -> void:
-	_get("battle")
-	_get("battle2")
+	_track("battle")
+	_track("battle2")
 
 
 func _on_state_changed(state: int) -> void:
@@ -70,7 +70,7 @@ func play(track: String) -> void:
 	if track == _current:
 		return
 	_current = track
-	var stream := _get(track)
+	var stream := _track(track)
 	if stream == null:
 		return
 	var new_p := _players[1 - _active]
@@ -99,7 +99,7 @@ func stop() -> void:
 		t.tween_callback(p.stop)
 
 
-func _get(track: String) -> AudioStreamWAV:
+func _track(track: String) -> AudioStreamWAV:
 	if not _streams.has(track):
 		_streams[track] = _build(track)
 	return _streams[track]
