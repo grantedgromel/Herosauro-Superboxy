@@ -19,9 +19,21 @@ extends SceneTree
 
 var _checks: int = 0
 var _failures: int = 0
+var _ran: bool = false
 
 
+# Run on the first processed frame rather than in _initialize(): by then the
+# SceneTree root is fully wired, so nodes we add are genuinely in-tree and their
+# get_tree() calls (e.g. GameManager.change_state -> get_tree().paused) resolve
+# cleanly instead of erroring against a null tree.
 func _initialize() -> void:
+	process_frame.connect(_run)
+
+
+func _run() -> void:
+	if _ran:
+		return
+	_ran = true
 	print("== headless test run ==")
 	_test_all_scripts_compile()
 	_test_game_manager_logic()
@@ -85,6 +97,9 @@ func _test_game_manager_logic() -> void:
 
 	var gm: Node = GM.new()
 	get_root().add_child(gm)   # needs to be in the tree for get_tree() calls
+	# Guard: if this is false, change_state()'s get_tree() would error against a
+	# null tree and spam the log — keep the gate's output trustworthy.
+	_check(gm.is_inside_tree(), "GameManager test instance is in-tree")
 
 	# start_game() resets the session.
 	gm.start_game()
