@@ -18,6 +18,7 @@ func _ready() -> void:
 	for i in POOL_SIZE:
 		var p := AudioStreamPlayer.new()
 		p.process_mode = Node.PROCESS_MODE_ALWAYS
+		p.bus = Settings.SFX_BUS   # mix through the SFX bus so the options menu can control it
 		add_child(p)
 		_players.append(p)
 	_build_library()
@@ -26,6 +27,8 @@ func _ready() -> void:
 # --- Public API ------------------------------------------------------------
 
 func play_jump() -> void: _play("jump")
+func play_attack() -> void: _play("attack")
+func play_ui() -> void: _play("ui", -4.0)
 func play_dino_fire() -> void: _play("dino_fire")
 func play_dino_hit() -> void: _play("dino_hit")
 func play_dash() -> void: _play("dash")
@@ -50,6 +53,8 @@ func _play(name: String, volume_db: float = 0.0) -> void:
 
 func _build_library() -> void:
 	_streams["jump"] = _make(_sweep(200.0, 600.0, 0.15, 0.6))
+	_streams["attack"] = _make(_whoosh(0.16, 0.5))
+	_streams["ui"] = _make(_pulse(660.0, 0.06, 0.35))
 	_streams["dino_fire"] = _make(_pulse(440.0, 0.14, 0.5))
 	_streams["dino_hit"] = _make(_rumble(80.0, 0.22, 0.7))
 	_streams["dash"] = _make(_whoosh(0.26, 0.5))

@@ -211,6 +211,7 @@ func _handle_attack() -> void:
 		_attack_swing = 0.14
 		_attack_landed = false
 		play_action_anim("attack", attack_hold)
+		AudioManager.play_attack()
 
 
 func _process_attack_hit() -> void:
