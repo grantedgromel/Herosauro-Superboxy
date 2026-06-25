@@ -1,71 +1,87 @@
 extends Control
-## Main menu overlay. Sits transparently over the live 3D arena (the bridge and
-## a menacingly idling Adamastor show through behind it). ENTER starts the game.
+## Main menu overlay — sits over the live 3D arena. Polished: comic-style title,
+## soft scrims for legibility, a pulsing start prompt, and a clean controls bar.
 
-const GOLD := Color(1.0, 0.84, 0.2)
-const CREAM := Color(1.0, 0.97, 0.9)
-const SHADOW := Color(0.1, 0.05, 0.0, 0.9)
-
-var _prompt: Label
+var _prompt: Control
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scrim(true, 380.0)
+	_scrim(false, 240.0)
 
-	# A soft dark banner behind the title for legibility over the bright sky.
-	var banner := ColorRect.new()
-	banner.color = Color(0.05, 0.05, 0.1, 0.45)
-	banner.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	banner.offset_top = 70.0
-	banner.offset_bottom = 290.0
-	banner.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(banner)
-
-	var title := _label("HEROSAURO & SUPER BOXY", 64, GOLD)
+	var title := UIStyle.title("HEROSAURO & SUPER BOXY", 74)
 	title.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	title.offset_top = 96.0
+	title.offset_top = 78.0
 	add_child(title)
 
-	var subtitle := _label("Legends of Porto", 36, CREAM)
+	var subtitle := UIStyle.label("LEGENDS OF PORTO", 30, UIStyle.CREAM, true)
 	subtitle.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	subtitle.offset_top = 178.0
+	subtitle.offset_top = 168.0
 	add_child(subtitle)
 
-	var crest := _label("⚔  Defend the Dom Luís Bridge  ⚔", 22, Color(0.95, 0.7, 0.45))
-	crest.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	crest.offset_top = 232.0
-	add_child(crest)
+	var tagline := UIStyle.label("Defend the Dom Luís Bridge", 20, UIStyle.GOLD)
+	tagline.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	tagline.offset_top = 210.0
+	add_child(tagline)
 
-	_prompt = _label("Press ENTER to Start", 34, CREAM)
+	# Pulsing start prompt in a subtle pill.
+	_prompt = _pill("PRESS ENTER TO START")
 	_prompt.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_prompt.offset_top = 60.0
-	_prompt.offset_bottom = 110.0
+	_prompt.offset_left = -190.0
+	_prompt.offset_right = 190.0
+	_prompt.offset_top = 50.0
+	_prompt.offset_bottom = 108.0
 	add_child(_prompt)
 	var pulse := create_tween().set_loops()
-	pulse.tween_property(_prompt, "modulate:a", 0.15, 0.7).set_trans(Tween.TRANS_SINE)
-	pulse.tween_property(_prompt, "modulate:a", 1.0, 0.7).set_trans(Tween.TRANS_SINE)
+	pulse.tween_property(_prompt, "modulate:a", 0.35, 0.75).set_trans(Tween.TRANS_SINE)
+	pulse.tween_property(_prompt, "modulate:a", 1.0, 0.75).set_trans(Tween.TRANS_SINE)
 
-	var controls := _label(
-		"HEROSAURO (P1):  WASD move   ·   Shift jump   ·   E = Dino Energy\n" +
-		"SUPER BOXY (P2):  Arrows move   ·   / jump   ·   Space = Boxy Dash",
-		20, CREAM)
-	controls.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	controls.offset_top = -110.0
-	controls.offset_bottom = -30.0
-	add_child(controls)
+	# Controls footer.
+	var p1 := UIStyle.label("HEROSAURO   ·   WASD move   ·   Shift jump   ·   E summon", 19, UIStyle.CREAM)
+	p1.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	p1.offset_top = -98.0
+	p1.offset_bottom = -68.0
+	add_child(p1)
+	var p2 := UIStyle.label("SUPER BOXY   ·   Arrows move   ·   / jump   ·   Space dash", 19, UIStyle.CREAM)
+	p2.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	p2.offset_top = -64.0
+	p2.offset_bottom = -34.0
+	add_child(p2)
 
 
-func _label(text: String, size: int, color: Color) -> Label:
-	var l := Label.new()
-	l.text = text
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", color)
-	l.add_theme_color_override("font_outline_color", SHADOW)
-	l.add_theme_constant_override("outline_size", 8)
-	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return l
+func _pill(text: String) -> Control:
+	var pc := PanelContainer.new()
+	pc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := UIStyle.panel(Color(0.08, 0.06, 0.12, 0.6), 30, 12)
+	sb.border_color = UIStyle.GOLD
+	sb.border_width_left = 2; sb.border_width_right = 2; sb.border_width_top = 2; sb.border_width_bottom = 2
+	pc.add_theme_stylebox_override("panel", sb)
+	var l := UIStyle.label(text, 28, UIStyle.GOLD, true)
+	pc.add_child(l)
+	return pc
+
+
+func _scrim(top: bool, height: float) -> void:
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 1.0])
+	grad.colors = PackedColorArray([Color(0.05, 0.04, 0.09, 0.62), Color(0.05, 0.04, 0.09, 0.0)])
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 8
+	gt.height = 256
+	gt.fill_from = Vector2(0, 0) if top else Vector2(0, 1)
+	gt.fill_to = Vector2(0, 1) if top else Vector2(0, 0)
+	var tr := TextureRect.new()
+	tr.texture = gt
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(tr)
+	tr.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE if top else Control.PRESET_BOTTOM_WIDE)
+	if top:
+		tr.offset_bottom = height
+	else:
+		tr.offset_top = -height
 
 
 func _unhandled_input(event: InputEvent) -> void:
