@@ -25,6 +25,7 @@ signal timer_updated(seconds: float)
 signal camera_shake_requested(strength: float, duration: float)
 
 enum State { MENU, PLAYING, PAUSED, VICTORY, DEFEAT }
+enum Difficulty { EASY, NORMAL, HARD }
 
 const MAX_PLAYER_HEALTH := 100
 const MAX_BOSS_HEALTH := 500
@@ -36,6 +37,12 @@ const SCORE_PER_HIT := 10
 var state: int = State.MENU
 var score: int = 0
 var fight_time: float = 0.0
+
+# --- Session config (written by the main menu, read at spawn time) ---------
+var difficulty: int = Difficulty.NORMAL
+var player_count: int = 2     # 1 = solo + AI ally, 2 = local co-op
+var human_hero: int = 1       # in 1P: which hero the human drives (1 or 2)
+
 var player_health := {1: MAX_PLAYER_HEALTH, 2: MAX_PLAYER_HEALTH}
 var boss_health: int = MAX_BOSS_HEALTH
 var boss_phase: int = 1
@@ -89,6 +96,32 @@ func change_state(new_state: int) -> void:
 
 func go_to_menu() -> void:
 	change_state(State.MENU)
+
+
+# --- Session config --------------------------------------------------------
+
+func set_difficulty(d: int) -> void:
+	difficulty = clampi(d, Difficulty.EASY, Difficulty.HARD)
+
+
+func set_player_count(n: int) -> void:
+	player_count = clampi(n, 1, 2)
+
+
+func set_human_hero(h: int) -> void:
+	human_hero = clampi(h, 1, 2)
+
+
+## Aggression / speed multiplier the boss FSM and ally AI scale by.
+## EASY is gentler, HARD is faster and more relentless.
+func difficulty_scalar() -> float:
+	match difficulty:
+		Difficulty.EASY:
+			return 0.75
+		Difficulty.HARD:
+			return 1.4
+		_:
+			return 1.0
 
 
 func toggle_pause() -> void:

@@ -32,3 +32,7 @@ func is_jump_held(player_id: int) -> bool:
 
 func is_ability_just_pressed(player_id: int) -> bool:
 	return Input.is_action_just_pressed(_prefix(player_id) + "ability")
+
+
+func is_attack_just_pressed(player_id: int) -> bool:
+	return Input.is_action_just_pressed(_prefix(player_id) + "attack")

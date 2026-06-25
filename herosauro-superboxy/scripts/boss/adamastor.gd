@@ -13,6 +13,12 @@ const CONTACT_RANGE := 5.0
 const CONTACT_COOLDOWN := 1.0
 const NUDGE_DECAY := 22.0
 
+# Compact arena (single source of truth — main.gd's BOSS_SPAWN matches SPAWN).
+const SPAWN := Vector3(16.0, 2.0, 0.0)
+const ARENA_X_MIN := -14.0   # reaches past the player spawn zone (-12/-8) so chase can close
+const ARENA_X_MAX := 24.0
+const ARENA_Z := 5.0
+
 const AdamastorModel: PackedScene = preload("res://assets/models/adamastor.glb")
 const MODEL_YAW := -PI / 2.0   # face -X, toward the approaching heroes
 const MODEL_SCALE := 4.8       # rigged model is ~1.9u -> ~9u giant
@@ -41,6 +47,7 @@ var _right_arm: Node3D = null
 var _arm_base_y: float = 0.0
 
 var _dead: bool = false
+var _death_tween: Tween = null
 var _contact_cd: float = 0.0
 var _nudge: Vector3 = Vector3.ZERO
 
@@ -133,7 +140,13 @@ func nudge(world_dir: Vector3, amount: float) -> void:
 
 func reset_boss() -> void:
 	_dead = false
-	global_position = Vector3(35.0, 2.0, 0.0)
+	# Kill any in-flight death fall so it can't keep tipping the model after a Play Again.
+	if _death_tween and _death_tween.is_valid():
+		_death_tween.kill()
+	_death_tween = null
+	collision_layer = 1 << 2   # restore "boss" layer (a previous _die() zeroed it)
+	global_position = SPAWN
+	rotation = Vector3.ZERO
 	velocity = Vector3.ZERO
 	_nudge = Vector3.ZERO
 	if _model:
@@ -154,6 +167,10 @@ func reset_boss() -> void:
 
 func _on_boss_damaged(_amount: int, new_health: int) -> void:
 	if _dead:
+		return
+	# start_game() emits a zero-damage boss_damaged purely to sync the HUD bar;
+	# don't play a hit reaction (sound / flinch / flash) for it.
+	if _amount <= 0:
 		return
 	AudioManager.play_boss_hit()
 	_flinch()
@@ -204,9 +221,9 @@ func _die() -> void:
 	GameManager.request_shake(0.4, 0.4)
 	collision_layer = 0
 	if _model:
-		var tween := create_tween().set_parallel(true)
-		tween.tween_property(_model, "rotation:z", deg_to_rad(82.0), 1.5)
-		tween.tween_property(_model, "position", Vector3(-3.0, -1.5, 0.0), 1.5)
+		_death_tween = create_tween().set_parallel(true)
+		_death_tween.tween_property(_model, "rotation:z", deg_to_rad(82.0), 1.5)
+		_death_tween.tween_property(_model, "position", Vector3(-3.0, -1.5, 0.0), 1.5)
 
 
 # --- Contact / clamp -------------------------------------------------------
@@ -228,8 +245,21 @@ func _check_contact() -> void:
 
 
 func _clamp_to_arena() -> void:
-	global_position.z = clampf(global_position.z, -5.0, 5.0)
-	global_position.x = clampf(global_position.x, 8.0, 46.0)
+	global_position.z = clampf(global_position.z, -ARENA_Z, ARENA_Z)
+	global_position.x = clampf(global_position.x, ARENA_X_MIN, ARENA_X_MAX)
+
+
+## Rotate the giant (body + its child model) to face a world point, smoothly.
+## The model carries a fixed MODEL_YAW offset and faces -X at body-rotation 0,
+## so body yaw = atan2(dir.z, -dir.x) aims that baked facing along `dir`.
+func face_toward(world_pos: Vector3, weight: float = 0.18) -> void:
+	var to := world_pos - global_position
+	to.y = 0.0
+	if to.length() < 0.5:
+		return
+	var dir := to.normalized()
+	var target := atan2(dir.z, -dir.x)
+	rotation.y = lerp_angle(rotation.y, target, weight)
 
 
 # --- Model -----------------------------------------------------------------
