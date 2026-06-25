@@ -20,6 +20,8 @@ const ARENA_X_MAX := 24.0
 const ARENA_Z := 5.0
 
 const AdamastorModel: PackedScene = preload("res://assets/models/adamastor.glb")
+const DamageNumber: GDScript = preload("res://scripts/fx/damage_number.gd")
+const HitSpark: GDScript = preload("res://scripts/fx/hit_spark.gd")
 const MODEL_YAW := -PI / 2.0   # face -X, toward the approaching heroes
 const MODEL_SCALE := 4.8       # rigged model is ~1.9u -> ~9u giant
 
@@ -184,8 +186,27 @@ func _on_boss_damaged(_amount: int, new_health: int) -> void:
 	AudioManager.play_boss_hit()
 	_flinch()
 	_flash()
+	_spawn_hit_juice(_amount)
 	if new_health <= 0:
 		_die()
+
+
+## Floating damage number + spark burst on the giant's upper body when it's hit.
+func _spawn_hit_juice(amount: int) -> void:
+	var root := get_tree().get_first_node_in_group("spawn_root")
+	if root == null:
+		root = get_parent()
+	if root == null:
+		return
+	var num: Label3D = DamageNumber.new()
+	root.add_child(num)
+	num.global_position = global_position + Vector3(randf_range(-1.0, 1.0), 9.0, 0.0)
+	num.play(amount)
+
+	var spark: CPUParticles3D = HitSpark.new()
+	root.add_child(spark)
+	spark.global_position = global_position + Vector3(0.0, 7.0, 0.0)
+	spark.play()
 
 
 func _flinch() -> void:
