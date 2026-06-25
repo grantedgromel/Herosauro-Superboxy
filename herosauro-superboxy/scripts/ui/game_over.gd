@@ -1,11 +1,6 @@
 extends Control
-## Victory / Defeat screen. Appears a beat after the fight ends (letting the boss
-## death + camera zoom play on a win), shows the result, score and time, and
-## offers Play Again / Main Menu.
-
-const SHADOW := Color(0.0, 0.0, 0.0, 0.9)
-const VICTORY_COLOR := Color(0.45, 0.95, 0.4)
-const DEFEAT_COLOR := Color(0.95, 0.35, 0.35)
+## Victory / Defeat screen — a polished centred card with the result, run stats
+## and replay options. Appears a beat after the fight ends.
 
 var _dim: ColorRect
 var _title: Label
@@ -19,37 +14,46 @@ func _ready() -> void:
 	visible = false
 
 	_dim = ColorRect.new()
-	_dim.color = Color(0.02, 0.02, 0.06, 0.7)
+	_dim.color = Color(0.02, 0.02, 0.06, 0.72)
 	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_dim)
 
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", UIStyle.panel(Color(0.07, 0.06, 0.11, 0.96), 22, 34))
+	card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	card.offset_left = -300.0
+	card.offset_right = 300.0
+	card.offset_top = -220.0
+	card.offset_bottom = 220.0
+	add_child(card)
+
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	box.offset_left = -300.0
-	box.offset_right = 300.0
-	box.offset_top = -200.0
-	box.offset_bottom = 200.0
-	box.add_theme_constant_override("separation", 18)
-	add_child(box)
+	box.add_theme_constant_override("separation", 16)
+	card.add_child(box)
 
-	_title = _make_label("", 72, VICTORY_COLOR)
+	_title = UIStyle.title("", 76, UIStyle.VICTORY)
 	box.add_child(_title)
-	_subtitle = _make_label("", 26, Color(1, 0.97, 0.9))
+	_subtitle = UIStyle.label("", 24, UIStyle.CREAM)
 	box.add_child(_subtitle)
-	_stats = _make_label("", 28, Color(1, 0.9, 0.6))
+
+	var divider := Panel.new()
+	divider.custom_minimum_size = Vector2(0, 2)
+	var dsb := StyleBoxFlat.new(); dsb.bg_color = Color(1, 1, 1, 0.12)
+	divider.add_theme_stylebox_override("panel", dsb)
+	box.add_child(divider)
+
+	_stats = UIStyle.label("", 26, UIStyle.GOLD, true)
 	box.add_child(_stats)
 
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 20)
+	var spacer := Control.new(); spacer.custom_minimum_size = Vector2(0, 14)
 	box.add_child(spacer)
 
-	_again_btn = _make_button("▶  Play Again")
+	_again_btn = UIStyle.button("▶  PLAY AGAIN", true)
 	_again_btn.pressed.connect(_on_play_again)
 	box.add_child(_again_btn)
-
-	var menu_btn := _make_button("≡  Main Menu")
+	var menu_btn := UIStyle.button("MAIN MENU")
 	menu_btn.pressed.connect(_on_main_menu)
 	box.add_child(menu_btn)
 
@@ -58,28 +62,22 @@ func _ready() -> void:
 
 
 func _on_game_over(victory: bool) -> void:
-	# Let the death animation / camera zoom breathe before the screen appears.
-	var delay := 2.0 if victory else 1.0
-	await get_tree().create_timer(delay).timeout
-	# Bail out if the player already restarted during the delay.
+	await get_tree().create_timer(2.0 if victory else 1.0).timeout
 	if GameManager.state != GameManager.State.VICTORY and GameManager.state != GameManager.State.DEFEAT:
 		return
-
 	if victory:
 		_title.text = "VICTORY!"
-		_title.add_theme_color_override("font_color", VICTORY_COLOR)
-		_subtitle.text = "Herosauro & Super Boxy saved Porto!"
+		_title.add_theme_color_override("font_color", UIStyle.VICTORY)
+		_subtitle.text = "Porto is safe — the brothers triumph!"
 		AudioManager.play_victory()
 	else:
 		_title.text = "DEFEAT"
-		_title.add_theme_color_override("font_color", DEFEAT_COLOR)
-		_subtitle.text = "Adamastor wins this round…"
+		_title.add_theme_color_override("font_color", UIStyle.DEFEAT)
+		_subtitle.text = "Adamastor stands unbroken…"
 		AudioManager.play_defeat()
-
 	var m := int(GameManager.fight_time) / 60
 	var s := int(GameManager.fight_time) % 60
-	_stats.text = "Score: %d        Time: %d:%02d" % [GameManager.score, m, s]
-
+	_stats.text = "SCORE  %d        TIME  %d:%02d" % [GameManager.score, m, s]
 	visible = true
 	_again_btn.grab_focus()
 
@@ -102,25 +100,3 @@ func _on_play_again() -> void:
 func _on_main_menu() -> void:
 	visible = false
 	GameManager.go_to_menu()
-
-
-# --- Builders --------------------------------------------------------------
-
-func _make_label(text: String, size: int, color: Color) -> Label:
-	var l := Label.new()
-	l.text = text
-	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", color)
-	l.add_theme_color_override("font_outline_color", SHADOW)
-	l.add_theme_constant_override("outline_size", 8)
-	return l
-
-
-func _make_button(text: String) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.custom_minimum_size = Vector2(260, 56)
-	b.add_theme_font_size_override("font_size", 26)
-	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	return b
