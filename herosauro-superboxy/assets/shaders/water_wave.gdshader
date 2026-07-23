@@ -9,6 +9,8 @@ uniform float wave_speed = 0.5;
 uniform float wave_height = 0.35;
 uniform float wave_scale = 0.18;
 uniform float flow = 0.02;
+uniform vec4 glint_color : source_color = vec4(1.0, 0.85, 0.55, 1.0);
+uniform float glint_strength = 0.0;
 
 void vertex() {
 	float w = sin((VERTEX.x + TIME * wave_speed) * wave_scale)
@@ -20,6 +22,8 @@ void fragment() {
 	vec2 uv = UV + vec2(TIME * flow, TIME * flow * 0.7);
 	float ripple = 0.5 + 0.5 * sin(uv.x * 38.0) * sin(uv.y * 38.0);
 	ALBEDO = mix(deep_color.rgb, shallow_color.rgb, ripple);
+	// Golden-hour sparkle concentrated on the ripple crests.
+	EMISSION = glint_color.rgb * pow(ripple, 6.0) * glint_strength;
 	ROUGHNESS = 0.25;
 	METALLIC = 0.0;
 	SPECULAR = 0.5;

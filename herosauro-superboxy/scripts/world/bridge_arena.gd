@@ -4,8 +4,8 @@ extends Node3D
 ## The static collidable parts (deck, railings, river, light, sky) live in the
 ## .tscn. This script adds the purely-decorative, NON-COLLIDING ironwork that
 ## gives the bridge its iconic Dom Luís I silhouette: the single great steel arch
-## slung beneath the deck, a few clean spandrels tying it up, and a sparse parapet.
-## Deliberately simple — no overhead cross-ties or lattice thicket. Grey, toon-shaded.
+## slung beneath the deck, X-braced lattice tying its ribs into a deep iron truss,
+## a sparse parapet, and dusk lampposts along the rail tops. Grey, toon-shaded.
 
 const ARCH_SPAN := 92.0      # horizontal reach of the arch (x in [-46, 46])
 const ARCH_RISE := 18.0      # how far the arch drops below the deck
@@ -14,13 +14,21 @@ const DECK_BOTTOM := 0.0     # underside of the deck box (deck centred at y=1)
 const POST_COUNT := 7        # sparse railing posts per side (scale cue, not a ladder)
 const RAIL_TOP := 4.0        # height of the top guard rail
 
+# Lamppost positions: the camera lives on the +z side, so the far rail carries
+# the full row while the near rail gets just two at the ends, outside the boss
+# arena, where the poles can't cross the action sight line.
+const LAMP_XS_FAR := [-40.0, -20.0, 0.0, 20.0, 40.0]
+const LAMP_XS_NEAR := [-44.0, 44.0]
+
 
 func _ready() -> void:
 	var steel := ToonFactory.solid(Color(0.40, 0.43, 0.47), 0.05)   # weathered iron grey
 	var dark_steel := ToonFactory.solid(Color(0.28, 0.30, 0.34), 0.05)
 
 	_build_arch(steel, dark_steel)
+	_build_lattice(steel)
 	_build_posts(steel)
+	_build_lamps()
 
 
 # --- The iconic arch -------------------------------------------------------
@@ -88,6 +96,78 @@ func _beam_between(parent: Node3D, a: Vector3, b: Vector3, thickness: float, mat
 		var pitch := atan2(dir.y, Vector2(dir.x, dir.z).length())
 		beam.rotation = Vector3(0.0, yaw, pitch)
 	parent.add_child(beam)
+
+
+# --- Lattice bracing --------------------------------------------------------
+
+## X-cross-braces between the two ribs plus a raised second chord riding each
+## rib, so the arch reads as the Dom Luís I deep lattice truss instead of two
+## lone parabolas.
+func _build_lattice(steel: ShaderMaterial) -> void:
+	var lattice := Node3D.new()
+	lattice.name = "Lattice"
+	add_child(lattice)
+
+	# Braces sit in the deck's shadow where outlines smear to mush, so no outline.
+	var brace := ToonFactory.solid(Color(0.28, 0.30, 0.34), 0.0)
+
+	# X-braces between the ribs, every third segment.
+	for i in range(3, ARCH_SEGMENTS - 2, 3):
+		var t0 := -1.0 + 2.0 * float(i) / float(ARCH_SEGMENTS)
+		var t1 := -1.0 + 2.0 * float(i + 2) / float(ARCH_SEGMENTS)
+		_beam_between(lattice, _arch_point(t0, -5.0), _arch_point(t1, 5.0), 0.22, brace)
+		_beam_between(lattice, _arch_point(t0, 5.0), _arch_point(t1, -5.0), 0.22, brace)
+
+	# The second chord rides 2 units above the main rib across the middle span,
+	# thickening the arch into the truss band you see from the river.
+	for z_side in [-5.0, 5.0]:
+		var prev := _arch_point(-0.8, z_side) + Vector3(0.0, 2.0, 0.0)
+		for i in range(1, 13):
+			var t := lerpf(-0.8, 0.8, float(i) / 12.0)
+			var p := _arch_point(t, z_side) + Vector3(0.0, 2.0, 0.0)
+			_beam_between(lattice, prev, p, 0.5, steel)
+			prev = p
+
+
+# --- Lampposts ---------------------------------------------------------------
+
+func _build_lamps() -> void:
+	var lamps := Node3D.new()
+	lamps.name = "Lamps"
+	add_child(lamps)
+
+	var iron := ToonFactory.solid(Color(0.20, 0.22, 0.26), 0.03)
+	for x in LAMP_XS_FAR:
+		_lamp(lamps, x, -6.0, iron)
+	for x in LAMP_XS_NEAR:
+		_lamp(lamps, x, 6.0, iron)
+
+
+## One dusk lamppost planted on the rail top: slim iron pole, warm glowing globe.
+func _lamp(parent: Node3D, x: float, z: float, iron: ShaderMaterial) -> void:
+	var pole := MeshInstance3D.new()
+	pole.name = "LampPole"
+	var pole_mesh := CylinderMesh.new()
+	pole_mesh.top_radius = 0.07
+	pole_mesh.bottom_radius = 0.07
+	pole_mesh.height = 2.4
+	pole_mesh.radial_segments = 8
+	pole.mesh = pole_mesh
+	pole.position = Vector3(x, RAIL_TOP + 1.2, z)
+	pole.material_override = iron
+	parent.add_child(pole)
+
+	var globe := MeshInstance3D.new()
+	globe.name = "LampGlobe"
+	var globe_mesh := SphereMesh.new()
+	globe_mesh.radius = 0.17
+	globe_mesh.height = 0.34
+	globe_mesh.radial_segments = 8
+	globe_mesh.rings = 4
+	globe.mesh = globe_mesh
+	globe.position = Vector3(x, RAIL_TOP + 2.55, z)
+	globe.material_override = ToonFactory.glow(Color(1.0, 0.85, 0.55), 2.2)
+	parent.add_child(globe)
 
 
 # --- Railing posts ---------------------------------------------------------

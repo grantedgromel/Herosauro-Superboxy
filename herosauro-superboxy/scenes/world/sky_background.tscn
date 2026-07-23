@@ -27,6 +27,13 @@ ambient_light_energy = 1.1
 tonemap_mode = 2
 tonemap_exposure = 1.05
 tonemap_white = 1.2
+fog_enabled = true
+fog_mode = 1
+fog_light_color = Color(0.965, 0.76, 0.55, 1)
+fog_sun_scatter = 0.1
+fog_sky_affect = 0.1
+fog_depth_begin = 45.0
+fog_depth_end = 250.0
 
 [node name="SkyBackground" type="Node3D"]
 script = ExtResource("1_sky")
