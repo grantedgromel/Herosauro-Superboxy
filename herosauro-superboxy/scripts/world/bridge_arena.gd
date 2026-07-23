@@ -14,11 +14,10 @@ const DECK_BOTTOM := 0.0     # underside of the deck box (deck centred at y=1)
 const POST_COUNT := 7        # sparse railing posts per side (scale cue, not a ladder)
 const RAIL_TOP := 4.0        # height of the top guard rail
 
-# Lamppost positions: the camera lives on the +z side, so the far rail carries
-# the full row while the near rail gets just two at the ends, outside the boss
-# arena, where the poles can't cross the action sight line.
+# Lamppost positions — far (-z) rail only: the camera lives on the +z side, and
+# a near-rail pole ends up huge in the foreground whenever the fight reaches a
+# bridge end.
 const LAMP_XS_FAR := [-40.0, -20.0, 0.0, 20.0, 40.0]
-const LAMP_XS_NEAR := [-44.0, 44.0]
 
 
 func _ready() -> void:
@@ -139,8 +138,6 @@ func _build_lamps() -> void:
 	var iron := ToonFactory.solid(Color(0.20, 0.22, 0.26), 0.03)
 	for x in LAMP_XS_FAR:
 		_lamp(lamps, x, -6.0, iron)
-	for x in LAMP_XS_NEAR:
-		_lamp(lamps, x, 6.0, iron)
 
 
 ## One dusk lamppost planted on the rail top: slim iron pole, warm glowing globe.

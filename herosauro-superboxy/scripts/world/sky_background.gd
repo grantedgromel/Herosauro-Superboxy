@@ -619,7 +619,9 @@ func _build_azulejo_chapel() -> void:
 	chapel.add_child(bell)
 
 	# The azulejo band: offset tiles read as a blue-and-white checker from afar.
-	var tile_mat := ToonFactory.solid(RIBEIRA_WALLS[3], 0.0)
+	# Deeper than the facade-palette blue — the warm sun washes lighter blues
+	# out to near-white at this distance.
+	var tile_mat := ToonFactory.solid(Color(0.18, 0.38, 0.66), 0.0)
 	for col in 4:
 		var tx := -1.5 + float(col)
 		var ty := 6.0 if col % 2 == 0 else 7.0
