@@ -93,8 +93,14 @@ func add_roof_prism(width: float, height: float, depth: float, xform: Transform3
 	_quad(b, a, r0, r1, slope)                       # -Z pitch
 	_tri(a, b, c, Vector2(width, depth) * uv_scale)  # underside
 	_tri(a, c, d, Vector2(width, depth) * uv_scale)
-	_tri(a, r0, r1, Vector2(depth, height) * uv_scale)  # gables
-	_tri(b, r1, r0, Vector2(depth, height) * uv_scale)
+	# Gable ends, in the x = -hw and x = +hw planes. These were previously
+	# (a, r0, r1) and (b, r1, r0): both span the full width, so they were two
+	# coincident copies of the -Z pitch with opposing normals -- guaranteed
+	# z-fighting on that slope -- while leaving both actual ends open.
+	# Winding differs per end so each faces outward: (d - a) x (r0 - a) gives -X,
+	# and (r1 - b) x (c - b) gives +X.
+	_tri(a, d, r0, Vector2(depth, height) * uv_scale)
+	_tri(b, r1, c, Vector2(depth, height) * uv_scale)
 
 
 ## A cylinder along local Y — columns, balusters, poles, barrel roof tiles.
