@@ -159,4 +159,8 @@ scaling_3d/mode.web=0
 lights_and_shadows/directional_shadow/size=4096
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
 occlusion_culling/use_occlusion_culling=true
+; 64 (default) smears shafts cast by 0.2 m lattice members at 10-40 m.
+; Forward+ only -- the web build has no volumetric fog to pay for it.
+environment/volumetric_fog/volume_size=96
+environment/volumetric_fog/volume_depth=96
 mesh_lod/lod_change/threshold_pixels=2.0

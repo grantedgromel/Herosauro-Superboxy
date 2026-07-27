@@ -18,6 +18,7 @@ extends RefCounted
 ## top terrace, and `scree()` and `boulder()` dress every toe on both banks.
 
 const MK := preload("res://scripts/world/terrain/masonry_kit.gd")
+const TerrainBatch := preload("res://scripts/world/terrain/terrain_batch.gd")
 
 
 # --- Bluffs -------------------------------------------------------------------
@@ -30,7 +31,7 @@ const MK := preload("res://scripts/world/terrain/masonry_kit.gd")
 ## two square ends — `shoulder` is the fraction of the run each taper eats.
 ##
 ## Returns the number of bands, for budgeting.
-static func strata_bluff(batch, z0: float, z1: float, toe_x: float, toe_y: float,
+static func strata_bluff(batch: TerrainBatch, z0: float, z1: float, toe_x: float, toe_y: float,
 		crest_x: float, crest_y: float, outward: float, seed: int = 0,
 		z_step: float = 4.2, band_h: float = 1.15, shoulder: float = 0.22) -> int:
 	var run := z1 - z0
@@ -95,7 +96,7 @@ static func _shoulder(t: float, edge: float) -> float:
 
 ## Fallen rock heaped against a toe. Boxes, not blobs: broken schist is angular,
 ## and a rounded pile reads as gravel.
-static func scree(batch, z0: float, z1: float, face_x: float, outward: float,
+static func scree(batch: TerrainBatch, z0: float, z1: float, face_x: float, outward: float,
 		y: float, spread: float = 4.0, seed: int = 0, density: float = 0.7) -> void:
 	var rb := batch.rock()
 	var run := z1 - z0

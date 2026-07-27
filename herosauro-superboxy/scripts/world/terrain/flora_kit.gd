@@ -23,6 +23,7 @@ extends RefCounted
 ## looks the same every run and moving one does not reshuffle the rest.
 
 const MK := preload("res://scripts/world/terrain/masonry_kit.gd")
+const TerrainBatch := preload("res://scripts/world/terrain/terrain_batch.gd")
 
 ## Deep, desaturated, slightly blue-shifted greens are the point. The Porto bank
 ## is backlit at 11.5 degrees, so its planting is very nearly silhouette; the
@@ -187,7 +188,7 @@ static func wall_toe(b: MeshBaker, z0: float, z1: float, face_x: float, outward:
 
 ## A granite trough planter with something growing out of it. Wants the batch:
 ## stone, soil and leaf are three materials.
-static func planter(batch, pos: Vector3, size: Vector3, seed: int = 0) -> void:
+static func planter(batch: TerrainBatch, pos: Vector3, size: Vector3, seed: int = 0) -> void:
 	var g := batch.dressed()
 	var wall := 0.13
 	# Four sides rather than a box with a lid, so the trough reads as hollow.
@@ -207,7 +208,7 @@ static func planter(batch, pos: Vector3, size: Vector3, seed: int = 0) -> void:
 
 ## A line of trees along a promenade or a terrace street, thinned out by hash so
 ## the spacing is not a metronome and the odd gap reads as one that died.
-static func tree_row(batch, x: float, z0: float, z1: float, pitch: float,
+static func tree_row(batch: TerrainBatch, x: float, z0: float, z1: float, pitch: float,
 		height_min: float, height_max: float, y: float, seed: int = 0,
 		gap_chance: float = 0.22) -> void:
 	var run := z1 - z0

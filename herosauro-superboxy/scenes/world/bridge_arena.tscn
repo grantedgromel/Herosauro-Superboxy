@@ -90,7 +90,7 @@ subdivide_depth = 178
 ; general movement rather than a sideways river, so it is left alone here.
 [sub_resource type="ShaderMaterial" id="Mat_river"]
 shader = ExtResource("3_water")
-shader_parameter/shallow_color = Color(0.915, 0.665, 0.43, 1)
+shader_parameter/shallow_color = Color(0.955, 0.75, 0.485, 1)
 shader_parameter/deep_color = Color(0.16, 0.28, 0.38, 1)
 shader_parameter/wave_speed = 0.5
 shader_parameter/wave_height = 0.35

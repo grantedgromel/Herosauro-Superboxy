@@ -254,7 +254,7 @@ static func weep_holes(b: MeshBaker, z0: float, z1: float, face_x0: float, face_
 ## climbs whichever way the caller points it.
 ##
 ## Returns the number of steps, so a caller can budget.
-static func stair_flight(batch, z_center: float, width: float,
+static func stair_flight(batch: TerrainBatch, z_center: float, width: float,
 		x_bottom: float, y_bottom: float, x_top: float, y_top: float,
 		seed: int = 0, rail: bool = true) -> int:
 	var rise_total := y_top - y_bottom
@@ -290,7 +290,9 @@ static func stair_flight(batch, z_center: float, width: float,
 		)
 		x += dir * tread
 		y += rise
-		if i % 3 == 0:
+		# A rail station every fifth step. The run between landings is straight, so
+		# more than this is triangles spent on a line that was already straight.
+		if i % 5 == 0:
 			tops.append(Vector3(x, y, z_center))
 	tops.append(Vector3(x, y, z_center))
 
@@ -348,9 +350,13 @@ static func handrail(b: MeshBaker, path: Array[Vector3], z_offset: float,
 		if i % 2 != 0 and i != top.size() - 1:
 			continue
 		var p := top[i]
-		b.add_cylinder(0.042, height, Transform3D(Basis.IDENTITY, p - Vector3(0, height * 0.5, 0)), 6)
-		# Ball finial. Two triangles' worth of nothing that reads at fifty metres.
-		b.add_box(Vector3(0.11, 0.11, 0.11), Transform3D(Basis.IDENTITY, p + Vector3(0, 0.03, 0)))
+		# Uncapped: the ends are inside the rail and inside the step, and the two
+		# caps are a third of the post's triangles.
+		b.add_cylinder(0.042, height,
+				Transform3D(Basis.IDENTITY, p - Vector3(0, height * 0.5, 0)), 6, false)
+	# One newel finial per run, at the head, where a hand actually lands.
+	b.add_box(Vector3(0.13, 0.13, 0.13),
+			Transform3D(Basis.IDENTITY, top[top.size() - 1] + Vector3(0, 0.04, 0)))
 
 
 ## The flight of steps down into the river.
@@ -359,7 +365,7 @@ static func handrail(b: MeshBaker, path: Array[Vector3], z_offset: float,
 ## from the quay and down past the waterline; boats come alongside them. Steep by
 ## modern standards — a 30 cm rise is normal — because they were built for
 ## stepping into a rabelo, not for strolling.
-static func water_steps(batch, z_center: float, face_x: float, outward: float,
+static func water_steps(batch: TerrainBatch, z_center: float, face_x: float, outward: float,
 		y_top: float, y_bottom: float, width: float = 3.4, project: float = 5.6,
 		seed: int = 0) -> void:
 	var drop := y_top - y_bottom
@@ -398,7 +404,7 @@ static func water_steps(batch, z_center: float, face_x: float, outward: float,
 
 ## A granite mooring bollard with an iron ring through it. Ribeira has a line of
 ## these along the coping and they are the detail that says "working quay".
-static func bollard(batch, pos: Vector3, outward: float, seed: int = 0) -> void:
+static func bollard(batch: TerrainBatch, pos: Vector3, outward: float, seed: int = 0) -> void:
 	var g := batch.dressed()
 	var h := 0.72 + hash01(seed, 3) * 0.10
 	g.add_cylinder(0.24, h, Transform3D(Basis.IDENTITY, pos + Vector3(0, h * 0.5, 0)), 8)
@@ -411,7 +417,7 @@ static func bollard(batch, pos: Vector3, outward: float, seed: int = 0) -> void:
 ## faces out across the water. Six segments: enough to read as round at the
 ## distance anything this small is ever seen from.
 static func mooring_ring(b: MeshBaker, center: Vector3, radius: float, seed: int = 0,
-		segments: int = 6) -> void:
+		segments: int = 5) -> void:
 	var tilt := hash_sym(seed, 21) * 0.35     # rings hang, they do not sit square
 	var prev := Vector3.ZERO
 	for i in range(segments + 1):
@@ -448,7 +454,7 @@ static func kerb(b: MeshBaker, z0: float, z1: float, face_x0: float, face_x1: fl
 ## A low parapet along the front edge of a terrace, so the drop reads as a drop.
 ## Alternates solid granite stretches with iron railing, which is what happens on
 ## a real hillside street as walls get replaced piecemeal.
-static func edge_parapet(batch, z0: float, z1: float, face_x0: float, face_x1: float,
+static func edge_parapet(batch: TerrainBatch, z0: float, z1: float, face_x0: float, face_x1: float,
 		outward: float, y_top0: float, y_top1: float, seed: int = 0) -> void:
 	var run := z1 - z0
 	var bays := maxi(1, int(absf(run) / 7.0))
@@ -468,10 +474,10 @@ static func edge_parapet(batch, z0: float, z1: float, face_x0: float, face_x1: f
 		else:
 			var b := batch.iron()
 			var rx := fx - outward * 0.16
-			var posts := maxi(2, int(absf(step) / 1.4))
+			var posts := maxi(2, int(absf(step) / 2.2))
 			for p in range(posts + 1):
 				var z := lerpf(za, zb, float(p) / float(posts))
 				b.add_cylinder(0.035, 0.95,
-					Transform3D(Basis.IDENTITY, Vector3(rx, y_top + 0.475, z)), 6)
+					Transform3D(Basis.IDENTITY, Vector3(rx, y_top + 0.475, z)), 6, false)
 			b.add_beam(Vector3(rx, y_top + 0.95, za), Vector3(rx, y_top + 0.95, zb), 0.055)
 			b.add_beam(Vector3(rx, y_top + 0.42, za), Vector3(rx, y_top + 0.42, zb), 0.035)

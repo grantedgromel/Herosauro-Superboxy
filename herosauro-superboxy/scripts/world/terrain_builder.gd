@@ -236,6 +236,9 @@ static func ground_height(x: float, z: float) -> float:
 ##   level    terrace index, 0 = standing on the cais
 ##   side     PORTO / GAIA
 ##   detail   2 = near enough to read as a building, 1 = silhouette only
+##
+## The array is a fresh copy each call but the dictionaries inside it are the
+## cached ones. Read them; do not write to them.
 static func building_plots(side: float) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var cached: Array = _plot_cache.get(side, [])
@@ -356,7 +359,8 @@ static func _ground_grid(b: MeshBaker, side: float, x0: float, x1: float,
 ## The wall belongs to the level it holds up and its toe is the platform below,
 ## which is why level 0's wall is the quay wall and needs no special case beyond
 ## footing under the water.
-static func _build_level(near, far, side: float, level: int, seed: int) -> void:
+static func _build_level(near: TerrainBatch, far: TerrainBatch, side: float,
+		level: int, seed: int) -> void:
 	var lseed := seed + level * 617
 	var outward := -side
 	var toe := WALL_FOOT_Y if level == 0 else _wall_toe_y(side, level)
@@ -366,15 +370,19 @@ static func _build_level(near, far, side: float, level: int, seed: int) -> void:
 	for span in _spans(BANK_Z_FAR, BANK_Z_NEAR, slots):
 		_wall_run(near, far, side, level, span.x, span.y, toe, coping_h, lseed)
 
-	# Buttresses on the deep walls only; a 4 m garden wall does not need them.
-	if float((_levels(side)[level] as Dictionary)["top"]) - toe > 4.0:
-		var pitch := 9.5 + float(level) * 1.4
+	# Counterforts, on the deep walls near the water. They break a 190 m run into
+	# bays and throw a hard vertical shadow at this sun angle, which is most of
+	# what stops a retaining wall reading as a slab — but the top terraces are
+	# 120 m out, where a 70 cm pier is four pixels. The height test alongside
+	# keeps the rule honest if the risers are ever re-cut.
+	if level <= 3 and float((_levels(side)[level] as Dictionary)["top"]) - toe > 4.0:
+		var pitch := 13.0 + float(level) * 1.8
 		var n := int((BANK_Z_NEAR - BANK_Z_FAR) / pitch)
 		for i in n:
 			var z := BANK_Z_FAR + pitch * (float(i) + 0.5)
 			if _blocked(z, 2.4, slots):
 				continue
-			var batch = near if z > NEAR_Z_FAR else far
+			var batch: TerrainBatch = near if z > NEAR_Z_FAR else far
 			MK.buttress(batch.granite(), z, front_x(side, level, z), outward,
 					toe - 0.4, terrace_top(side, level, z) - coping_h - 0.15,
 					1.4 + MK.hash01(lseed, i) * 0.6, 0.55 + MK.hash01(lseed + 3, i) * 0.35)
@@ -384,11 +392,27 @@ static func _build_level(near, far, side: float, level: int, seed: int) -> void:
 	for reach in 2:
 		var z0 := NEAR_Z_FAR if reach == 0 else BANK_Z_FAR
 		var z1 := BANK_Z_NEAR if reach == 0 else NEAR_Z_FAR
-		var batch = near if reach == 0 else far
+		var batch: TerrainBatch = near if reach == 0 else far
 		var zm := (z0 + z1) * 0.5
 		_ground_grid(batch.cobble(), side,
 				absf(front_x(side, level, zm)), absf(front_x(side, back, zm)),
 				z0, z1, 6 if reach == 0 else 3, 5.0 if reach == 0 else 9.0)
+
+	# Kerb along the pavement's back edge, where the setts meet the building
+	# line. One pale granite line running the length of a quay is the cheapest
+	# thing there is for turning a paved area into a street, and it gives the
+	# camber somewhere to end. Near reach and the low levels only — past three
+	# terraces up it is a 15 cm stone at 120 m.
+	if level <= 2:
+		var street := float((_levels(side)[level] as Dictionary)["street"])
+		var z := NEAR_Z_FAR
+		while z < BANK_Z_NEAR - 0.5:
+			var zb := minf(z + 12.0, BANK_Z_NEAR)
+			var zc := (z + zb) * 0.5
+			var kx := side * (absf(front_x(side, level, zc)) + street)
+			MK.kerb(near.dressed(), z, zb, kx, kx, outward,
+					ground_height(kx, zc) + 0.15, 0.34, 0.17, 2.0, lseed + int(z))
+			z = zb
 
 
 ## Toe of a retaining wall: the platform below it, dropped clear of that
@@ -400,8 +424,8 @@ static func _wall_toe_y(side: float, level: int) -> float:
 
 ## One run of retaining wall between two stair slots, with its coping, weep
 ## holes and — on the near reach — individual blocks and a street parapet.
-static func _wall_run(near, far, side: float, level: int, z0: float, z1: float,
-		toe: float, coping_h: float, seed: int) -> void:
+static func _wall_run(near: TerrainBatch, far: TerrainBatch, side: float, level: int,
+		z0: float, z1: float, toe: float, coping_h: float, seed: int) -> void:
 	var outward := -side
 	# Chop at the near/far boundary, and again into short pieces so a far-reach
 	# band (which cannot follow a drifting top) never has far to follow.
@@ -420,7 +444,7 @@ static func _wall_run(near, far, side: float, level: int, z0: float, z1: float,
 		if b - a < 0.4:
 			continue
 		var is_near := (a + b) * 0.5 > NEAR_Z_FAR
-		var batch = near if is_near else far
+		var batch: TerrainBatch = near if is_near else far
 		var fa := front_x(side, level, a)
 		var fb := front_x(side, level, b)
 		var ya := terrace_top(side, level, a)
@@ -431,8 +455,8 @@ static func _wall_run(near, far, side: float, level: int, z0: float, z1: float,
 			# takes the tide and the boats.
 			MK.coursed_wall(batch.granite(), a, b, fa, fb, outward, toe,
 					ya - coping_h, yb - coping_h,
-					1.3 if level == 0 else 0.9, 0.78 if level == 0 else 0.60,
-					1.2 if level == 0 else 0.85, 2.6 if level == 0 else 1.8,
+					1.3 if level == 0 else 0.9, 0.78 if level == 0 else 0.85,
+					1.2 if level == 0 else 1.30, 2.6 if level == 0 else 2.70,
 					0.055, seed + int(a))
 		else:
 			MK.banded_wall(batch.granite(), a, b, fa, fb, outward, toe,
@@ -453,7 +477,7 @@ static func _wall_run(near, far, side: float, level: int, z0: float, z1: float,
 
 # --- Escadarias --------------------------------------------------------------
 
-static func _build_stairs(near, side: float, seed: int) -> void:
+static func _build_stairs(near: TerrainBatch, side: float, seed: int) -> void:
 	var stations := PORTO_STAIRS if side < 0.0 else GAIA_STAIRS
 	for si in stations.size():
 		var st: Dictionary = stations[si]
@@ -461,10 +485,13 @@ static func _build_stairs(near, side: float, seed: int) -> void:
 			var z := _stair_z(side, si, level)
 			var f := absf(front_x(side, level, z))
 			# Foot stands on the platform below, clear of the wall; head lands on
-			# the street of the platform above.
+			# the street of the platform above. Both ends take the PAVED height
+			# rather than the terrace datum — the platforms are cambered, and a
+			# flight built to the datum buries its bottom step by a hand's width.
+			var x0 := side * (f - 5.4)
+			var x1 := side * (f + 2.6)
 			MK.stair_flight(near, z, STAIR_WIDTH,
-					side * (f - 5.4), terrace_top(side, level - 1, z),
-					side * (f + 2.6), terrace_top(side, level, z),
+					x0, ground_height(x0, z), x1, ground_height(x1, z),
 					seed + si * 37 + level, true)
 
 
@@ -493,7 +520,7 @@ static func _stair_slots(side: float, level: int) -> Array[Vector2]:
 
 ## What makes a cais a cais: bollards along the coping, mooring rings on the wall
 ## face, and flights of steps running down into the river.
-static func _build_waterfront(near, side: float, seed: int) -> void:
+static func _build_waterfront(near: TerrainBatch, side: float, seed: int) -> void:
 	var outward := -side
 	var pitch := 7.4
 	var n := int((BANK_Z_NEAR - NEAR_Z_FAR) / pitch)
@@ -516,23 +543,23 @@ static func _build_waterfront(near, side: float, seed: int) -> void:
 
 	# The quay face is permanently damp; ivy and weed take it wherever a boat is
 	# not tied up.
-	for spot in [Vector2(-40.0, -29.0), Vector2(2.0, 14.0)]:
-		var zm := (spot.x + spot.y) * 0.5
+	for spot: Vector2 in [Vector2(-40.0, -29.0), Vector2(2.0, 14.0)]:
+		var zm: float = (spot.x + spot.y) * 0.5
 		FK.ivy_curtain(near.leaf_dark(), spot.x, spot.y, front_x(side, 0, zm), outward,
 				terrace_top(side, 0, zm) - 0.55, 2.8, seed + int(zm), true)
 
 
 # --- Hillside behind the top terrace -----------------------------------------
 
-static func _build_upland(near, far, side: float) -> void:
+static func _build_upland(near: TerrainBatch, far: TerrainBatch, side: float) -> void:
 	var back := PORTO_BACK_X if side < 0.0 else GAIA_BACK_X
 	var crest := PORTO_CREST_X if side < 0.0 else GAIA_CREST_X
 	for reach in 2:
 		var z0 := NEAR_Z_FAR if reach == 0 else BANK_Z_FAR
 		var z1 := BANK_Z_NEAR if reach == 0 else NEAR_Z_FAR
-		var batch = near if reach == 0 else far
+		var batch: TerrainBatch = near if reach == 0 else far
 		_ground_grid(batch.earth(), side, back, crest, z0, z1,
-				6 if reach == 0 else 4, 8.0 if reach == 0 else 14.0)
+				8 if reach == 0 else 5, 6.0 if reach == 0 else 12.0)
 
 
 # --- Serra do Pilar ----------------------------------------------------------
@@ -540,7 +567,7 @@ static func _build_upland(near, far, side: float) -> void:
 ## The bluff, and the scree and scrub that make its toe look eroded rather than
 ## sawn. Only part of its run is inside shadow range, so it splits near/far like
 ## everything else.
-static func _build_bluff(near, far, seed: int) -> void:
+static func _build_bluff(near: TerrainBatch, far: TerrainBatch, seed: int) -> void:
 	var toe_y := float((GAIA_LEVELS[1] as Dictionary)["top"])
 	var splits := [BLUFF_Z0, maxf(BLUFF_Z0, NEAR_Z_FAR), BLUFF_Z1]
 	for i in range(splits.size() - 1):
@@ -548,9 +575,11 @@ static func _build_bluff(near, far, seed: int) -> void:
 		var b: float = splits[i + 1]
 		if b - a < 1.0:
 			continue
-		var batch = near if (a + b) * 0.5 > NEAR_Z_FAR else far
+		var batch: TerrainBatch = near if (a + b) * 0.5 > NEAR_Z_FAR else far
+		# Fine bands and short segments: this is the one cliff in the scene and the
+		# strata are the whole reason it reads as rock rather than as a ramp.
 		RK.strata_bluff(batch, a, b, BLUFF_TOE_X, toe_y, GAIA_BACK_X, BLUFF_PLATEAU_Y,
-				-1.0, seed + 71, 4.2, 1.15, BLUFF_SHOULDER)
+				-1.0, seed + 71, 2.8, 0.75, BLUFF_SHOULDER)
 		RK.scree(batch, a, b, BLUFF_TOE_X, -1.0, toe_y, 4.5, seed + 73, 0.62)
 
 	# Scrub caught on two bands of setbacks. It is what stops a scarp reading as
@@ -561,7 +590,7 @@ static func _build_bluff(near, far, seed: int) -> void:
 		var w := RK._shoulder(t, BLUFF_SHOULDER)
 		if w < 0.25:
 			continue
-		var batch = near if z > NEAR_Z_FAR else far
+		var batch: TerrainBatch = near if z > NEAR_Z_FAR else far
 		for k in 2:
 			var f := 0.35 + float(k) * 0.34
 			var y := lerpf(toe_y, lerpf(toe_y, BLUFF_PLATEAU_Y, w), f)
@@ -576,7 +605,7 @@ static func _build_bluff(near, far, seed: int) -> void:
 			continue
 		var z := lerpf(BLUFF_Z0 + 6.0, BLUFF_Z1 - 6.0, (float(i) + 0.5) / 9.0)
 		var x := GAIA_BACK_X + 1.6 + MK.hash01(seed + 19, i) * 3.0
-		var batch = near if z > NEAR_Z_FAR else far
+		var batch: TerrainBatch = near if z > NEAR_Z_FAR else far
 		FK.cypress(batch.leaf_dark(), Vector3(x, ground_height(x, z) - 0.2, z),
 				5.5 + MK.hash01(seed + 23, i) * 3.5, seed + i * 41)
 
@@ -586,12 +615,12 @@ static func _build_bluff(near, far, seed: int) -> void:
 ## Downstream of BANK_Z_NEAR the terraces sink into the water. Bare rock with a
 ## rubble toe: this is the last thing before open river, and a manicured quay
 ## ending in mid-air is worse than a natural one.
-static func _build_headlands(near, seed: int) -> void:
+static func _build_headlands(near: TerrainBatch, seed: int) -> void:
 	for side_i in 2:
 		var side := PORTO if side_i == 0 else GAIA
 		var front := absf(front_x(side, 0, BANK_Z_NEAR))
 		var back := absf(front_x(side, _levels(side).size(), BANK_Z_NEAR))
-		var b := near.rock()
+		var b: MeshBaker = near.rock()
 		_ground_grid(b, side, front, back, BANK_Z_NEAR, HEADLAND_Z, 6, 3.5)
 
 		# Close the river-facing edge, or the sheet is a flap seen edge-on from
@@ -613,10 +642,12 @@ static func _build_headlands(near, seed: int) -> void:
 
 		RK.scree(near, BANK_Z_NEAR + 1.0, HEADLAND_Z - 2.0, side * (front + 1.0),
 				-side, WATER_Y + 0.4, 5.0, seed + side_i * 91, 0.75)
+		# Stacks standing off the point, IN the water — the reason a headland is a
+		# headland is the rock the river has not managed to take yet.
 		for k in 3:
-			RK.boulder(b, Vector3(side * (front + 2.0 + float(k) * 3.4),
-					WATER_Y + 0.5, BANK_Z_NEAR + 5.0 + float(k) * 9.0),
-					1.6 + MK.hash01(seed, k) * 1.4, seed + k * 5)
+			RK.boulder(b, Vector3(side * (front - 3.0 - float(k) * 2.6),
+					WATER_Y + 0.4, BANK_Z_NEAR + 5.0 + float(k) * 7.0),
+					1.5 + MK.hash01(seed, k) * 1.3, seed + k * 5)
 
 
 # --- Planting ----------------------------------------------------------------
@@ -625,17 +656,18 @@ static func _build_headlands(near, seed: int) -> void:
 ## terrace edges where it breaks the horizontal, on the wall faces where it
 ## breaks the masonry, and along the promenade where it gives the eye something
 ## at human scale next to a 23 m hillside.
-static func _build_planting(near, far, side: float, seed: int) -> void:
+static func _build_planting(near: TerrainBatch, far: TerrainBatch, side: float,
+		seed: int) -> void:
 	var levels := _levels(side)
 	var outward := -side
 
 	# Plane trees down the middle of the cais, in two runs so the bridge landing
 	# stays open.
 	var row_x := side * (absf(front_x(side, 0, 0.0)) + 4.2)
-	FK.tree_row(near, row_x, -70.0, -BRIDGE_CLEAR_Z - 2.0, 9.5, 6.5, 9.5,
-			terrace_top(side, 0, -40.0) + 0.1, seed + 101, 0.24)
-	FK.tree_row(near, row_x, BRIDGE_CLEAR_Z + 2.0, BANK_Z_NEAR - 4.0, 9.5, 6.0, 9.0,
-			terrace_top(side, 0, 20.0) + 0.1, seed + 103, 0.24)
+	FK.tree_row(near, row_x, NEAR_Z_FAR + 2.0, -BRIDGE_CLEAR_Z - 2.0, 7.0, 6.5, 9.5,
+			terrace_top(side, 0, -40.0) + 0.1, seed + 101, 0.22)
+	FK.tree_row(near, row_x, BRIDGE_CLEAR_Z + 2.0, BANK_Z_NEAR - 3.0, 7.0, 6.0, 9.0,
+			terrace_top(side, 0, 20.0) + 0.1, seed + 103, 0.22)
 
 	# Planters flanking the bridge landing. Kept off z in [-7.5, 7.5], which is
 	# where the abutment block comes up through the quay.
@@ -652,7 +684,7 @@ static func _build_planting(near, far, side: float, seed: int) -> void:
 		for reach in 2:
 			var z0 := NEAR_Z_FAR if reach == 0 else BANK_Z_FAR
 			var z1 := BANK_Z_NEAR if reach == 0 else NEAR_Z_FAR
-			var batch = near if reach == 0 else far
+			var batch: TerrainBatch = near if reach == 0 else far
 			FK.wall_toe(batch.leaf_dark(), z0, z1, front_x(side, l, (z0 + z1) * 0.5),
 					outward, toe + 0.15, wseed, 0.6 if reach == 0 else 0.28)
 		# Ivy hanging off two or three bays of each coping.
@@ -661,16 +693,19 @@ static func _build_planting(near, far, side: float, seed: int) -> void:
 				continue
 			var z := lerpf(BANK_Z_FAR + 15.0, BANK_Z_NEAR - 15.0,
 					(float(k) + 0.5 + MK.hash_sym(wseed, k) * 0.3) / 3.0)
-			var batch2 = near if z > NEAR_Z_FAR else far
+			var batch2: TerrainBatch = near if z > NEAR_Z_FAR else far
+			# Anchored to the drifted coping, not to the table value, or the mass
+			# hangs half a metre off the stone it is supposed to be growing on.
 			FK.ivy_curtain(batch2.leaf_dark(), z - 5.0, z + 5.0, front_x(side, l, z),
-					outward, top - 0.45, minf(top - toe - 0.8, 4.2), wseed + k * 7, true)
+					outward, terrace_top(side, l, z) - 0.45,
+					minf(top - toe - 0.8, 4.2), wseed + k * 7, true)
 		# Cypresses on the terrace edge — the vertical accent against the steps.
 		for k in 6:
 			if MK.hash01(wseed + 5, k) < 0.42:
 				continue
 			var z := lerpf(BANK_Z_FAR + 8.0, BANK_Z_NEAR - 8.0, (float(k) + 0.5) / 6.0)
 			var x := side * (absf(front_x(side, l, z)) + 1.4 + MK.hash01(wseed, k) * 1.6)
-			var batch3 = near if z > NEAR_Z_FAR else far
+			var batch3: TerrainBatch = near if z > NEAR_Z_FAR else far
 			FK.cypress(batch3.leaf_dark(), Vector3(x, ground_height(x, z) - 0.2, z),
 					6.0 + MK.hash01(wseed + 9, k) * 4.0, wseed + k * 31)
 
@@ -683,7 +718,7 @@ static func _build_planting(near, far, side: float, seed: int) -> void:
 ## and on a hillside that space is a shaded slot with a wall at the end of it.
 ## Standing the shadow up here means the alleys read as depth even before the
 ## placement stream has put a single building on either side of them.
-static func _build_alley_shadows(near, far, side: float) -> void:
+static func _build_alley_shadows(near: TerrainBatch, far: TerrainBatch, side: float) -> void:
 	var outward := -side
 	var plots := building_plots(side)
 	var prev_end := 0.0
@@ -696,7 +731,7 @@ static func _build_alley_shadows(near, far, side: float) -> void:
 			var z0 := prev_end
 			var z1 := zc - w * 0.5
 			var zm := (z0 + z1) * 0.5
-			var batch = near if zm > NEAR_Z_FAR else far
+			var batch: TerrainBatch = near if zm > NEAR_Z_FAR else far
 			batch.dark().add_box(
 				Vector3(0.5, 2.6, z1 - z0),
 				Transform3D(Basis.IDENTITY,

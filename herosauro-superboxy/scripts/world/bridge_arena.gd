@@ -27,6 +27,8 @@ extends Node3D
 ##   exactly what makes a third-person camera chatter, and a railing the player
 ##   cannot walk through the gaps of is what a railing is anyway.
 
+const IronworkScript := preload("res://scripts/world/bridge_ironwork.gd")
+
 # --- Deck cross-section ------------------------------------------------------
 # Every Z is a half-width from the bridge centreline, every Y is absolute.
 # DECK_TOP must stay at 2.0: main.gd drops the hero above it and prop_spawner.gd
@@ -109,8 +111,12 @@ const PIER_X := ARCH_SPAN * 0.5 + 1.0
 ## no OmniLight3D, so this list must not grow past four. The stations land on
 ## POST_PITCH multiples so every lamp stands on a heavy parapet post.
 const LAMP_XS := [-30.0, -10.0, 10.0, 30.0]
-const LAMP_BASE_Y := HANDRAIL_TOP
-const LAMP_GLOBE_Y := HANDRAIL_TOP + 3.0
+## Sits on BridgeIronwork.RAIL_TOP, not HANDRAIL_TOP. The ironwork's parapet
+## tops out at 3.33 — its plinth is deliberately lower than the 2.55 used here so
+## a 1.20 m railing has room for a readable lattice band — so keying the lamps to
+## 3.50 would leave all eight floating 17 cm above their posts.
+const LAMP_BASE_Y := 3.33
+const LAMP_GLOBE_Y := LAMP_BASE_Y + 3.0
 
 # --- Palette -----------------------------------------------------------------
 # The deck's whole job at eye level is a light/dark read: near-black roadway,
@@ -140,8 +146,8 @@ func _ready() -> void:
 	_build_footways()
 	_build_parapets()
 	_build_ends()
-	_build_arch()
-	_build_lattice()
+	_build_arch_foundations()
+	IronworkScript.attach(self)
 	_build_lamps()
 
 
@@ -289,56 +295,18 @@ func _build_parapets() -> void:
 	rails.name = "Parapets"
 	add_child(rails)
 
-	var plinth_mat := SceneryKit.world_mapped(ToonFactory.stone(PLINTH_COLOR, 2.0))
-	# Painted cast iron: barely metallic, satin, near-black. Raw steel here reads
-	# as chrome the moment the sun catches a hundred metres of handrail.
-	var iron := ToonFactory.iron(IRONWORK_COLOR, 1.0, 0.30, 0.48)
-	var girder := ToonFactory.iron(STEEL_COLOR, 1.6)
-
-	var bars: Array[Vector3] = []
-	var posts: Array[Vector3] = []
-	# Balusters run plinth top to handrail underside; posts overlap both by 5 cm
-	# so no hairline of sky shows through a joint.
-	var handrail_under := HANDRAIL_TOP - 0.12
-	var bar_size := Vector3(0.06, handrail_under - PLINTH_TOP, 0.06)
-	var post_size := Vector3(0.17, HANDRAIL_TOP + 0.05 - (PLINTH_TOP - 0.05), 0.17)
-
+	# The parapet's MESH — plinth, rails, balusters, posts, edge girder — is built
+	# by BridgeIronwork now, as one riveted lattice run rather than a handrail on
+	# sticks. What stays here is the collider, because that is this file's job.
+	#
+	# One box per side from pavement to handrail, standing in for ~320 balusters.
+	# See the collision contract at the top of the file: a swept camera sphere
+	# catching on each bar in turn is exactly what makes a third-person camera
+	# chatter, and a railing you cannot squeeze between the bars of is what a
+	# railing is anyway.
 	for side in [-1.0, 1.0]:
-		var z: float = side * PARAPET_MID
-		# Rooted in the deck mass rather than perched on the pavement, so no gap
-		# opens under it where the flagstones stop.
-		SceneryKit.box(rails, "Plinth", Vector3(DECK_LENGTH, PLINTH_TOP - STRUCTURE_TOP, PARAPET_THICKNESS),
-				Vector3(0.0, (PLINTH_TOP + STRUCTURE_TOP) * 0.5, z), plinth_mat)
-		SceneryKit.box(rails, "MidRail", Vector3(DECK_LENGTH, 0.07, PARAPET_THICKNESS * 0.5),
-				Vector3(0.0, MIDRAIL_Y, z), iron)
-		SceneryKit.box(rails, "HandRail", Vector3(DECK_LENGTH, 0.12, PARAPET_THICKNESS * 0.78),
-				Vector3(0.0, HANDRAIL_TOP - 0.06, z), iron)
-
-		# The deck's edge girder and its bottom flange, riding just proud of the
-		# fascia. Below the pavement and outside every reachable surface, so no
-		# collider: the camera would only ever scrape along them.
-		SceneryKit.box(rails, "EdgeGirder", Vector3(DECK_LENGTH, 0.62, 0.30),
-				Vector3(0.0, DECK_BOTTOM + 0.31, side * (DECK_HALF_WIDTH - 0.10)), girder)
-		SceneryKit.box(rails, "GirderFlange", Vector3(DECK_LENGTH, 0.14, 0.52),
-				Vector3(0.0, DECK_BOTTOM + 0.07, side * (DECK_HALF_WIDTH - 0.16)), girder)
-
-		for x in _centred_line(BALUSTER_PITCH):
-			bars.append(Vector3(x, PLINTH_TOP + bar_size.y * 0.5, z))
-		for x in _centred_line(POST_PITCH):
-			posts.append(Vector3(x, PLINTH_TOP - 0.05 + post_size.y * 0.5, z))
-
-		# The whole parapet as one box, from the pavement to the handrail. See the
-		# collision contract at the top of the file for why it is not per-baluster.
 		SceneryKit.solid(rails, "ParapetBody", Vector3(DECK_LENGTH, HANDRAIL_TOP - DECK_TOP, PARAPET_THICKNESS),
-				Vector3(0.0, (HANDRAIL_TOP + DECK_TOP) * 0.5, z))
-
-	var baluster_batch := SceneryKit.repeat(rails, "Balusters", bar_size, bars, iron)
-	if baluster_batch != null:
-		# Shadows stay on — 300 bars striping the pavement at 11.5 degrees is the
-		# single best thing the parapet does. GI comes off: 6 cm rods are far under
-		# an SDFGI cascade-0 cell and only ever add leak noise.
-		baluster_batch.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
-	SceneryKit.repeat(rails, "ParapetPosts", post_size, posts, iron)
+				Vector3(0.0, (HANDRAIL_TOP + DECK_TOP) * 0.5, side * PARAPET_MID))
 
 
 # --- Bridge ends -------------------------------------------------------------
@@ -371,106 +339,34 @@ func _build_ends() -> void:
 		SceneryKit.solid(ends, "AbutmentBody", mass, Vector3(x, mid_y, 0.0))
 
 
-# --- The iconic arch ---------------------------------------------------------
+# --- Arch foundations --------------------------------------------------------
 
-func _build_arch() -> void:
+## The arch, its lattice web, the spandrel columns and the parapet ironwork are
+## all built by BridgeIronwork now — a real riveted crescent truss instead of
+## smooth box beams following a parabola. It emits meshes only, so the collision
+## contract at the top of this file is unaffected and lives entirely here.
+##
+## What remains is the one thing the ironwork cannot add: something solid at the
+## springings. A hero knocked over the parapet near either end lands on the
+## abutment tower's top stage, and a tower you fall straight through is exactly
+## the clipping this pass exists to kill.
+func _build_arch_foundations() -> void:
 	var arch := Node3D.new()
-	arch.name = "Arch"
+	arch.name = "ArchFoundations"
 	add_child(arch)
 
-	# ~120 short beams, welded down to two meshes. Left as MeshInstance3Ds the
-	# arch alone cost 120 draw calls under a deck you mostly see it edge-on from;
-	# baked, it is two, and the object-space triplanar grain now runs continuously
-	# along a rib instead of restarting at every segment joint.
-	var ribs := MeshBaker.new()
-	var spandrels := MeshBaker.new()
+	var body := StaticBody3D.new()
+	body.name = "PierBodies"
+	body.collision_layer = PhysicsLayers.WORLD
+	body.collision_mask = 0
+	arch.add_child(body)
 
-	# Two parallel arch ribs, one under each kerb line, built from short straight
-	# beam segments following a parabola that dips below the deck.
-	for z_side in [-RIB_HALF, RIB_HALF]:
-		var prev := _arch_point(-1.0, z_side)
-		for i in range(ARCH_SEGMENTS + 1):
-			var t := -1.0 + 2.0 * float(i) / float(ARCH_SEGMENTS)
-			var p := _arch_point(t, z_side)
-			if i > 0:
-				ribs.add_beam(prev, p, 1.0)   # thicker, bolder single arch
-			prev = p
-
-	# A few clean spandrel posts tying the arch up to the deck (sparse, not a thicket).
-	for z_side in [-RIB_HALF, RIB_HALF]:
-		for i in [4, 8, 12, 16, 20]:
-			var t := -1.0 + 2.0 * float(i) / float(ARCH_SEGMENTS)
-			var bottom := _arch_point(t, z_side)
-			var top := Vector3(bottom.x, DECK_BOTTOM, z_side)
-			if top.y - bottom.y > 0.8:
-				spandrels.add_beam(bottom, top, 0.3)
-
-	# LODs off, here and on the lattice. The simplifier would be handed a hundred
-	# disjoint 0.3 m boxes, and the first thing mesh decimation does with thin
-	# disconnected geometry is collapse it — a truss that dissolves at range costs
-	# more than the triangles it saves.
-	arch.add_child(ribs.commit(ToonFactory.iron(STEEL_COLOR), "ArchRibs", false))
-	arch.add_child(spandrels.commit(ToonFactory.iron(DARK_STEEL_COLOR), "Spandrels", false))
-
-	# Two stout stone-grey piers where the arch springs off the bank. Solid: a
-	# hero knocked over the parapet near the ends can land on one, and a mesh he
-	# falls straight through is exactly the clipping this pass is meant to kill.
-	var pier_mass := Vector3(4.0, ARCH_RISE + 6.0, DECK_HALF_WIDTH * 2.0)
-	var pier_y := DECK_BOTTOM - pier_mass.y * 0.5
-	var pier_body := StaticBody3D.new()
-	pier_body.name = "PierBodies"
-	pier_body.collision_layer = PhysicsLayers.WORLD
-	pier_body.collision_mask = 0
-	arch.add_child(pier_body)
+	# Matches BridgeIronwork's tower top stage rather than the old 4 x 24 x 14
+	# pier, which stood proud of the towers and caught the player on nothing.
+	var tower_top := Vector3(8.4, 4.2, 16.6)
 	for sx in [-1.0, 1.0]:
-		var pos := Vector3(sx * PIER_X, pier_y, 0.0)
-		SceneryKit.box(arch, "Pier", pier_mass, pos, ToonFactory.stone(Color(0.52, 0.50, 0.47), 3.0))
-		SceneryKit.solid_shape(pier_body, pier_mass, pos)
+		SceneryKit.solid_shape(body, tower_top, Vector3(sx * 48.5, -1.9, 0.0))
 
-
-## A point on the arch rib for parameter t in [-1, 1] at a given z.
-func _arch_point(t: float, z: float) -> Vector3:
-	var x := t * ARCH_SPAN * 0.5
-	# Parabola: 0 at the ends, -ARCH_RISE at the centre, all below the deck.
-	var y := DECK_BOTTOM - ARCH_RISE * (1.0 - t * t)
-	return Vector3(x, y, z)
-
-
-# --- Lattice bracing ---------------------------------------------------------
-
-## X-cross-braces between the two ribs plus a raised second chord riding each
-## rib, so the arch reads as the Dom Luís I deep lattice truss instead of two
-## lone parabolas. Non-colliding by contract: the camera swings through here.
-func _build_lattice() -> void:
-	var lattice := Node3D.new()
-	lattice.name = "Lattice"
-	add_child(lattice)
-
-	var braces := MeshBaker.new()
-	var chords := MeshBaker.new()
-
-	# X-braces between the ribs, every third segment.
-	for i in range(3, ARCH_SEGMENTS - 2, 3):
-		var t0 := -1.0 + 2.0 * float(i) / float(ARCH_SEGMENTS)
-		var t1 := -1.0 + 2.0 * float(i + 2) / float(ARCH_SEGMENTS)
-		braces.add_beam(_arch_point(t0, -RIB_HALF), _arch_point(t1, RIB_HALF), 0.22)
-		braces.add_beam(_arch_point(t0, RIB_HALF), _arch_point(t1, -RIB_HALF), 0.22)
-
-	# The second chord rides 2 units above the main rib across the middle span,
-	# thickening the arch into the truss band you see from the river.
-	for z_side in [-RIB_HALF, RIB_HALF]:
-		var prev := _arch_point(-0.8, z_side) + Vector3(0.0, 2.0, 0.0)
-		for i in range(1, 13):
-			var t := lerpf(-0.8, 0.8, float(i) / 12.0)
-			var p := _arch_point(t, z_side) + Vector3(0.0, 2.0, 0.0)
-			chords.add_beam(prev, p, 0.5)
-			prev = p
-
-	# Braces live in the deck's shadow, lit almost entirely by bounce off the
-	# river, so they get a duller, less metallic iron than the sunlit chords.
-	lattice.add_child(braces.commit(
-			ToonFactory.iron(DARK_STEEL_COLOR, 1.6, 0.35, 0.72), "Braces", false))
-	lattice.add_child(chords.commit(ToonFactory.iron(STEEL_COLOR), "SecondChord", false))
 
 
 # --- Lampposts ---------------------------------------------------------------

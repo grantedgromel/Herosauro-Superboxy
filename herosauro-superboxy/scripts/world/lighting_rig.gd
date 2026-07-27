@@ -1,38 +1,82 @@
 extends Node3D
-## LightingRig: renderer tiering for the Porto environment, plus the bridge practicals.
+## LightingRig: renderer tiering for the Porto environment, the two fill lights the
+## key light needs, and the bridge practicals.
 ##
 ## One resource — assets/environments/porto_golden_hour.tres — authors the full
-## Forward+ look. GL Compatibility, which is what the web export runs, supports
+## Forward+ look, and the reasoning behind every number in it lives in that file's
+## own `;` comments. GL Compatibility, which is what the web export runs, supports
 ## none of SSR / SSIL / SDFGI / volumetric fog, and pulls glow out of the already
 ## tonemapped buffer rather than an HDR one. Rather than maintain two Environments
 ## that drift apart, this strips whatever the live renderer cannot do at boot and
-## pays back what was lost (thicker depth fog for the aerial perspective, more sky
-## ambient for the missing bounce, a glow threshold the LDR buffer can reach).
+## pays back what was lost — see COMPAT_* below, which are derived to *match* the
+## Forward+ image rather than to approximate it.
 ##
-## It also hangs real OmniLight3Ds on the lamppost globes. bridge_arena.gd builds
-## those as emissive spheres that light nothing, which at dusk is the difference
-## between a lamp and a sticker.
+## (One caveat on those `;` comments: the text resource format keeps them on load,
+## but Godot's inspector does NOT round-trip them. If porto_golden_hour.tres is
+## ever re-saved from the editor, every comment in it is gone. Edit it as text.)
 ##
-## Environment tuning notes (.tres files take no comments, so they live here):
-##   - AgX with a 12.0 white point, not the 16.29 default: the default keeps so
-##     much highlight headroom that a golden hour scene reads flat and grey.
-##   - The old Filmic + tonemap_white 1.2 pairing is what actually washed the
-##     baseline render out — everything above 1.2 luminance clipped to cream. The
-##     depth fog took the blame but at the default density of 0.01 it could only
-##     ever contribute 1%; the depth-mode formula multiplies by fog_density.
-##   - Depth fog now runs at density 0.5 with aerial_perspective 0.88, so distant
-##     geometry tends toward the actual sky behind it instead of a flat haze
-##     colour. Begin 45 keeps the whole 100-unit deck out of it.
-##   - Volumetric fog sits at density 0.002 over a 96-unit froxel volume — about
-##     4% extinction at fighting range. volumetric_fog_sky_affect is 0: at the
-##     default of 1.0 it fogs the sky itself, which is the milky-screen failure.
-##   - SSAO radius 0.9 is tuned to the ~2-unit characters, not the 100-unit deck.
-##   - SDFGI runs 5 cascades off a 0.2 min cell (12.8-unit cascade 0, ~205 units
-##     total), enough to cover the bridge and the far bank. See use_sdfgi below.
+## Three things here are not tiering:
 ##
-## The key light itself is not here: SunLight lives in bridge_arena.tscn. The sky
-## shader reads it through LIGHT0_*, so moving or recolouring it drags the sun
-## disk and both scatter lobes along with it and nothing here needs editing.
+##   1. Two fill lights. At an 11.5 degree sun everything not facing -x/-z is lit
+##      by ambient alone, and a constant ambient term bright enough to keep those
+##      faces off the floor is also bright enough to flatten the ones the sun does
+##      hit. That is the trade the render pass caught as "deck blowing out while
+##      parapets crush". The answer is not more ambient, it is DIRECTIONAL fill:
+##      a cool anti-solar sky light and a warm up-bounce off the river. Both are
+##      free of shadow maps, and between them the environment's flat ambient could
+##      come down from 0.95 to 0.55.
+##
+##   2. The sun's light_volumetric_fog_energy. That is a fog-only multiplier — it
+##      cannot touch surface lighting — and it is the right lever for god rays,
+##      because the alternative (more volumetric density) is extinction, which is
+##      uniform in every direction and is exactly the milkiness to avoid.
+##
+##   3. Real OmniLight3Ds on the lamppost globes. bridge_arena.gd builds those as
+##      emissive spheres that light nothing, which at dusk is the difference
+##      between a lamp and a sticker.
+##
+## The key light itself is not here: SunLight lives in bridge_arena.tscn, and this
+## only reads it. The sky shader reads it too, through LIGHT0_*, so moving or
+## recolouring SunLight drags the sun disk and both scatter lobes along with it and
+## nothing here needs editing. Both fill lights are created with
+## sky_mode = LIGHT_ONLY precisely so they can never displace it as LIGHT0.
+
+# --- Key light ---------------------------------------------------------------
+
+## Fog-only multiplier on the sun, on Forward+. The shafts through the arch lattice
+## are the difference between lit and shadowed froxels, and 1.0 makes that
+## difference about as visible as the fog's own 0.16% per-metre extinction — i.e.
+## not. Shaft brightness goes as (this * volumetric_fog_density), but extinction —
+## the part that veils the playable deck — goes as density alone, so buying the
+## shafts here instead of there is strictly the better trade. 2.4 * 0.0016 is the
+## same shaft as 1.8 * 0.0022 for 27% less haze on the bridge.
+## Sized against volumetric_fog_anisotropy = 0.75, which already delivers ~3.4x
+## isotropic along a sightline 30 degrees off the sun (the down-gorge view).
+const SUN_FOG_ENERGY := 2.4
+
+# --- Fill lights -------------------------------------------------------------
+#
+# Directions are the direction light comes FROM, unit length. The sun's is the +Z
+# column of SunLight's basis in bridge_arena.tscn, (-0.860, 0.200, -0.470): low
+# over the -x/-z quadrant, 11.5 degrees up.
+
+## Cool sky fill, opposite the sun in azimuth and 42 degrees up. This is the open
+## dome doing what the open dome actually does, and it is what puts a readable
+## value on every surface the key misses — the far parapet, the underside of the
+## handrail, the shaded half of every Ribeira facade.
+const SKY_FILL_DIR := Vector3(0.652, 0.669, 0.356)
+const SKY_FILL_COLOR := Color(0.52, 0.66, 0.92)
+
+## Warm bounce up off the river. The deck soffit and the whole inside of the arch
+## truss face straight down at water that is mirroring a sunset, and without this
+## they are the largest black holes in the frame. Leaning slightly toward the sun
+## (-x/-z) because that is where the glitter path is.
+const BOUNCE_DIR := Vector3(-0.30, -0.94, -0.16)
+const BOUNCE_COLOR := Color(1.0, 0.72, 0.46)
+
+## Far enough out that the shadow-map framing (unused — neither casts) and any
+## future debug gizmo sit outside the geometry.
+const FILL_DISTANCE := 90.0
 
 # --- Practical lamps ---------------------------------------------------------
 
@@ -45,6 +89,9 @@ const LAMP_FADE_BEGIN := 55.0
 const LAMP_FADE_LENGTH := 18.0
 const LAMP_MERGE_RADIUS := 0.6      # globes closer than this are one lamp head
 const LAMP_GROUP_NAME := "Lamps"    # the node bridge_arena.gd parks its lampposts under
+## Each globe gets a small halo in the volumetric fog. Cheap — an omni only touches
+## the froxels inside its range — and it is most of what makes a dusk lamp read.
+const LAMP_FOG_ENERGY := 1.6
 
 ## Compatibility shades at most 8 omnis per mesh and the deck is a single mesh, so
 ## any lamp past the eighth would simply pop out on web. Refuse to spawn them.
@@ -61,19 +108,51 @@ const FALLBACK_LAMP_SPOTS := [
 ]
 
 # --- Fallback renderer tier --------------------------------------------------
+#
+# Depth fog has to carry the aerial perspective alone once volumetric fog is gone,
+# and the old answer — multiply fog_density by 1.5 — is wrong twice over. It only
+# scales the far end (density IS the blend at fog_depth_end), and at the resource's
+# new 0.72 it would clamp to 1.0 and erase the photogrammetry backdrop's silhouette
+# into flat sky. What the volumetric fog actually contributes is a *near* term: an
+# extinction floor of 1 - exp(-0.0016 * d) that saturates at 12% by the end of the
+# 80-unit froxel volume.
+#
+# So the fallback reproduces the composite curve instead: pull the start of the
+# ramp in (26 -> 14) and flatten the exponent (0.62 -> 0.55) to buy back the near
+# haze, and lift the far end (0.72 -> 0.76) to cover the floor past it. Measured
+# against the Forward+ composite the worst error is 2.4 points, at 70 m; from 130 m
+# out the two agree to within one point. _atmosphere_probe.gd prints both curves.
+const COMPAT_FOG_BEGIN := 14.0
+const COMPAT_FOG_CURVE := 0.55
+const COMPAT_FOG_DENSITY := 0.76
 
-## Depth fog carries the aerial perspective alone once volumetric fog is gone.
-const COMPAT_FOG_DENSITY_SCALE := 1.5
 ## Compatibility extracts glow after tonemapping, so nothing ever exceeds ~1.0 and
 ## an HDR threshold above it would stop the lamps and the sun blooming entirely.
 const COMPAT_GLOW_THRESHOLD := 0.82
-## Buys back a little of the indirect fill that SSIL and SDFGI were providing.
-const COMPAT_AMBIENT_SCALE := 1.15
-const COMPAT_RADIANCE_SIZE := Sky.RADIANCE_SIZE_128
+
+## Buys back the indirect that SSIL and SDFGI were providing. Much larger than it
+## used to be because the environment's ambient came down by 42% on the strength of
+## those two existing; 0.55 * 1.7 = 0.94, i.e. roughly where Forward+ sat before
+## SDFGI and SSIL were subtracted from it.
+const COMPAT_AMBIENT_SCALE := 1.7
+
+## Same argument, one tier up: Forward+ with SDFGI switched off keeps SSIL, so it
+## needs less of the ambient back than Compatibility does.
+const NO_SDFGI_AMBIENT_SCALE := 1.3
+
+## An upper clamp, not a downgrade — and it used to be a downgrade, from the
+## resource's 256 to 128. That is the wrong saving here: the river is a near-mirror
+## (the water shader runs ROUGHNESS 0.07) covering a third of the frame, and with
+## no SSR on this tier the sky cubemap is the ONLY thing it can reflect. A 128px
+## cubemap sampled at mip 0 is a visibly blocky sunset. It costs nothing per frame
+## either way: the Sky is PROCESS_MODE_QUALITY and the sun never moves, so the
+## radiance map is generated once at load.
+const COMPAT_RADIANCE_SIZE := Sky.RADIANCE_SIZE_256
 
 ## Decorative groups in sky_background.gd that move every frame. Left as static GI
 ## geometry they get voxelised into the SDFGI cascades as drifting occluders, which
-## smears light across the whole arena as the clouds pass over.
+## smears light across the whole arena as the clouds pass over. (river_life.gd
+## disables GI on its own movers as it builds them, so it is not listed here.)
 const MOVING_DECOR := ["Clouds", "Gulls", "Rabelos"]
 
 @export var world_environment: WorldEnvironment
@@ -82,6 +161,14 @@ const MOVING_DECOR := ["Clouds", "Gulls", "Rabelos"]
 ## switch so it can be dropped without touching the resource.
 @export var use_sdfgi: bool = true
 @export var spawn_lamp_lights: bool = true
+@export var spawn_fill_lights: bool = true
+## Leave null to find the scene's shadow-casting DirectionalLight3D automatically.
+@export var sun: DirectionalLight3D
+## Fill energies, exposed because they are the two numbers most likely to want a
+## nudge once someone has actually looked at a frame. Ratios to the key (2.4):
+## sky fill is 19%, bounce is 9%.
+@export_range(0.0, 2.0, 0.01) var sky_fill_energy: float = 0.45
+@export_range(0.0, 2.0, 0.01) var bounce_energy: float = 0.22
 
 
 func _ready() -> void:
@@ -92,9 +179,11 @@ func _ready() -> void:
 
 	_apply_renderer_tier(env)
 
-	# Both of these read nodes that other _ready() calls have not made yet: the
-	# lamps come from BridgeArena (a parent, so it runs after this) and the decor
-	# from SkyBackground (this node's own parent). Defer past the whole pass.
+	# All of these read nodes that other _ready() calls have not made yet: the
+	# lamps come from BridgeArena (a parent, so it runs after this), the decor from
+	# SkyBackground (this node's own parent), and the sun is a sibling of the arena
+	# root. Defer past the whole pass.
+	_build_light_rig.call_deferred(env)
 	if spawn_lamp_lights:
 		_attach_lamp_lights.call_deferred()
 	if env.sdfgi_enabled:
@@ -118,21 +207,31 @@ func _apply_renderer_tier(env: Environment) -> void:
 	if method == "forward_plus":
 		if not use_sdfgi:
 			env.sdfgi_enabled = false
+			env.ambient_light_energy *= NO_SDFGI_AMBIENT_SCALE
 		return
 
-	# Everything below is Forward+ only; leaving it on just logs warnings.
+	_strip_forward_plus(env)
+	if method == "mobile":
+		env.ssao_enabled = false   # Mobile has no SSAO either; Compatibility does.
+		env.ambient_light_energy *= COMPAT_AMBIENT_SCALE
+		return
+	_tune_for_compatibility(env)
+
+
+## Drop everything Forward+ only and re-shape the depth fog to stand in for the
+## volumetric pass it just lost. Split out from the tier switch above so
+## _atmosphere_probe.gd can exercise it — headless always reports forward_plus, so
+## the fallback would otherwise never run anywhere it could be checked.
+func _strip_forward_plus(env: Environment) -> void:
 	env.ssr_enabled = false
 	env.ssil_enabled = false
 	env.sdfgi_enabled = false
 	env.volumetric_fog_enabled = false
+
 	env.fog_enabled = true
-	env.fog_density = minf(env.fog_density * COMPAT_FOG_DENSITY_SCALE, 1.0)
-
-	if method == "mobile":
-		env.ssao_enabled = false   # Mobile has no SSAO either; Compatibility does.
-		return
-
-	_tune_for_compatibility(env)
+	env.fog_depth_begin = COMPAT_FOG_BEGIN
+	env.fog_depth_curve = COMPAT_FOG_CURVE
+	env.fog_density = COMPAT_FOG_DENSITY
 
 
 func _tune_for_compatibility(env: Environment) -> void:
@@ -144,7 +243,95 @@ func _tune_for_compatibility(env: Environment) -> void:
 	env.set_glow_level(5, 0.0)
 	env.ambient_light_energy *= COMPAT_AMBIENT_SCALE
 	if env.sky != null:
-		env.sky.radiance_size = COMPAT_RADIANCE_SIZE
+		env.sky.radiance_size = mini(env.sky.radiance_size, COMPAT_RADIANCE_SIZE)
+
+
+# --- Key + fill --------------------------------------------------------------
+
+func _build_light_rig(env: Environment) -> void:
+	if sun == null:
+		sun = _find_sun()
+	if sun != null and env.volumetric_fog_enabled:
+		sun.light_volumetric_fog_energy = SUN_FOG_ENERGY
+	if spawn_fill_lights:
+		_spawn_fill_lights()
+
+
+## The brightest shadow-casting DirectionalLight3D in the scene. Matching on
+## "casts shadows" rather than on the node name is what keeps this from picking up
+## either of the fills below — they deliberately cast none — if it is ever re-run.
+##
+## Searched from the top of the tree rather than from get_tree().current_scene:
+## bridge_arena.tscn is instantiated into main.tscn, and anything that loads the
+## arena on its own (a probe, a test harness, a future level select) leaves
+## current_scene null or pointing somewhere else entirely, at which point the sun
+## is silently never found and the god rays silently never happen.
+func _find_sun() -> DirectionalLight3D:
+	var root: Node = self
+	while root.get_parent() != null:
+		root = root.get_parent()
+
+	var best: DirectionalLight3D = null
+	for light in _directional_lights(root):
+		if not light.shadow_enabled:
+			continue
+		if best == null or light.light_energy > best.light_energy:
+			best = light
+	if best == null:
+		push_warning("LightingRig: no shadow-casting DirectionalLight3D found; god rays will be flat.")
+	return best
+
+
+func _directional_lights(node: Node) -> Array[DirectionalLight3D]:
+	var found: Array[DirectionalLight3D] = []
+	if node == null:
+		return found
+	if node is DirectionalLight3D:
+		found.append(node as DirectionalLight3D)
+	for child in node.get_children():
+		found.append_array(_directional_lights(child))
+	return found
+
+
+func _spawn_fill_lights() -> void:
+	var holder := Node3D.new()
+	holder.name = "Fills"
+	add_child(holder)
+
+	_fill_light(holder, "SkyFill", SKY_FILL_DIR, SKY_FILL_COLOR, sky_fill_energy, Vector3.UP)
+	# The bounce points within 20 degrees of straight up, so Vector3.UP is a
+	# degenerate reference for the basis. Any horizontal axis will do — a
+	# directional light's roll about its own beam is unobservable.
+	_fill_light(holder, "WaterBounce", BOUNCE_DIR, BOUNCE_COLOR, bounce_energy, Vector3.BACK)
+
+
+func _fill_light(parent: Node3D, node_name: String, from_dir: Vector3, color: Color,
+		energy: float, up: Vector3) -> void:
+	if energy <= 0.0:
+		return
+	var light := DirectionalLight3D.new()
+	light.name = node_name
+	light.light_color = color
+	light.light_energy = energy
+	# A fill with its own specular lobe is two suns' worth of highlights on every
+	# iron member; these exist to raise diffuse values, nothing else.
+	light.light_specular = 0.0
+	light.shadow_enabled = false
+	# Both of these ARE the bounce. Letting SDFGI treat them as sources to bounce
+	# again is how a fake fill turns into a compounding wash.
+	light.light_bake_mode = Light3D.BAKE_DISABLED
+	# Uniform fill inside the fog is milk with no directional payoff, and the
+	# anisotropy that makes the sun's shafts read would work against it anyway.
+	light.light_volumetric_fog_energy = 0.0
+	# The single most important line in this function. LIGHT0 in porto_sky.gdshader
+	# is whichever directional light the renderer hands the sky first, and the sun
+	# disk, both scatter lobes and the whole anti-solar counter-glow are hung off
+	# it. LIGHT_ONLY keeps these two out of that list entirely.
+	light.sky_mode = DirectionalLight3D.SKY_MODE_LIGHT_ONLY
+	parent.add_child(light)
+
+	var dir := from_dir.normalized()
+	light.global_transform = Transform3D(Basis.looking_at(-dir, up), dir * FILL_DISTANCE)
 
 
 # --- Practical lamps ---------------------------------------------------------
@@ -161,6 +348,7 @@ func _attach_lamp_lights() -> void:
 		lamp.light_color = LAMP_COLOR
 		lamp.light_energy = LAMP_ENERGY
 		lamp.light_specular = LAMP_SPECULAR
+		lamp.light_volumetric_fog_energy = LAMP_FOG_ENERGY
 		lamp.omni_range = LAMP_RANGE
 		lamp.omni_attenuation = LAMP_ATTENUATION
 		# Five shadow-casting omnis cost far more than they read against a sky
