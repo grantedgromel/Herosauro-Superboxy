@@ -44,6 +44,14 @@ const RIBEIRA_WALLS := [
 	Color(0.55, 0.25, 0.21),  # red oxide
 ]
 ## Two tile ages rather than one, so a whole hillside of roofs is not one colour.
+## Gaia's lodges are limewashed, not painted: the far bank must read as a
+## different city from the Ribeira terraces facing it.
+const LODGE_WHITEWASH := [
+	Color(0.82, 0.79, 0.72),
+	Color(0.78, 0.75, 0.69),
+	Color(0.85, 0.82, 0.75),
+	Color(0.74, 0.72, 0.67),
+]
 const ROOF_COLORS := [Color(0.56, 0.28, 0.22), Color(0.48, 0.26, 0.21)]
 
 # Moored rabelo positions on the river (y is driven by the wave bob) and yaws.
@@ -58,7 +66,19 @@ var _gulls: Array[Node3D] = []
 var _gull_data: Array[Dictionary] = []
 
 
+const CityBackdropScene: PackedScene = preload("res://scenes/world/city_backdrop.tscn")
+
+
 func _ready() -> void:
+	# The photogrammetry scan of the real district, closing the far end of the
+	# gorge. Without it both banks stop dead in mid-air and the view opens onto
+	# empty ocean — and terrain_builder's BANK_Z_FAR, the 900x900 river plane and
+	# the lighting rig are all written assuming it is there.
+	#
+	# It self-gates: skipped on the Compatibility web tier, and guarded by
+	# ResourceLoader.exists() so a web export that strips the 38 MB asset still
+	# loads this scene.
+	add_child(CityBackdropScene.instantiate())
 	add_child(TerrainBuilder.build())
 	_build_city()
 	_build_landmarks()
@@ -117,27 +137,63 @@ func _spec_from_plot(plot: Dictionary, rng: RandomNumberGenerator) -> FacadeBuil
 	spec.lean = rng.randf_range(-0.022, 0.022)
 	spec.tilt = rng.randf_range(-0.012, 0.012)
 
-	# Lower terraces are the tall dense Ribeira frontage; the hill thins out and
-	# drops a storey or two as it climbs, which is what gives the bank its taper.
-	var floors := 5 - int(level / 2) + (1 if rng.randf() < 0.30 else 0)
-	spec.floors = clampi(floors, 2, 6)
-	spec.floor_height = rng.randf_range(2.75, 3.15)
-	spec.ground_height = rng.randf_range(3.2, 3.9)
-	spec.attic = rng.randf() < 0.35
-	spec.roof_pitch = rng.randf_range(0.38, 0.50)
-	spec.gable_front = rng.randf() < 0.28
+	# Gaia is not a second Ribeira, and building it as one was the single most
+	# wrong thing about the far bank — it is the one the player stares at for the
+	# whole fight. Its waterfront is port-wine lodges: long, low, whitewashed
+	# sheds with shallow terracotta roofs, not tall painted terraces. Only its
+	# upper levels are ordinary housing.
+	var gaia_waterfront := side == TerrainBuilder.GAIA and level <= 1
 
-	spec.wall_color = RIBEIRA_WALLS[rng.randi() % RIBEIRA_WALLS.size()]
+	if gaia_waterfront:
+		spec.floors = 1 + (1 if rng.randf() < 0.35 else 0)
+		spec.floor_height = rng.randf_range(3.4, 4.2)
+		spec.ground_height = rng.randf_range(3.8, 4.6)
+		spec.attic = false
+		spec.roof_pitch = rng.randf_range(0.20, 0.30)   # shallow shed pitch
+		spec.gable_front = false
+		spec.style = FacadeBuilder.Style.PLASTER
+		spec.wall_color = LODGE_WHITEWASH[rng.randi() % LODGE_WHITEWASH.size()]
+		spec.chimneys = 0
+		spec.string_courses = false
+		spec.lit_fraction = 0.04
+	else:
+		# The hill thins and drops a storey or two as it climbs, which is what
+		# gives the Ribeira bank its taper.
+		var floors := 5 - int(level / 2) + (1 if rng.randf() < 0.30 else 0)
+		spec.floors = clampi(floors, 2, 6)
+		spec.floor_height = rng.randf_range(2.75, 3.15)
+		spec.ground_height = rng.randf_range(3.2, 3.9)
+		spec.attic = rng.randf() < 0.35
+		spec.roof_pitch = rng.randf_range(0.38, 0.50)
+		spec.gable_front = rng.randf() < 0.28
+		spec.chimneys = 1 + (1 if rng.randf() < 0.35 else 0)
+		spec.lit_fraction = rng.randf_range(0.10, 0.28)
+
+		# Style FIRST, then a colour from that style's own palette. Picking the
+		# colour first meant every azulejo house came out ochre or terracotta —
+		# 50 of 59 tiled facades, and not one of them blue.
+		spec.style = FacadeBuilder.Style.AZULEJO if rng.randf() < 0.24 else FacadeBuilder.Style.PLASTER
+		if level >= 4 and rng.randf() < 0.30:
+			spec.style = FacadeBuilder.Style.GRANITE
+		match spec.style:
+			FacadeBuilder.Style.AZULEJO:
+				spec.wall_color = FacadeBuilder.AZULEJO_PALETTE[rng.randi() % FacadeBuilder.AZULEJO_PALETTE.size()]
+			FacadeBuilder.Style.GRANITE:
+				spec.wall_color = FacadeBuilder.GRANITE_PALETTE[rng.randi() % FacadeBuilder.GRANITE_PALETTE.size()]
+			_:
+				spec.wall_color = RIBEIRA_WALLS[rng.randi() % RIBEIRA_WALLS.size()]
+
 	spec.roof_color = ROOF_COLORS[rng.randi() % ROOF_COLORS.size()]
-	spec.style = FacadeBuilder.Style.AZULEJO if rng.randf() < 0.24 else FacadeBuilder.Style.PLASTER
-	if level >= 4 and rng.randf() < 0.30:
-		spec.style = FacadeBuilder.Style.GRANITE
 
 	# The waterfront level is the one the player can actually see into: give it
 	# shopfronts, arcades and washing. Higher up it is all silhouette.
 	if level == 0:
-		spec.ground = FacadeBuilder.Ground.ARCH if rng.randf() < 0.45 else FacadeBuilder.Ground.SHOPFRONT
-		spec.laundry = rng.randf() < 0.45 and side == TerrainBuilder.PORTO
+		if gaia_waterfront:
+			spec.ground = FacadeBuilder.Ground.SHOPFRONT   # lodge loading doors
+			spec.laundry = false
+		else:
+			spec.ground = FacadeBuilder.Ground.ARCH if rng.randf() < 0.45 else FacadeBuilder.Ground.SHOPFRONT
+			spec.laundry = rng.randf() < 0.45
 	else:
 		spec.ground = FacadeBuilder.Ground.DOOR
 		spec.laundry = false

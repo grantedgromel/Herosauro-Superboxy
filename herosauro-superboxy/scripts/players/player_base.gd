@@ -398,14 +398,28 @@ func _update_timers(delta: float) -> void:
 		_end_action_anim()
 
 
+## Blink the hero while invulnerable — but asymmetrically.
+##
+## This used to toggle visibility on a symmetric 0.1 s cycle, so across 1.5 s of
+## i-frames the hero was simply absent for half of them. Under the old fixed
+## camera that was a readable arcade blink; with a third-person camera locked to
+## him it means the protagonist disappears out of the frame he is the subject of,
+## and a scripted capture caught him missing in 2 of 10 gameplay frames.
+##
+## A 3:1 duty cycle still reads unmistakably as "I am invulnerable" while never
+## leaving the screen without a hero for more than a few frames.
+const FLICKER_ON := 0.09
+const FLICKER_OFF := 0.03
+
+
 func _handle_flicker(delta: float) -> void:
 	if _invuln > 0.0:
 		_invuln = max(0.0, _invuln - delta)
 		_flicker -= delta
-		if _flicker <= 0.0:
-			_flicker = 0.1
-			if _model_root:
-				_model_root.visible = not _model_root.visible
+		if _flicker <= 0.0 and _model_root:
+			var now_hidden := not _model_root.visible
+			_model_root.visible = now_hidden
+			_flicker = FLICKER_ON if now_hidden else FLICKER_OFF
 		if _invuln <= 0.0 and _model_root:
 			_model_root.visible = true
 	elif _model_root and not _model_root.visible:

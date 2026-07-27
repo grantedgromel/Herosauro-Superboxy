@@ -214,16 +214,19 @@ fog_enabled = true
 fog_mode = 1
 fog_light_color = Color(0.878, 0.706, 0.549, 1)
 fog_sun_scatter = 0.42
-; 0.72 veiled the whole frame: at that density the depth fog blended so far
-; toward the sky colour that the Douro rendered as pale sand and the far bank
-; nearly vanished. Aerial perspective needs a GRADIENT of haze, not a constant
-; one, so density comes down and the begin distance moves out past the deck.
-fog_density = 0.34
+; Density is not the milkiness dial -- RANGE is. Dropping density to 0.34 over a
+; 340 m range removed the veil but also removed aerial perspective entirely, and
+; left the river plane's far edge cutting a hard line across the frame with no
+; horizon. Full density over a 640 m range with a 0.9 curve restores the
+; gradient: the deck and hero (0-40 m) are untouched, the bridge ends barely
+; tinted, the far city visibly hazed, and the water reaches the horizon colour
+; before its geometry runs out -- so the edge stops being visible at all.
+fog_density = 1.0
 fog_aerial_perspective = 0.75
 fog_sky_affect = 0.0
-fog_depth_curve = 0.78
-fog_depth_begin = 55.0
-fog_depth_end = 340.0
+fog_depth_curve = 0.9
+fog_depth_begin = 40.0
+fog_depth_end = 640.0
 
 ; --- Volumetric fog: the god rays ---
 ; This exists for one shot: an 11.5 degree sun raking through the arch lattice.
