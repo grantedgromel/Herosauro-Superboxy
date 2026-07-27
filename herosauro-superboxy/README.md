@@ -1,101 +1,114 @@
 # Herosauro & Super Boxy: Legends of Porto
 
-A 3D local co-op action game built in **Godot 4.3** (GDScript), rebuilt from the
-original single-file Three.js / Cannon.js prototype into a clean, modular, polished
-indie-style project.
+A third-person action game built in **Godot 4.7**, set on the **Ponte de Dom Luís I**
+over the Douro in Porto. You play **Herosauro**, defending the bridge from
+**Adamastor**, the giant of Portuguese myth, while the sun sets over the Ribeira.
 
-Two pint-sized superheroes defend the **Dom Luís Bridge** over the Douro in Porto
-from **Adamastor**, a giant rocky stone golem, while the sun sets over the city.
+![engine](https://img.shields.io/badge/engine-Godot%204.7.1-blue) ![renderer](https://img.shields.io/badge/desktop-Forward%2B%20(PBR%2C%20GI%2C%20SSR)-green) ![web](https://img.shields.io/badge/web-GL%20Compatibility-orange)
 
-![toon style](https://img.shields.io/badge/style-toon%20cel--shaded-orange) ![engine](https://img.shields.io/badge/engine-Godot%204.3-blue) ![renderer](https://img.shields.io/badge/renderer-GL%20Compatibility%20(Web)-green)
+## Running it
 
-## Characters
+### Desktop — the quality build
 
-| | Hero | Player | Ability | Controls |
-|---|------|--------|---------|----------|
-| 🦖 | **Herosauro** (Rui) | P1 | **Dino Energy** — green energy projectile (50 dmg) | `WASD` move · `Shift` jump · `E` ability |
-| 🥊 | **Super Boxy** (Kiko) | P2 | **Boxy Dash** — gravity-defying lunge (25 dmg, combos) | `Arrows` move · `/` jump · `Space` ability |
+Forward+ gives the full lighting stack: HDR framebuffer, PBR materials, HDRI-style
+sky with image-based lighting, real-time GI (SDFGI), SSAO/SSIL/SSR, volumetric fog,
+soft shadows and AgX tone mapping.
 
-Gamepads are also mapped (P1 = device 0, P2 = device 1; left stick to move, South/West
-face buttons for jump/ability).
+1. Install **Godot 4.7.1** (standard build) — https://godotengine.org/download
+2. Open `project.godot` in the editor and press **F5**.
 
-**Boss — Adamastor:** patrols the bridge, periodically **slams** the ground (expanding
-shockwave) and **hurls rocks** at the nearest hero. At 50% health he enters **Phase 2**,
-turning red and attacking faster with double rock throws. Defeat him to win; if both
-heroes fall, Porto is lost.
-
-## Running the project
-
-1. Open Godot 4.3 (stable) and import this folder (`project.godot`).
-2. Press **F5** (or the Play button). The main scene is `scenes/main.tscn`.
-3. On the title screen, press **ENTER** to start. `ESC` pauses.
-
-## Exporting for Web (HTML5) — the primary target
-
-The project renders with the **GL Compatibility** backend so it runs in browsers via
-WebGL 2. A `Web` export preset is included (`export_presets.cfg`), and a **prebuilt,
-ready-to-host HTML5 build is committed under [`web/`](web/)** (no-threads variant, so it
-needs no special COOP/COEP headers and works on any static host, e.g. GitHub Pages).
+Headless, from a terminal:
 
 ```bash
-# Play the prebuilt version locally:
+godot --path . --rendering-driver vulkan
+```
+
+To export a standalone binary you need the matching export templates
+(*Editor → Manage Export Templates → Download*), then:
+
+```bash
+godot --headless --export-release "Linux"   build/linux/herosauro.x86_64
+godot --headless --export-release "Windows" build/windows/herosauro.exe
+```
+
+### Web — reduced-fidelity preview
+
+The browser build runs on **GL Compatibility** (WebGL 2). Godot cannot export
+Forward+ to the web — WebGPU is not implemented — and Compatibility renders 3D into
+an **LDR** framebuffer, so the web build has **no** SSR, GI, volumetric fog, TAA or
+depth of field. It keeps PBR materials, the HDRI sky, real shadows, SSAO, glow and
+tone mapping. The photogrammetry backdrop is skipped there for download size.
+
+```bash
+# Play the committed build:
 python3 -m http.server --directory web 8000   # then open http://localhost:8000
 ```
 
-To rebuild it yourself:
+A plain `file://` open will not work — wasm needs to be served over HTTP.
 
-```bash
-# One-time: install the matching export templates via the Godot editor
-#   Editor → Manage Export Templates → Download (4.3.stable)
-# Then export headlessly:
-mkdir -p build/web
-godot --headless --export-release "Web" build/web/index.html
-# Serve it (a plain file:// won't work for wasm):
-python3 -m http.server --directory build/web 8000
-# open http://localhost:8000
-```
+## Controls
+
+| Input | Action |
+|---|---|
+| `WASD` | Move (camera-relative) |
+| Mouse / right stick | Look |
+| `Space` | Jump |
+| `Shift` | Sprint |
+| `LMB` / `Q` | Attack |
+| `RMB` / `E` | Dino Energy special |
+| `Esc` | Pause / release mouse |
 
 ## Architecture
 
-Code-driven composition keeps every scene small and self-contained; `main.gd`
-assembles the world, camera, players, boss and UI at runtime. All cross-cutting
-events flow through the `GameManager` autoload's signals.
+Code-driven composition keeps scenes small; `main.gd` assembles world, camera, hero,
+props and boss at runtime, and everything cross-cutting flows through the
+`GameManager` autoload's signals.
 
 ```
 autoloads/
-  game_manager.gd     # state machine (MENU→PLAYING→PAUSED→VICTORY/DEFEAT), score,
-                      # combo, health, signals, hit-stop, screen-shake requests
-  input_manager.gd    # per-player Input Map abstraction
-  audio_manager.gd    # procedural SFX synthesised into AudioStreamWAV (no audio files)
+  game_manager.gd     # state machine, score, combo, health, hit-stop, shake requests
+  input_manager.gd    # input abstraction
+  audio_manager.gd    # procedural SFX synthesised at startup (no audio files)
 scripts/
-  toon_factory.gd     # builds consistent toon + outline ShaderMaterials
-  camera_rig.gd       # co-op follow camera, screen shake, victory zoom-out
-  main.gd             # root composition + UI state wiring + pause input
-  players/player_base.gd   # movement: coyote time, jump buffer, variable jump,
-                           # facing, i-frames, knockback, fall respawn, cooldowns
-  players/herosauro.gd · superboxy.gd
-  abilities/dino_energy.gd · boxy_dash.gd
-  boss/adamastor.gd · adamastor_state_machine.gd   # explicit IDLE/SLAM/ROCK/PHASE_TWO FSM
-  fx/shockwave.gd · rock_projectile.gd
-  world/bridge_arena.gd · sky_background.gd
-  ui/main_menu.gd · hud.gd · game_over.gd
+  toon_factory.gd     # PBR StandardMaterial3D factory, cached and shared
+  camera_rig.gd       # third-person SpringArm orbit camera with collision
+  players/            # CharacterBody3D hero, camera-relative movement, AnimationTree
+  boss/               # Adamastor + FSM, real hitboxes, physics corpse topple
+  props/              # Hitbox/Hurtbox components, rigid-body and breakable props
+  world/              # bridge geometry, Porto skyline, city backdrop, lighting rig
+  fx/ · abilities/ · ui/
 assets/
-  shaders/   toon.gdshader · toon_outline.gdshader · water_wave.gdshader
-  materials/ toon_player1/2 · toon_boss · toon_bridge (.tres)
+  environments/  porto_golden_hour.tres     # Environment + sky
+  textures/      procedural detail normal / roughness+AO maps (NoiseTexture2D)
+  shaders/       water_wave.gdshader
+  models/backdrop/   photogrammetry city scan (see ATTRIBUTION.md)
+tools/
+  shotrunner.{gd,tscn}   # headless screenshot harness, fixed vantage points
+  playtest.{gd,tscn}     # headless scripted playthrough
 ```
 
 ### Notable systems
-- **Toon look:** a cel-banded lighting shader plus an inverted-hull outline pass,
-  composed at runtime by `ToonFactory` so every procedurally-built mesh matches.
-- **Game feel:** hit-stop on boss hits, screen shake on slams, white hit-flash,
-  1.5 s invulnerability with mesh flicker, knockback impulses.
-- **Procedural audio:** every sound effect (jumps, hits, slams, fanfares) is
-  synthesised from sine/noise envelopes at startup — no audio assets shipped.
-- **Procedural world:** the bridge arch, railings, Porto skyline and drifting clouds
-  are generated in code; the Douro ripples via a vertex + UV-scroll water shader.
+
+- **Materials:** one cached factory builds every procedural material, so dozens of
+  Ribeira facades in seven palette colours collapse onto seven materials. Detail
+  normal/roughness maps are generated as `NoiseTexture2D` — no binary texture assets.
+- **Water:** the Douro's normals are derived analytically from the summed sine
+  derivatives, with a Fresnel depth blend, whitecaps and a sun-glint lobe.
+- **Renderer-aware lighting:** one Environment authors both tiers; a runtime rig
+  strips the Forward+-only effects when running on Compatibility.
+- **Procedural audio:** every sound is synthesised from sine/noise envelopes at
+  startup — no audio assets ship.
+
+## Third-party assets
+
+The city backdrop is **CC BY 4.0** by **Eduardo Soethe**
+([Sketchfab](https://sketchfab.com/3d-models/ponte-de-d-luis-portoportugal-2551868c712942729abe8e5bd6cc318c)).
+Full attribution and the list of modifications: `assets/models/backdrop/ATTRIBUTION.md`.
+
+Character and boss models were generated with Meshy.
 
 ## Tuning
 
-Most gameplay values are `@export`ed (player speeds/jump, ability damage/cooldowns,
-boss attack timings) or are named constants near the top of each script, so they are
-easy to tweak in the Inspector or in code.
+Most gameplay values are `@export`ed (movement, camera distances and sensitivity,
+ability damage/cooldowns, boss timings) or are named constants at the top of each
+script.
