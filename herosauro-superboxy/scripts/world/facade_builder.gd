@@ -94,7 +94,15 @@ const ARCHITRAVE_BAND := 0.13     ## width of the white stone surround
 const ARCHITRAVE_PROUD := 0.055   ## how far that surround stands off the wall
 const SILL_PROJECT := 0.20
 const CORNICE_PROUD := 0.23
-const EAVE_OVERHANG := 0.26
+## Roof overhang towards the street and the back. Generous, because the shadow a
+## deep eave throws across the top of a facade is half of what makes the building
+## look like it has a roof rather than a lid.
+const EAVE_OVERHANG := 0.42
+## Roof and cornice overhang sideways, where the neighbour is. Nearly nothing:
+## houses in a terrace stand 5 cm apart, so anything generous here drives a
+## terracotta wedge straight through the wall of the house next door. Eaves are a
+## front-elevation feature; a gable end abuts the party wall and stops.
+const PARTY_OVERHANG := 0.06
 const PLINTH_PROUD := 0.05
 const BALCONY_PROJECT := 0.42
 const JULIET_PROJECT := 0.11
@@ -215,7 +223,10 @@ class Spec extends RefCounted:
 	## again — deliberately excluded, because what a caller wants this for is
 	## "will this building hide the one behind it", and a 40 cm chimney does not.
 	func total_height() -> float:
-		var across := (width if gable_front else depth) + EAVE_OVERHANG * 2.0
+		# The span the pitch has to climb: across the depth normally, across the
+		# width when the ridge has been turned to face the street.
+		var across := (width + PARTY_OVERHANG * 2.0) if gable_front \
+				else (depth + EAVE_OVERHANG * 2.0)
 		return wall_height() + 0.32 + across * 0.5 * tan(roof_pitch)
 
 
@@ -431,18 +442,23 @@ static func _assemble(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> v
 	# String courses: a moulded band on the floor lines. They read as the
 	# horizontal rhythm that a plain box has none of, and because neighbours have
 	# different storey heights the bands never line up across a terrace.
+	#
+	# Like the cornice below, these are held to PARTY_OVERHANG sideways. A
+	# moulding that projects into the gap between houses either merges with the
+	# neighbour's — fine — or pokes out through the wall of a taller one, which
+	# is not.
 	if spec.string_courses and detailed:
 		for f in range(1, spec.floors):
 			Geo.box(trim_b, base, 0.0, lines[f], 0.0,
-					spec.width + 0.11, 0.10, spec.depth + 0.11)
+					spec.width + PARTY_OVERHANG, 0.10, spec.depth + 0.11)
 
 	# Cornice: the deep overhang at the top, plus a thinner fascia under it. The
 	# whole job of this pair is to cast one hard shadow line across the facade.
 	Geo.box(trim_b, base, 0.0, wall_h + 0.16, 0.0,
-			spec.width + CORNICE_PROUD * 2.0, 0.32, spec.depth + CORNICE_PROUD * 2.0)
+			spec.width + PARTY_OVERHANG * 2.0, 0.32, spec.depth + CORNICE_PROUD * 2.0)
 	if detailed:
 		Geo.box(trim_b, base, 0.0, wall_h - 0.07, 0.0,
-				spec.width + 0.12, 0.14, spec.depth + 0.12)
+				spec.width + PARTY_OVERHANG, 0.14, spec.depth + 0.12)
 
 	_emit_roof(batch, base, spec, rng, wall_h)
 
@@ -810,8 +826,14 @@ static func _emit_roof(batch: Batch, base: Transform3D, spec: Spec, rng: RandomN
 	var rf := base.translated_local(Vector3(0.0, wall_h + 0.32, 0.0))
 	if spec.gable_front:
 		rf = rf.rotated_local(Vector3.UP, PI * 0.5)
-	var along := (spec.depth if spec.gable_front else spec.width) + EAVE_OVERHANG * 2.0
-	var across := (spec.width if spec.gable_front else spec.depth) + EAVE_OVERHANG * 2.0
+	# Overhangs are chosen per *building* axis, not per roof axis: sideways is
+	# always the party wall and always tight, front-to-back is always open air and
+	# always generous — and turning the ridge to face the street swaps which of
+	# those the roof's own length and width correspond to.
+	var x_span := spec.width + PARTY_OVERHANG * 2.0
+	var z_span := spec.depth + EAVE_OVERHANG * 2.0
+	var along := z_span if spec.gable_front else x_span
+	var across := x_span if spec.gable_front else z_span
 	var ridge_h := across * 0.5 * tan(spec.roof_pitch)
 
 	var tile_b := batch.baker(Batch.roof(spec.roof_color))
@@ -834,12 +856,16 @@ static func _emit_roof(batch: Batch, base: Transform3D, spec: Spec, rng: RandomN
 		var ribs := clampi(int(along / 0.33), 4, 20)
 		for sz: float in [1.0, -1.0]:
 			_emit_pantiles(tile_b, rf, along, hd, ridge_h, sz, ribs)
-		# Half-round ridge cap, uncapped because its underside is buried.
-		Geo.cylinder_x(tile_b, rf, 0.0, ridge_h - 0.02, 0.0, 0.12, along + 0.06, 6, false)
+		# Half-round ridge cap, uncapped because its underside is buried. Flush
+		# with the gable ends rather than proud of them: when the ridge runs along
+		# the terrace, anything longer than the roof reaches into next door.
+		Geo.cylinder_x(tile_b, rf, 0.0, ridge_h - 0.02, 0.0, 0.12, along, 6, false)
 		# Eave lip, closing the open bottom edge of the slopes and throwing a
-		# shadow onto the cornice below.
+		# shadow onto the cornice below. Tucked *inside* the eave line — centring
+		# it on the edge would hang half its thickness out over the drop.
+		const LIP := 0.14
 		for sz: float in [1.0, -1.0]:
-			Geo.box(tile_b, rf, 0.0, -0.045, hd * sz, along + 0.04, 0.11, 0.14)
+			Geo.box(tile_b, rf, 0.0, -0.045, (hd - LIP * 0.5) * sz, along, 0.11, LIP)
 
 	# The gable ends. MeshBaker's roof prism does not close these correctly, and
 	# emitting them here means the street-facing one can be plaster rather than

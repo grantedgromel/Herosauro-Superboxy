@@ -264,6 +264,39 @@ func _check_bounds() -> void:
 			"size = %s" % aabb.size)
 	node.free()
 
+	# The one that actually matters for a terrace: nothing may reach sideways
+	# past the party wall, or a roof or a cornice grows out of the neighbour.
+	for gable_front in [false, true]:
+		var rng2 := RandomNumberGenerator.new()
+		rng2.seed = 606
+		var s := FB.random_spec(rng2, 12.0, 16.0)
+		s.width = 4.0
+		s.depth = 6.5
+		s.gable_front = gable_front
+		s.lean = 0.0
+		s.tilt = 0.0
+		s.yaw = 0.0
+		s.side = 0
+		var batch := Batch.new()
+		FB.add_to_batch(batch, s, rng2)
+		var n := batch.commit("Plot")
+		var box := AABB()
+		var f := true
+		for child in n.get_children():
+			var b := (child as MeshInstance3D).mesh.get_aabb()
+			box = b if f else box.merge(b)
+			f = false
+		# Slack for the pantile relief: a crest stands 5 cm off the slope, and at
+		# the verge a couple of centimetres of that lands sideways. Verge tiles do
+		# stand proud in life, so this is geometry, not error.
+		var allowed := s.width + FacadeBuilder.PARTY_OVERHANG * 2.0 + 0.05
+		_expect("nothing overhangs the party wall (gable_front=%s)" % gable_front,
+				box.size.x <= allowed,
+				"x span %.3f, allowed %.3f" % [box.size.x, allowed])
+		print("  x %.2f (plot %.2f)   z %.2f (plot %.2f, eaves both sides)" % [
+			box.size.x, s.width, box.size.z, s.depth])
+		n.free()
+
 
 # --- Ground floor ------------------------------------------------------------
 # A door, a shopfront and an arch each carry dressings above the opening. Those
