@@ -23,8 +23,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GODOT_VERSION: "4.3"
-  GODOT_RELEASE: "4.3-stable"
+  GODOT_VERSION: "4.7.1"
+  GODOT_RELEASE: "4.7.1-stable"
   PROJECT_DIR: herosauro-superboxy
   EXPORT_PRESET: "Web"
 
