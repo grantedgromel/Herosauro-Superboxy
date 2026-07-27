@@ -1,130 +1,280 @@
+class_name CameraRig
 extends Node3D
-## CameraRig: a dynamic "action zoom" camera (à la Smash Bros / Streets of Rage 4).
+## CameraRig: the solo third-person orbit camera.
 ##
-## It frames the two heroes close and large by default, then smoothly folds the
-## boss into the shot as the giant engages or telegraphs an attack — punching in
-## tight during melee and easing out when players spread or a big move winds up,
-## so nobody ever leaves the frame. Also handles screen shake and the victory
-## pull-out. Distance is derived from how spread-out the framed subjects are, then
-## clamped, so characters stay readable at both extremes.
+## A damped pivot that chases the hero, carrying a yaw/pitch gimbal and a
+## SpringArm3D. The arm sweeps a sphere backwards through the world layer, so the
+## camera snaps in whenever the deck, a rail wall or a truss would come between it
+## and the hero, then eases back out once the way is clear. Also owns pointer
+## capture, screen shake and the victory pull-out.
+##
+## Node layout (built in _ready, so main.gd only has to `CameraRig.new()`):
+##   CameraRig        - damped to the hero's position, plus the shake offset
+##   └ Yaw            - rotation.y = orbit yaw
+##     └ Pitch        - shoulder + eye-height offset, rotation.x = orbit pitch
+##       └ Arm        - SpringArm3D; shortens on contact
+##         └ Camera3D - the active camera; carries only the shake roll
 
-@export var follow_speed: float = 4.0
-@export var fov: float = 45.0             # telephoto magnification -> heroes read large, faces visible
-@export var height: float = 4.0           # low, in among the heroes (kept above the y4 near rail so it never occludes)
-@export var look_offset_x: float = -2.0
-@export var look_height: float = 2.0      # eyeline target above the focus (chest height)
+# --- Framing ---------------------------------------------------------------
 
-@export var min_distance: float = 4.5     # extreme close-up: a hero nearly fills the frame
-@export var max_distance: float = 13.0    # hard cap: even a big spread / boss can't pull the heroes small
-@export var close_pad: float = 1.0        # breathing room added to the fitted distance
-@export var player_pad: float = 1.6       # hug the heroes (they sit large, near the edges)
-@export var boss_pad: float = 2.5         # the giant's body extent (it's allowed to crop)
-@export var boss_attack_pad: float = 3.0  # modest reveal while the boss winds up an attack
-@export var boss_near: float = 7.0        # boss only folds in when it's right on top of a hero
-@export var boss_far: float = 16.0        # boss ignored beyond this -> heroes stay tight
-@export var boss_focus_bias: float = 0.2  # keep the focus on the heroes, not the giant
+@export var fov: float = 62.0                  # wide enough to read the giant without fisheye
+@export var distance: float = 5.6              # spring length with nothing in the way
+@export var eye_height: float = 1.15           # pivot above the hero's origin (~just over the head)
+@export var shoulder_offset: float = 0.7       # slide the pivot right so the hero sits left of centre
+@export var probe_radius: float = 0.3          # sphere the arm sweeps: corners can't pop through it
+@export var probe_margin: float = 0.14         # standoff from whatever the arm hit
+## World geometry only. The giant deliberately stays out of this mask: letting a
+## 9u boss shove the camera makes the shot unreadable exactly when it matters.
+@export_flags_3d_physics var probe_mask: int = 1
 
+# --- Feel ------------------------------------------------------------------
+
+@export var follow_lambda: float = 16.0        # exponential follow rate (framerate independent)
+@export var extend_lambda: float = 7.0         # how fast the arm eases back out after an obstruction
+@export var mouse_sensitivity: float = 0.0023  # radians per pixel of mouse motion
+@export var stick_sensitivity: float = 2.9     # radians/second at full right-stick deflection
+@export var invert_pitch: bool = false
+@export var min_pitch_deg: float = -58.0       # high and looking down at the hero
+@export var max_pitch_deg: float = 26.0        # low and looking up past him at the giant
+@export var start_pitch_deg: float = -11.0
+
+# --- Victory / shake -------------------------------------------------------
+
+@export var victory_pullout: float = 9.0       # extra spring length for the winning pose
+@export var shake_roll: float = 0.45           # radians of camera roll per unit of shake strength
+
+const SHAKE_SEED := 0x5CA1E   # fixed so a given fight shakes identically every run
+
+## Hero the rig frames. main.gd assigns it before adding the rig to the tree;
+## if it ever goes stale we fall back to the first node in the "players" group.
+var target: Node3D = null
 var camera: Camera3D
-var _last_focus: Vector3 = Vector3(0.0, 2.0, 0.0)
+
+var _yaw_node: Node3D
+var _pitch_node: Node3D
+var _arm: SpringArm3D
+
+var _yaw: float = 0.0
+var _pitch: float = 0.0
+var _focus: Vector3 = Vector3(0.0, 2.0, 0.0)
+var _arm_length: float = 0.0
+var _dist_extra: float = 0.0
+var _dist_extra_target: float = 0.0
+var _look_accum: Vector2 = Vector2.ZERO   # mouse motion banked between physics ticks
+
 var _shake_strength: float = 0.0
 var _shake_time: float = 0.0
 var _shake_total: float = 0.0
-var _extra_zoom: float = 0.0
+var _shake_offset: Vector3 = Vector3.ZERO
+var _shake_roll: float = 0.0
+var _rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
 	add_to_group("camera_rig")
-	camera = get_node_or_null("Camera3D")
-	if camera == null:
-		camera = Camera3D.new()
-		camera.name = "Camera3D"
-		add_child(camera)
-	camera.fov = fov
-	camera.current = true
+	_rng.seed = SHAKE_SEED
+	_build_nodes()
+	_pitch = deg_to_rad(start_pitch_deg)
+	_arm_length = distance
+	_snap_to_target()
+
 	GameManager.camera_shake_requested.connect(_on_shake_requested)
 	GameManager.game_over.connect(_on_game_over)
-	GameManager.game_started.connect(func() -> void: _extra_zoom = 0.0)
+	GameManager.game_started.connect(_on_game_started)
+	GameManager.state_changed.connect(_on_state_changed)
+	_apply_mouse_mode()
 
 
-func _process(delta: float) -> void:
-	var players := get_tree().get_nodes_in_group("players")
-	var focus := _focus_point(players)
+func _exit_tree() -> void:
+	# The rig is torn down with the world; never leave the pointer trapped.
+	_set_mouse_captured(false)
 
-	# How much the boss is part of the shot right now: 0 when far/idle (frame just
-	# the heroes, tight), ramping to 1 as it closes in, and forced to 1 while it
-	# winds up an attack (so the telegraph / AoE is on screen).
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_set_mouse_captured(false)
+
+
+# --- Per-tick update -------------------------------------------------------
+
+## Runs on the physics tick, not the frame: SpringArm3D resolves its cast during
+## internal physics processing, so driving the pivot from _process would leave the
+## camera position and the arm a full tick out of step with each other.
+func _physics_process(delta: float) -> void:
+	var hero := _resolve_target()
+
+	_apply_look(delta)
+	_update_shake(delta)
+
+	if hero:
+		_focus = _focus.lerp(hero.global_position, _damp(follow_lambda, delta))
+	global_position = _focus + _shake_offset
+
+	_yaw_node.rotation.y = _yaw
+	_pitch_node.rotation.x = _pitch
+	_pitch_node.position = Vector3(shoulder_offset, eye_height, 0.0)
+
+	_dist_extra = lerpf(_dist_extra, _dist_extra_target, _damp(extend_lambda, delta))
+	_update_arm(delta)
+
+	# Applied here rather than as a position offset: SpringArm3D overwrites the
+	# origin of every direct child each tick, so a translated Camera3D is wiped.
+	camera.rotation = Vector3(0.0, 0.0, _shake_roll)
+
+
+## Pull in the instant something blocks the shot, ease back out once it clears.
+## `hit` is last tick's resolved length; 0 means the arm has not cast yet.
+func _update_arm(delta: float) -> void:
+	var want := distance + _dist_extra
+	var hit := _arm.get_hit_length()
+	if hit > 0.001 and hit < _arm.spring_length - 0.001:
+		_arm_length = hit          # obstruction: no easing, or the camera clips through it
+	else:
+		_arm_length = lerpf(_arm_length, want, _damp(extend_lambda, delta))
+	_arm.spring_length = clampf(_arm_length, probe_radius + probe_margin, want)
+	_arm_length = _arm.spring_length
+
+
+func _apply_look(delta: float) -> void:
+	# Both sources arrive as (+x = turn right, +y = look up).
+	var look := InputManager.get_look_vector() * stick_sensitivity * delta
+	look += _look_accum * mouse_sensitivity
+	_look_accum = Vector2.ZERO
+
+	_yaw -= look.x
+	_yaw = wrapf(_yaw, -PI, PI)
+	_pitch += -look.y if invert_pitch else look.y
+	_pitch = clampf(_pitch, deg_to_rad(min_pitch_deg), deg_to_rad(max_pitch_deg))
+
+
+func _update_shake(delta: float) -> void:
+	if _shake_time <= 0.0:
+		_shake_offset = Vector3.ZERO
+		_shake_roll = 0.0
+		_shake_strength = 0.0
+		return
+	_shake_time = maxf(0.0, _shake_time - delta)
+	var k: float = _shake_strength * (_shake_time / maxf(0.0001, _shake_total))
+	_shake_offset = Vector3(_rng.randf_range(-k, k), _rng.randf_range(-k, k), _rng.randf_range(-k, k))
+	_shake_roll = _rng.randf_range(-k, k) * shake_roll
+
+
+# --- Targeting -------------------------------------------------------------
+
+func _resolve_target() -> Node3D:
+	if target and is_instance_valid(target):
+		return target
+	target = get_tree().get_first_node_in_group("players") as Node3D
+	return target
+
+
+## Jump straight to the framing we want at the start of a fight: sat behind the
+## hero, looking down the line towards the giant.
+func _snap_to_target() -> void:
+	var hero := _resolve_target()
+	if hero:
+		_focus = hero.global_position
+	var aim := Vector3(1.0, 0.0, 0.0)   # the bridge runs along X; the giant waits at +X
 	var boss := get_tree().get_first_node_in_group("boss")
-	var boss_pos := focus
-	var bw := 0.0
-	var boss_attacking := false
-	if boss and is_instance_valid(boss):
-		boss_pos = (boss as Node3D).global_position
-		bw = clampf(inverse_lerp(boss_far, boss_near, _nearest_player_dist(players, boss_pos)), 0.0, 1.0)
-		boss_attacking = boss.has_method("is_attacking") and boss.is_attacking()
-		if boss_attacking:
-			bw = 1.0
-		focus = focus.lerp(boss_pos, boss_focus_bias * bw)
-
-	# Distance needed to fit the framed subjects horizontally, with padding.
-	var tan_h: float = maxf(0.001, tan(deg_to_rad(fov * 0.5)) * _aspect())
-	var radius := 0.0
-	for p in players:
-		radius = maxf(radius, _h_dist(focus, (p as Node3D).global_position) + player_pad)
-	if boss and is_instance_valid(boss):
-		var bpad := boss_pad + (boss_attack_pad if boss_attacking else 0.0)
-		# Scaled by bw so the boss only stretches the frame as it becomes relevant.
-		radius = maxf(radius, (_h_dist(focus, boss_pos) + bpad) * bw)
-
-	var dist := clampf(radius / tan_h + close_pad, min_distance, max_distance) + _extra_zoom
-
-	var target := focus + Vector3(look_offset_x, height + _extra_zoom * 0.4, dist)
-	global_position = global_position.lerp(target, clamp(follow_speed * delta, 0.0, 1.0))
-
-	var shake_off := Vector3.ZERO
-	if _shake_time > 0.0:
-		_shake_time -= delta
-		var k: float = _shake_strength * (_shake_time / max(0.0001, _shake_total))
-		shake_off = Vector3(randf_range(-k, k), randf_range(-k, k), 0.0)
-	camera.position = shake_off
-	camera.look_at(focus + Vector3(0.0, look_height, 0.0), Vector3.UP)
+	if hero and boss and is_instance_valid(boss):
+		var to: Vector3 = (boss as Node3D).global_position - hero.global_position
+		to.y = 0.0
+		if to.length() > 0.5:
+			aim = to.normalized()
+	_yaw = atan2(-aim.x, -aim.z)
+	_pitch = deg_to_rad(start_pitch_deg)
+	_arm_length = distance
+	global_position = _focus
 
 
-func _focus_point(players: Array) -> Vector3:
-	if players.is_empty():
-		return _last_focus
-	var sum := Vector3.ZERO
-	for p in players:
-		sum += (p as Node3D).global_position
-	_last_focus = sum / float(players.size())
-	return _last_focus
+# --- Mouse capture ---------------------------------------------------------
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			var motion := event as InputEventMouseMotion
+			# Screen-space Y grows downward; flip it so +y always means "look up".
+			_look_accum += Vector2(motion.relative.x, -motion.relative.y)
+	elif event is InputEventMouseButton and (event as InputEventMouseButton).pressed:
+		# Re-grab after an alt-tab (and on web, where the lock needs a user gesture).
+		_apply_mouse_mode()
+	elif event.is_action_pressed("ui_cancel"):
+		# main.gd pauses on the same key; hand the pointer back for the overlay.
+		_set_mouse_captured(false)
 
 
-func _nearest_player_dist(players: Array, pos: Vector3) -> float:
-	var best := INF
-	for p in players:
-		best = minf(best, _h_dist(pos, (p as Node3D).global_position))
-	return best if best != INF else 0.0
+func _apply_mouse_mode() -> void:
+	_set_mouse_captured(GameManager.state == GameManager.State.PLAYING)
 
 
-func _h_dist(a: Vector3, b: Vector3) -> float:
-	return Vector2(a.x - b.x, a.z - b.z).length()
+func _set_mouse_captured(captured: bool) -> void:
+	if not DisplayServer.has_feature(DisplayServer.FEATURE_MOUSE):
+		return   # headless / CI: there is no pointer to capture
+	var want := Input.MOUSE_MODE_CAPTURED if captured else Input.MOUSE_MODE_VISIBLE
+	if Input.mouse_mode != want:
+		Input.mouse_mode = want
 
 
-func _aspect() -> float:
-	var vp := get_viewport()
-	if vp:
-		var s := vp.get_visible_rect().size
-		if s.y > 0.0:
-			return s.x / s.y
-	return 16.0 / 9.0
+# --- GameManager hooks -----------------------------------------------------
+
+func _on_state_changed(_new_state: int) -> void:
+	_apply_mouse_mode()
 
 
 func _on_shake_requested(strength: float, duration: float) -> void:
-	_shake_strength = max(_shake_strength, strength)
+	_shake_strength = maxf(_shake_strength, strength)
 	_shake_time = duration
 	_shake_total = duration
 
 
 func _on_game_over(victory: bool) -> void:
 	if victory:
-		_extra_zoom = 14.0
+		_dist_extra_target = victory_pullout
+
+
+func _on_game_started() -> void:
+	_dist_extra = 0.0
+	_dist_extra_target = 0.0
+	_shake_time = 0.0
+	_look_accum = Vector2.ZERO
+	_snap_to_target()
+
+
+# --- Construction ----------------------------------------------------------
+
+func _build_nodes() -> void:
+	_yaw_node = Node3D.new()
+	_yaw_node.name = "Yaw"
+	add_child(_yaw_node)
+
+	_pitch_node = Node3D.new()
+	_pitch_node.name = "Pitch"
+	_yaw_node.add_child(_pitch_node)
+
+	var probe := SphereShape3D.new()
+	probe.radius = probe_radius
+
+	_arm = SpringArm3D.new()
+	_arm.name = "Arm"
+	_arm.shape = probe
+	_arm.margin = probe_margin
+	_arm.collision_mask = probe_mask
+	_arm.spring_length = distance
+	_pitch_node.add_child(_arm)
+
+	camera = get_node_or_null("Camera3D")
+	if camera == null:
+		camera = Camera3D.new()
+		camera.name = "Camera3D"
+	elif camera.get_parent():
+		camera.get_parent().remove_child(camera)
+	_arm.add_child(camera)
+	camera.fov = fov
+	camera.current = true
+
+
+# --- Helpers ---------------------------------------------------------------
+
+## Framerate-independent lerp weight for an exponential decay of rate `lambda`.
+func _damp(lambda: float, delta: float) -> float:
+	return 1.0 - exp(-lambda * delta)

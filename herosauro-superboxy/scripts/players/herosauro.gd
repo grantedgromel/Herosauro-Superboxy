@@ -1,17 +1,17 @@
 extends PlayerBase
-## Herosauro (Player 1): the green dino-suit hero. Taller, older brother to
-## Super Boxy. His signature move is the Dino Energy projectile — he summons a
-## green T-Rex spectrum to charge Adamastor, hadouken-style.
+## Herosauro: the green dino-suit hero and the one hero you play. His signature
+## move is the Dino Energy projectile — he summons a green T-Rex spectrum to
+## charge Adamastor, hadouken-style, down whatever line the camera is aiming.
 ##
-## Visual is a Meshy-generated, RIGGED + ANIMATED glTF (walk / run / cast),
-## driven by PlayerBase's animation driver.
+## Visual is a Meshy-generated, RIGGED + ANIMATED glTF (walk / run / cast / jab),
+## driven by PlayerBase's AnimationTree.
 
 const DinoEnergyScene: PackedScene = preload("res://scenes/fx/dino_energy.tscn")
 const HerosauroModel: PackedScene = preload("res://assets/models/herosauro.glb")
 
-const MODEL_YAW := PI / 2.0     # model faces +Z; player faces +X
+const MODEL_YAW := PI / 2.0     # model faces +Z; body yaw 0 faces +X (PlayerBase._face_movement)
 const MODEL_SCALE := 1.0        # rigged model ~2u tall
-const MODEL_Y := -1.0           # drop feet to the bottom of the 2.0u collision box
+const MODEL_Y := -1.0           # drop feet to the bottom of the 2.0u collision capsule
 
 
 func _ready() -> void:
@@ -33,9 +33,14 @@ func _build_visuals() -> void:
 	model.scale = Vector3.ONE * MODEL_SCALE
 	model.position.y = MODEL_Y
 	_model_root.add_child(model)
+	# The GLB ships albedo only — no normal/roughness/metallic. Give it sane PBR
+	# response and a normal map derived from the albedo so it isn't a flat decal
+	# under Forward+ lighting.
+	ToonFactory.upgrade_glb_materials(model)
 	# "jab" matches the model's jab clip (the "Right Jab From Guard" animation);
 	# "cast" is the Dino Energy summon. Substring match, so full names also resolve.
-	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "cast", "attack": "jab"})
+	# No "idle" key: the art has none, so PlayerBase synthesizes one from "walk".
+	bind_animations(model, {"walk": "walk", "run": "run", "ability": "cast", "attack": "jab"})
 
 
 func _perform_ability() -> void:

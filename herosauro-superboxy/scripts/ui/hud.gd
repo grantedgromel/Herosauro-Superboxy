@@ -1,7 +1,13 @@
 extends Control
-## In-game HUD — health (P1 left, P2 right, boss centre), ability cooldowns,
-## score, fight timer, combo, i-frame indicators and pause overlay. Restyled
+## In-game HUD — hero health (left), boss health (centre), ability cooldown,
+## score, fight timer, combo, i-frame indicator and pause overlay. Restyled
 ## with the shared UIStyle for a clean, professional look.
+##
+## The game is single-hero, so the second-hero cluster is built but hidden; flip
+## SHOW_SECOND_HERO to bring it back for a co-op mode.
+
+## Whether to show the second hero's health bar, i-frame pip and dash cooldown.
+const SHOW_SECOND_HERO := false
 
 var _p1_bar: ProgressBar
 var _p2_bar: ProgressBar
@@ -15,8 +21,18 @@ var _dino_lbl: Label
 var _dash_lbl: Label
 var _p1_shield: Label
 var _p2_shield: Label
+var _p2_label: Label
 var _pause: Control
 var _pulse: float = 0.0
+
+
+## Show or hide every widget that only makes sense with a second hero.
+func _set_second_hero_visible(shown: bool) -> void:
+	for n in [_p2_label, _p2_bar, _dash_lbl, _dash_bar]:
+		if n:
+			(n as CanvasItem).visible = shown
+	if _p2_shield:
+		_p2_shield.visible = false
 
 
 func _ready() -> void:
@@ -30,7 +46,10 @@ func _ready() -> void:
 		Control.PRESET_TOP_LEFT, Vector2(28, 62), Vector2(200, 16))
 	_p1_shield.visible = false
 
-	_place(UIStyle.label("SUPER BOXY", 17, UIStyle.P2.lightened(0.2), true, HORIZONTAL_ALIGNMENT_RIGHT),
+	# Second-hero cluster. The game ships single-hero, so these are built but
+	# hidden — nothing drives them. Kept (rather than deleted) so a co-op mode
+	# only has to flip _show_second_hero back on.
+	_p2_label = _place(UIStyle.label("SUPER BOXY", 17, UIStyle.P2.lightened(0.2), true, HORIZONTAL_ALIGNMENT_RIGHT),
 		Control.PRESET_TOP_RIGHT, Vector2(-326, 14), Vector2(300, 22))
 	_p2_bar = _place(UIStyle.bar(UIStyle.P2), Control.PRESET_TOP_RIGHT, Vector2(-326, 40), Vector2(300, 20))
 	_p2_shield = _place(UIStyle.label("INVINCIBLE ◆", 13, UIStyle.GOLD, true, HORIZONTAL_ALIGNMENT_RIGHT),
@@ -58,6 +77,8 @@ func _ready() -> void:
 		Control.PRESET_BOTTOM_RIGHT, Vector2(-256, -64), Vector2(240, 20))
 	_dash_bar = _place(UIStyle.bar(UIStyle.GOLD), Control.PRESET_BOTTOM_RIGHT, Vector2(-256, -42), Vector2(230, 16))
 
+	_set_second_hero_visible(SHOW_SECOND_HERO)
+
 	_build_pause()
 
 	GameManager.player_damaged.connect(_on_player_damaged)
@@ -80,7 +101,7 @@ func _process(delta: float) -> void:
 			_dino_bar.value = frac
 			_dino_lbl.modulate = Color.WHITE if frac >= 100.0 else Color(1, 1, 1, 0.6)
 			_set_shield(_p1_shield, inv)
-		else:
+		elif SHOW_SECOND_HERO:
 			_dash_bar.value = frac
 			_dash_lbl.modulate = Color.WHITE if frac >= 100.0 else Color(1, 1, 1, 0.6)
 			_set_shield(_p2_shield, inv)
@@ -106,8 +127,9 @@ func _on_score_changed(new_score: int) -> void:
 	_score.text = "SCORE  %d" % new_score
 
 
-func _on_combo_changed(player_id: int, combo: int) -> void:
-	if player_id == 2 and combo >= 2:
+func _on_combo_changed(_player_id: int, combo: int) -> void:
+	# Any hero's combo counts now that the game is single-hero.
+	if combo >= 2:
 		_combo.text = "%d×  COMBO!" % combo
 		_combo.pivot_offset = _combo.size * 0.5
 		_combo.scale = Vector2(1.35, 1.35)

@@ -4,7 +4,6 @@ extends Control
 ## difficulty and (in 1P) which hero to control before starting the fight. Every
 ## selection writes straight to GameManager, which the spawner + boss read at start.
 
-var _hero_row: Control
 var _start_btn: Button
 var _hint: Label
 
@@ -38,20 +37,11 @@ func _ready() -> void:
 	col.offset_bottom = 200.0
 	add_child(col)
 
-	var on_players := func(i: int) -> void:
-		GameManager.set_player_count(i + 1)
-		_hero_row.visible = (i == 0)
-	col.add_child(_segment("PLAYERS", ["1 PLAYER", "2 PLAYERS"], GameManager.player_count - 1, on_players))
-
+	# PLAYERS and HERO selectors are gone: the game is single-hero third-person,
+	# so both were no-ops that promised a mode that no longer exists.
 	var on_difficulty := func(i: int) -> void:
 		GameManager.set_difficulty(i)
 	col.add_child(_segment("DIFFICULTY", ["EASY", "NORMAL", "HARD"], GameManager.difficulty, on_difficulty))
-
-	var on_hero := func(i: int) -> void:
-		GameManager.set_human_hero(i + 1)
-	_hero_row = _segment("HERO (1P)", ["HEROSAURO", "SUPER BOXY"], GameManager.human_hero - 1, on_hero)
-	_hero_row.visible = (GameManager.player_count == 1)
-	col.add_child(_hero_row)
 
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0, 12)
@@ -72,8 +62,8 @@ func _ready() -> void:
 
 
 func _controls_text() -> String:
-	return "P1 Herosauro  ·  WASD  ·  Shift jump  ·  E special  ·  Q attack        " \
-		+ "P2 Super Boxy  ·  Arrows  ·  / jump  ·  Space special  ·  . attack"
+	return "WASD move  ·  MOUSE look  ·  SPACE jump  ·  SHIFT sprint  ·  " \
+		+ "LMB / Q attack  ·  RMB / E special  ·  ESC pause"
 
 
 # --- Selectors -------------------------------------------------------------

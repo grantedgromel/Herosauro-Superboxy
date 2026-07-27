@@ -2,17 +2,25 @@ extends Area3D
 ## Shockwave: the expanding ground ring from Adamastor's slam.
 ##
 ## Spawned at the boss's feet into the "spawn_root". Its sphere collider grows
-## outward; any player it sweeps over is knocked away once. A translucent brown
-## ring mesh scales up to sell the blast, then the whole node frees itself.
+## outward; any player or prop it sweeps over is knocked away once. A
+## translucent brown ring mesh scales up to sell the blast, then the whole node
+## frees itself.
+##
+## This is the WIDE, weaker half of the slam. The heavy close hit is the boss's
+## own slam hitbox; the hero's i-frames mean only one of the two ever lands.
 
-@export var damage: int = 20
+@export var damage: int = 14
 @export var max_radius: float = 15.0
 @export var grow_time: float = 0.5
 @export var knockback: float = 14.0
+## Impulse handed to props the ring passes over, at the blast's centre. Falls
+## off with distance so barrels at the rim tip rather than fly.
+@export var prop_impulse: float = 38.0
 
 var _shape: SphereShape3D
 var _ring: MeshInstance3D
-var _hit: Array = []
+## Instance ids, not references: the ring outlives a prop it shatters.
+var _hit: Array[int] = []
 var _origin: Vector3 = Vector3.ZERO
 
 
@@ -20,7 +28,7 @@ func _ready() -> void:
 	monitoring = true
 	monitorable = false
 	collision_layer = 0
-	collision_mask = 2            # players
+	collision_mask = PhysicsLayers.PLAYERS | PhysicsLayers.PROPS
 
 	_origin = global_position
 
@@ -40,11 +48,11 @@ func _ready() -> void:
 	if _ring:
 		_ring.material_override = _ring_material()
 
+	# An Area3D's overlap list starts empty, so anything already standing on the
+	# boss's feet arrives through body_entered on the first physics frame — no
+	# separate initial sweep needed (the one that used to be here queried the
+	# list before it was populated and always came back empty).
 	body_entered.connect(_on_body_entered)
-
-	# Catch anyone already standing on top of the boss when it slams.
-	for b in get_overlapping_bodies():
-		_on_body_entered(b)
 
 	_grow()
 
@@ -89,15 +97,25 @@ func _set_radius(r: float) -> void:
 
 
 func _on_body_entered(body: Node) -> void:
-	if body == null or not body.is_in_group("players"):
+	if body == null:
 		return
-	if _hit.has(body):
+	var id := body.get_instance_id()
+	if _hit.has(id):
 		return
-	_hit.append(body)
+
 	var here: Vector3 = (body as Node3D).global_position
-	var dir := (here - _origin)
-	dir.y = 0.0
-	if dir.length() < 0.01:
-		dir = Vector3.RIGHT
-	dir = dir.normalized()
-	body.take_hit(damage, dir * knockback + Vector3.UP * 6.0)
+	var flat := here - _origin
+	flat.y = 0.0
+	var dist := flat.length()
+	var dir := flat.normalized() if dist > 0.01 else Vector3.RIGHT
+
+	if body.is_in_group("players"):
+		_hit.append(id)
+		body.take_hit(damage, dir * knockback + Vector3.UP * 6.0)
+	elif body is PropBody:
+		_hit.append(id)
+		# Falls off toward the rim: barrels at the giant's feet are launched,
+		# barrels at fifteen metres just topple.
+		var falloff: float = clampf(1.0 - dist / max_radius, 0.15, 1.0)
+		(body as PropBody).apply_hit_impulse(
+			(dir + Vector3.UP * 0.7).normalized() * prop_impulse * falloff, here)

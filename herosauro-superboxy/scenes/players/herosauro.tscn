@@ -2,11 +2,15 @@
 
 [ext_resource type="Script" path="res://scripts/players/herosauro.gd" id="1_hero"]
 
-[sub_resource type="BoxShape3D" id="Box_body"]
-size = Vector3(1.4, 2.0, 1.4)
+; Capsule, not a box: box corners catch on the deck lip and the rail posts, and
+; a rounded body slides off the giant instead of wedging against him.
+; 2.0 tall centred on the body origin -> feet at y=-1.0, matching MODEL_Y.
+[sub_resource type="CapsuleShape3D" id="Capsule_body"]
+radius = 0.45
+height = 2.0
 
 [node name="Herosauro" type="CharacterBody3D"]
 script = ExtResource("1_hero")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-shape = SubResource("Box_body")
+shape = SubResource("Capsule_body")
