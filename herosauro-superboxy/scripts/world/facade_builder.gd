@@ -100,6 +100,9 @@ const BALCONY_PROJECT := 0.42
 const JULIET_PROJECT := 0.11
 const RAIL_HEIGHT := 0.86
 const BALUSTER_PITCH := 0.115
+## The gap between neighbours in a terrace: a seam where two party walls meet,
+## not a slot you could see the hillside through.
+const PARTY_WALL_GAP := 0.05
 ## Coplanar surfaces z-fight; every overlay gets nudged out by this much.
 ##
 ## Larger than it looks like it needs to be. These buildings sit 40-90 m from the
@@ -341,11 +344,6 @@ static func terrace_specs_for_span(rng: RandomNumberGenerator, span: float, fron
 		used += spec.width + PARTY_WALL_GAP
 	_place_row(specs, frontage, rng)
 	return specs
-
-
-## The gap between neighbours: a seam where two party walls meet, not a slot you
-## could see the hillside through.
-const PARTY_WALL_GAP := 0.05
 
 
 static func _place_row(specs: Array[Spec], frontage: Vector3,
