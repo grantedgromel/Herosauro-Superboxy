@@ -1,21 +1,23 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/bridge_arena.gd" id="1_arena"]
 [ext_resource type="Material" path="res://assets/materials/toon_bridge.tres" id="2_deck"]
 [ext_resource type="Shader" path="res://assets/shaders/water_wave.gdshader" id="3_water"]
 [ext_resource type="PackedScene" path="res://scenes/world/sky_background.tscn" id="4_sky"]
 
+; The deck. Collider and mesh are deliberately NOT the same box:
+;   - the collider's top is the walkable surface at y = 2, flat from parapet to
+;     parapet, so nothing bridge_arena.gd lays on top can ever be a trip hazard;
+;   - the mesh stops 4 cm lower, at BridgeArena.STRUCTURE_TOP, and that 4 cm is
+;     the depth every paving seam, kerb joint and flagstone groove reveals.
+; Both keep the underside at y = 0 (BridgeArena.DECK_BOTTOM), which is what the
+; arch hangs from. Width is 14: a 10 m carriageway between the kerbs (the boss
+; arena is z in [-5, 5]) plus a 2 m footway and parapet on each side.
 [sub_resource type="BoxShape3D" id="Box_deck"]
-size = Vector3(100, 2, 12)
+size = Vector3(100, 2, 14)
 
 [sub_resource type="BoxMesh" id="Mesh_deck"]
-size = Vector3(100, 2, 12)
-
-[sub_resource type="BoxShape3D" id="Box_rail"]
-size = Vector3(100, 2, 0.4)
-
-[sub_resource type="BoxMesh" id="Mesh_rail"]
-size = Vector3(100, 2, 0.4)
+size = Vector3(100, 1.96, 14)
 
 [sub_resource type="PlaneMesh" id="Mesh_river"]
 size = Vector2(240, 240)
@@ -45,35 +47,13 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 shape = SubResource("Box_deck")
 
 [node name="Mesh" type="MeshInstance3D" parent="Bridge"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.98, 0)
 mesh = SubResource("Mesh_deck")
 surface_material_override/0 = ExtResource("2_deck")
 
-[node name="RailWallNeg" type="StaticBody3D" parent="."]
-collision_layer = 1
-collision_mask = 0
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="RailWallNeg"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -6)
-shape = SubResource("Box_rail")
-
-[node name="Mesh" type="MeshInstance3D" parent="RailWallNeg"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, -6)
-mesh = SubResource("Mesh_rail")
-surface_material_override/0 = ExtResource("2_deck")
-
-[node name="RailWallPos" type="StaticBody3D" parent="."]
-collision_layer = 1
-collision_mask = 0
-
-[node name="CollisionShape3D" type="CollisionShape3D" parent="RailWallPos"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 6)
-shape = SubResource("Box_rail")
-
-[node name="Mesh" type="MeshInstance3D" parent="RailWallPos"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 6)
-mesh = SubResource("Mesh_rail")
-surface_material_override/0 = ExtResource("2_deck")
+; The two 100x2x0.4 rail walls that used to fence the deck are gone.
+; bridge_arena.gd builds a proper parapet in their place — granite plinth, iron
+; balusters, handrail — with one collider box per side standing in for the lot.
 
 [node name="River" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -15, 0)

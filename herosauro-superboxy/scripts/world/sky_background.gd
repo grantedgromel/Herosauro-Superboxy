@@ -8,22 +8,119 @@ extends Node3D
 ## rooftop lettering, rabelo boats bobbing on the Douro, an azulejo-fronted chapel,
 ## and the two landmarks — the round Serra do Pilar dome and the slim Clérigos
 ## tower — plus drifting toon clouds and circling gulls. Decorative, no collision.
+##
+## The facades used to be flat coloured boxes with a glowing rectangle stuck on
+## the front, which under a raking 11.5-degree sun read as painted card. They now
+## carry the things that actually catch that light: a granite ground course, a
+## projecting eaves band, proud window surrounds over recessed panes, sills,
+## doors, the odd balcony, and chimneys breaking the roofline. All of it is
+## affordable because every repeated fitting goes into one MultiMesh per terrace
+## (see SceneryKit.repeat) — a row of thirteen houses costs four draw calls per
+## house plus eight for the whole row, however many windows it ends up with.
 
 const CLOUD_SPEED := 1.4          # world units / second of drift along +X
 const CLOUD_WRAP_MIN := -120.0    # x where a cloud re-appears after wrapping
 const CLOUD_WRAP_MAX := 120.0     # x past which a cloud wraps back
 
-# Ribeira facade palette — ochre, terracotta, cream, azulejo blue, mustard, rose.
-const RIBEIRA_WALLS := [
-	Color(0.91, 0.72, 0.30),  # ochre yellow
-	Color(0.78, 0.36, 0.29),  # terracotta red
-	Color(0.90, 0.82, 0.64),  # cream
-	Color(0.50, 0.66, 0.79),  # azulejo blue
-	Color(0.79, 0.54, 0.23),  # mustard
-	Color(0.71, 0.78, 0.64),  # faded green
-	Color(0.88, 0.78, 0.69),  # rose-beige
+# --- Far-city extents --------------------------------------------------------
+#
+# RECONCILIATION CONTRACT. A photogrammetry scan of the real district is going in
+# behind this procedural skyline. Everything about where the skyline stands is in
+# the five constants below and nowhere else — the hillside masses under the
+# houses, the Gaia lodges and the Clérigos tower all derive their X from
+# CITY_BANK_X, and each terrace row carries its own hill in the same table. So
+# making room for the scan is: pull CITY_BANK_X in, move a row's `z`, or set
+# CITY_CULL_Z to the scan's front edge. Not surgery.
+#
+# Where the two overlap, the procedural city is the one that should give way: it
+# exists to fill the gap between the bridge ends and the horizon, and the scan is
+# the real thing.
+
+## Distance from the bridge centreline out to each bank's line of house fronts.
+const CITY_BANK_X := 60.0
+
+## Terrace rows, front to back.
+##   z / dx     where the row stands (dx pushes it further out from CITY_BANK_X)
+##   count      houses in the row
+##   lift       the hillside tier it stands on
+##   low / high facade height range
+##   detail     2 = close enough to read as buildings (full trim, doors,
+##              balconies); 1 = silhouette and windows only
+##   hill*      the bank mass under the row, so pulling the row in drags the
+##              hillside with it. hill_dz is measured back from the row.
+const CITY_TERRACES := [
+	{
+		"z": -21.0, "dx": 0.0, "count": 13, "lift": 0.0,
+		"low": 8.0, "high": 19.0, "detail": 2,
+		"hill": Vector3(60.0, 10.0, 26.0), "hill_dx": 6.0, "hill_dz": -5.0,
+	},
+	{
+		"z": -31.0, "dx": 6.0, "count": 10, "lift": 7.0,
+		"low": 7.0, "high": 16.0, "detail": 1,
+		"hill": Vector3(50.0, 8.0, 22.0), "hill_dx": 12.0, "hill_dz": -7.0,
+	},
 ]
-const ROOF_COLOR := Color(0.62, 0.29, 0.21)   # terracotta tile
+
+## The Porto-side waterline row: low houses standing right on the cais, so the
+## Ribeira cascade runs all the way down to the river. Porto bank only — Gaia's
+## waterline is the lodges.
+const CITY_QUAY_ROW := {
+	"z": -10.0, "dx": 4.0, "count": 8, "lift": -10.1,
+	"low": 5.0, "high": 8.0, "detail": 2,
+}
+
+## Terrace rows further back than this are skipped, hillside and all. Set it to
+## the front edge of the photogrammetry backdrop and the procedural city stops
+## exactly where the real scan takes over.
+const CITY_CULL_Z := -1000.0
+
+## Waterline shelf / cais / quay wall, and the lodges standing on the Gaia one.
+const BANK_SHELF_DX := 18.0
+
+# --- Ribeira palette ---------------------------------------------------------
+# Pitched a good 10-15% darker than a photograph of these houses would suggest.
+# The key light is 2.4 energy of Color(1, 0.78, 0.54) and AgX has a 12.0 white
+# point: at the old values the ochres, creams and roses all converged on the same
+# hot cream and the terrace lost its stripe. Chroma went up as the values came
+# down, so the hue survives the exposure instead of being bleached out of it.
+
+const RIBEIRA_WALLS := [
+	Color(0.80, 0.60, 0.22),  # ochre yellow
+	Color(0.70, 0.30, 0.24),  # terracotta red
+	Color(0.80, 0.74, 0.60),  # cream
+	Color(0.42, 0.58, 0.74),  # azulejo blue — the cool anchor the row needs
+	Color(0.70, 0.47, 0.20),  # mustard
+	Color(0.56, 0.64, 0.50),  # faded green
+	Color(0.76, 0.66, 0.58),  # rose-beige
+	Color(0.55, 0.25, 0.21),  # red oxide
+]
+## Two tile ages rather than one, so a whole hillside of roofs is not one colour.
+const ROOF_COLORS := [Color(0.56, 0.28, 0.22), Color(0.48, 0.26, 0.21)]
+const TRIM_STONE := Color(0.66, 0.63, 0.57)     # granite surrounds, sills, eaves
+const PANE_DARK := Color(0.085, 0.095, 0.115)   # unlit glass reflecting the sky
+const PANE_LIT := Color(1.00, 0.80, 0.44)
+const DOOR_WOOD := Color(0.24, 0.16, 0.11)
+const BALCONY_IRON := Color(0.15, 0.16, 0.18)
+const CHIMNEY_BRICK := Color(0.52, 0.40, 0.33)
+
+# --- Facade fittings ---------------------------------------------------------
+# One size each, deliberately: identical fittings are what lets a whole terrace
+# collapse into a handful of MultiMeshes, and real Portuguese sash windows do
+# come in standard sizes.
+
+const GROUND_FLOOR := 2.4       # height of the shop/entrance storey
+const FLOOR_HEIGHT := 3.2
+const MAX_FLOORS := 5
+const WINDOW_SIZE := Vector3(0.86, 1.34, 0.12)   # proud stone surround
+const PANE_SIZE := Vector3(0.62, 1.06, 0.06)     # set back inside it, so the
+                                                 # surround's lip shades the glass
+const SILL_SIZE := Vector3(1.10, 0.10, 0.26)
+const DOOR_SIZE := Vector3(0.95, 2.10, 0.16)
+const BALCONY_SLAB := Vector3(1.55, 0.10, 0.60)
+const BALCONY_RAIL := Vector3(1.55, 0.55, 0.06)
+const CHIMNEY_SIZE := Vector3(0.46, 1.90, 0.46)
+const LIT_WINDOW_CHANCE := 0.22  # golden hour, not night: most glass is still dark
+const BALCONY_CHANCE := 0.35
 
 # Moored rabelo positions on the river (y is driven by the wave bob) and yaws.
 const RABELO_SPOTS := [Vector3(-28.0, 0.0, -16.0), Vector3(8.0, 0.0, -24.0), Vector3(34.0, 0.0, -13.0)]
@@ -94,118 +191,170 @@ func _build_banks() -> void:
 	banks.name = "Banks"
 	add_child(banks)
 
-	# Big tiles on the hillside masses: these boxes are 50-60 m across and a
-	# tight tile would alias into shimmer at this distance.
-	var plaster := ToonFactory.plaster(Color(0.60, 0.56, 0.50), 4.0)
+	# Very big tiles: these boxes are 50-60 m across, and a tight tile on one is
+	# high-frequency noise at 80 m, which aliases into shimmer and nothing else.
+	# Earth and rock, not render — the hillside is not a plastered wall.
+	var hillside := ToonFactory.stone(Color(0.44, 0.39, 0.33), 7.0)
 	var granite := ToonFactory.stone(Color(0.55, 0.52, 0.48), 3.5)
-	var cobble := ToonFactory.cobblestone(Color(0.66, 0.63, 0.58), 1.8)
+	var cobble := ToonFactory.cobblestone(Color(0.62, 0.59, 0.54), 1.8)
 
+	var shelf_x := CITY_BANK_X + BANK_SHELF_DX
 	for sx in [-1.0, 1.0]:
 		# Waterline shelf the quay row and lodges sit on (top y = -10).
-		_bank_box(banks, Vector3(56.0, 5.0, 44.0), Vector3(sx * 78.0, -12.5, -14.0), plaster)
+		_bank_box(banks, Vector3(56.0, 5.0, 44.0), Vector3(sx * shelf_x, -12.5, -14.0), hillside)
 		# Cais promenade running from the house fronts to the water's edge,
 		# finished with the granite quay wall dropping to the river.
-		_bank_box(banks, Vector3(56.0, 0.6, 16.0), Vector3(sx * 78.0, -9.9, 0.0), cobble)
-		_bank_box(banks, Vector3(56.0, 2.2, 1.0), Vector3(sx * 78.0, -11.0, 8.4), granite)
-		# Hillside tiers directly under the two existing terrace rows.
-		_bank_box(banks, Vector3(60.0, 10.0, 26.0), Vector3(sx * 66.0, -4.9, -26.0), plaster)
-		_bank_box(banks, Vector3(50.0, 8.0, 22.0), Vector3(sx * 72.0, 3.1, -40.0), plaster)
+		_bank_box(banks, Vector3(56.0, 0.6, 16.0), Vector3(sx * shelf_x, -9.9, 0.0), cobble)
+		_bank_box(banks, Vector3(56.0, 2.2, 1.0), Vector3(sx * shelf_x, -11.0, 8.4), granite)
+
+		# Hillside tier per terrace row, positioned off that row's own entry, so a
+		# row pulled in for the backdrop takes its slope with it.
+		for entry in CITY_TERRACES:
+			var row: Dictionary = entry
+			if float(row["z"]) < CITY_CULL_Z:
+				continue
+			var hill: Vector3 = row["hill"]
+			var lift := float(row["lift"])
+			_bank_box(banks, hill, Vector3(
+					sx * (CITY_BANK_X + float(row["hill_dx"])),
+					lift + 0.1 - hill.y * 0.5,          # top just under the house floors
+					float(row["z"]) + float(row["hill_dz"])), hillside)
 
 	# Serra do Pilar's cliff: one stout rock mass whose top (y = 9) meets the dome.
 	_bank_box(banks, Vector3(18.0, 24.0, 18.0), Vector3(51.0, -3.0, -30.0),
-			ToonFactory.stone(Color(0.48, 0.42, 0.36), 4.5))
+			ToonFactory.stone(Color(0.44, 0.38, 0.32), 5.0))
 
 
 func _bank_box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material) -> void:
-	var box := MeshInstance3D.new()
-	box.name = "Bank"
-	var mesh := BoxMesh.new()
-	mesh.size = size
-	box.mesh = mesh
-	box.position = pos
-	box.material_override = mat
-	parent.add_child(box)
+	SceneryKit.box(parent, "Bank", size, pos, mat)
 
 
-# --- Ribeira terraces ------------------------------------------------------
+# --- Ribeira terraces --------------------------------------------------------
 
 func _build_city() -> void:
 	var city := Node3D.new()
 	city.name = "City"
 	add_child(city)
 
-	# Two banks beyond the bridge ends, each a tight lower terrace plus an upper
-	# tier raised + set back, so the houses read as climbing the Douro hillside.
-	_build_terrace(city, -60.0, -22.0, 14, 0.0)
-	_build_terrace(city, -66.0, -34.0, 11, 7.0)
-	_build_terrace(city, 60.0, -22.0, 14, 0.0)
-	_build_terrace(city, 66.0, -34.0, 11, 7.0)
+	for entry in CITY_TERRACES:
+		var row: Dictionary = entry
+		if float(row["z"]) < CITY_CULL_Z:
+			continue
+		for bank in [-1.0, 1.0]:
+			_build_terrace(city, bank * (CITY_BANK_X + float(row["dx"])), row)
 
-	# Porto-side waterline row: low houses right on the quay, so the Ribeira
-	# cascade runs all the way down to the river.
-	_build_terrace(city, -64.0, -10.0, 8, -10.1, 5.0, 8.0)
+	if float(CITY_QUAY_ROW["z"]) >= CITY_CULL_Z:
+		_build_terrace(city, -(CITY_BANK_X + float(CITY_QUAY_ROW["dx"])), CITY_QUAY_ROW)
 
 
-## A row of narrow houses packed shoulder-to-shoulder along X, centred on center_x
-## and receding at base_z, raised by `lift` (for a hillside tier). Height range is
-## overridable so quay-level rows can stay low.
-func _build_terrace(parent: Node3D, center_x: float, base_z: float, count: int, lift: float,
-		h_min: float = 8.0, h_max: float = 20.0) -> void:
+## A row of narrow houses packed shoulder-to-shoulder along X, laid out from one
+## CITY_TERRACES entry. Every house gets its own wall, ground course, eaves and
+## roof; every repeated fitting — window surround, pane, sill, door, balcony,
+## chimney — is collected and emitted as one MultiMesh for the whole row.
+func _build_terrace(parent: Node3D, center_x: float, row: Dictionary) -> void:
+	var count := int(row["count"])
+	var lift := float(row["lift"])
+	var base_z := float(row["z"])
+	var rich := int(row["detail"]) >= 2
+	var h_min := float(row["low"])
+	var h_max := float(row["high"])
+
+	var terrace := Node3D.new()
+	terrace.name = "Terrace"
+	parent.add_child(terrace)
+
 	var rng := RandomNumberGenerator.new()
-	rng.seed = int(absf(center_x) * 31.0 + absf(base_z) * 7.0 + lift * 13.0)
+	# Signed center_x, unlike the old abs(): with the magnitude alone the Porto
+	# and Gaia banks drew the identical terrace and the river read as a mirror.
+	rng.seed = int(center_x * 31.0 + base_z * 7.0 + lift * 13.0)
 
+	var trim := ToonFactory.stone(TRIM_STONE, 0.9)
 	var pitch := 3.4   # spacing between adjacent facades (width + a sliver of gap)
 	var start_x := center_x - float(count - 1) * pitch * 0.5
 
-	for i in count:
-		var building := Node3D.new()
-		parent.add_child(building)
+	var frames: Array[Vector3] = []
+	var panes: Array[Vector3] = []
+	var lit_panes: Array[Vector3] = []
+	var sills: Array[Vector3] = []
+	var doors: Array[Vector3] = []
+	var balconies: Array[Vector3] = []
+	var balcony_rails: Array[Vector3] = []
+	var chimneys: Array[Vector3] = []
 
+	for i in count:
 		var w := rng.randf_range(2.6, 3.4)
 		var d := rng.randf_range(3.0, 4.5)
 		var h := rng.randf_range(h_min, h_max)
-
 		var px := start_x + float(i) * pitch + rng.randf_range(-0.3, 0.3)
 		var pz := base_z + rng.randf_range(-1.5, 1.5)
-		building.position = Vector3(px, lift, pz)
+		var face := pz + d * 0.5          # the +z facade, the one the bridge sees
 
-		# Wall: a tall narrow terraced facade.
-		var wall := MeshInstance3D.new()
-		wall.name = "Wall"
-		var wall_mesh := BoxMesh.new()
-		wall_mesh.size = Vector3(w, h, d)
-		wall.mesh = wall_mesh
-		wall.position = Vector3(0.0, h * 0.5, 0.0)
-		# Seven palette colours across dozens of facades, and the factory caches by
-		# colour, so the whole terrace batches onto seven materials.
-		wall.material_override = ToonFactory.plaster(RIBEIRA_WALLS[rng.randi() % RIBEIRA_WALLS.size()], 1.6)
-		building.add_child(wall)
+		# Wall: a tall narrow terraced facade. Eight palette colours across fifty
+		# facades, and the factory caches by colour, so the whole city batches onto
+		# eight materials.
+		SceneryKit.box(terrace, "Wall", Vector3(w, h, d), Vector3(px, lift + h * 0.5, pz),
+				ToonFactory.plaster(RIBEIRA_WALLS[rng.randi() % RIBEIRA_WALLS.size()], 1.6))
 
-		# Pitched terracotta roof: a triangular prism whose gable faces the camera.
+		# Projecting eaves band. Cheapest strong feature on the whole facade: at
+		# the sun's 11.5 degrees a 15 cm overhang throws a hard horizontal shadow
+		# most of the way down the wall, which is exactly what a flat box lacks.
+		SceneryKit.box(terrace, "Eaves", Vector3(w + 0.30, 0.18, d + 0.30),
+				Vector3(px, lift + h - 0.09, pz), trim)
+
+		var roof_h := rng.randf_range(1.6, 2.6)
 		var roof := MeshInstance3D.new()
 		roof.name = "Roof"
 		var roof_mesh := PrismMesh.new()
-		roof_mesh.size = Vector3(w * 1.05, rng.randf_range(1.6, 2.6), d * 1.05)
+		# PrismMesh extrudes its triangle along Z, so the gable faces the bridge
+		# and the slopes fall away in +-X. Chimneys are offset in X for that reason.
+		roof_mesh.size = Vector3(w * 1.06, roof_h, d * 1.06)
 		roof.mesh = roof_mesh
-		roof.position = Vector3(0.0, h + roof_mesh.size.y * 0.5, 0.0)
-		roof.material_override = ToonFactory.terracotta(ROOF_COLOR)
-		building.add_child(roof)
+		roof.position = Vector3(px, lift + h + roof_h * 0.5, pz)
+		roof.material_override = ToonFactory.terracotta(
+				ROOF_COLORS[rng.randi() % ROOF_COLORS.size()], 0.8)
+		terrace.add_child(roof)
 
-		_add_windows(building, w, h, d, rng)
+		chimneys.append(Vector3(px + w * (0.28 if i % 2 == 0 else -0.28),
+				lift + h + CHIMNEY_SIZE.y * 0.5, pz + d * 0.15))
 
+		if rich:
+			# Granite ground course. Grounds the house and gives the pavement line
+			# somewhere to end; without it the render floats.
+			SceneryKit.box(terrace, "GroundCourse", Vector3(w + 0.10, 0.70, d + 0.10),
+					Vector3(px, lift + 0.35, pz), trim)
+			doors.append(Vector3(px, lift + DOOR_SIZE.y * 0.5, face + 0.02))
 
-func _add_windows(building: Node3D, w: float, h: float, d: float, rng: RandomNumberGenerator) -> void:
-	var window_glow := Color(1.0, 0.83, 0.46)
-	var rows := int(clamp(h / 6.0, 1.0, 3.0))
-	for r in rows:
-		var win := MeshInstance3D.new()
-		win.name = "Window"
-		var win_mesh := BoxMesh.new()
-		win_mesh.size = Vector3(w * 0.5, 1.2, 0.2)
-		win.mesh = win_mesh
-		win.material_override = ToonFactory.glow(window_glow, 1.4, 0.0)
-		win.position = Vector3(0.0, 3.0 + float(r) * 5.0, d * 0.5 + 0.05)
-		building.add_child(win)
+		var floors := clampi(int((h - GROUND_FLOOR) / FLOOR_HEIGHT), 1, MAX_FLOORS)
+		var cols := 2 if w > 3.0 else 1
+		for f in floors:
+			var sill_y := lift + GROUND_FLOOR + float(f) * FLOOR_HEIGHT
+			var win_y := sill_y + SILL_SIZE.y + WINDOW_SIZE.y * 0.5
+			for c in cols:
+				var cx := px + (float(c) - float(cols - 1) * 0.5) * (w * 0.44)
+				frames.append(Vector3(cx, win_y, face + 0.01))
+				var pane := Vector3(cx, win_y, face)
+				if rng.randf() < LIT_WINDOW_CHANCE:
+					lit_panes.append(pane)
+				else:
+					panes.append(pane)
+				if rich:
+					sills.append(Vector3(cx, sill_y + SILL_SIZE.y * 0.5, face + 0.07))
+			if rich and f == 1 and rng.randf() < BALCONY_CHANCE:
+				balconies.append(Vector3(px, sill_y - BALCONY_SLAB.y * 0.5, face + 0.30))
+				balcony_rails.append(Vector3(px, sill_y + BALCONY_RAIL.y * 0.5, face + 0.57))
+
+	SceneryKit.repeat(terrace, "WindowSurrounds", WINDOW_SIZE, frames, trim)
+	SceneryKit.repeat(terrace, "Panes", PANE_SIZE, panes,
+			ToonFactory.solid(PANE_DARK, 0.0, 0.16))
+	SceneryKit.repeat(terrace, "LitPanes", PANE_SIZE, lit_panes,
+			ToonFactory.glow(PANE_LIT, 2.2))
+	SceneryKit.repeat(terrace, "Sills", SILL_SIZE, sills, trim)
+	SceneryKit.repeat(terrace, "Doors", DOOR_SIZE, doors, ToonFactory.wood(DOOR_WOOD, 0.35))
+	SceneryKit.repeat(terrace, "Balconies", BALCONY_SLAB, balconies, trim)
+	SceneryKit.repeat(terrace, "BalconyRails", BALCONY_RAIL, balcony_rails,
+			ToonFactory.iron(BALCONY_IRON, 0.35, 0.25, 0.50))
+	SceneryKit.repeat(terrace, "Chimneys", CHIMNEY_SIZE, chimneys,
+			ToonFactory.terracotta(CHIMNEY_BRICK, 0.4))
 
 
 # --- Gaia port-wine lodges ---------------------------------------------------
@@ -220,28 +369,25 @@ func _build_gaia_lodges() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4711
 
-	var wall_mat := ToonFactory.plaster(Color(0.93, 0.90, 0.82), 2.4)
-	var roof_mat := ToonFactory.terracotta(ROOF_COLOR)
+	# Limewash, but well down from the old 0.93: a big low-pitched roof plus a
+	# near-white wall is two thousand square metres of clipped highlight.
+	var wall_mat := ToonFactory.plaster(Color(0.84, 0.81, 0.74), 2.4)
+	var roof_mat := ToonFactory.terracotta(ROOF_COLORS[0], 0.8)
 	var signs := ["PORTO", "VINHO DO PORTO", "CAVES DO DOURO"]
 	var sign_sizes := [200, 120, 120]
 
-	var xs := [58.0, 71.0, 84.0, 96.0]
-	for i in xs.size():
-		var x: float = xs[i]
+	# Strung out along the Gaia shelf, so they follow if CITY_BANK_X moves.
+	var offsets := [-2.0, 11.0, 24.0, 36.0]
+	for i in offsets.size():
+		var x: float = CITY_BANK_X + float(offsets[i])
 		var length := rng.randf_range(12.0, 14.0)
 		var height := rng.randf_range(4.0, 5.0)
 		var depth := rng.randf_range(7.0, 8.0)
 		var z := rng.randf_range(-14.0, -6.0)
 		var base_y := -10.1
 
-		var body := MeshInstance3D.new()
-		body.name = "Lodge"
-		var body_mesh := BoxMesh.new()
-		body_mesh.size = Vector3(length, height, depth)
-		body.mesh = body_mesh
-		body.position = Vector3(x, base_y + height * 0.5, z)
-		body.material_override = wall_mat
-		lodges.add_child(body)
+		SceneryKit.box(lodges, "Lodge", Vector3(length, height, depth),
+				Vector3(x, base_y + height * 0.5, z), wall_mat)
 
 		# Ridge must run along X on these long sheds: PrismMesh extrudes its
 		# triangle along Z, so swap the footprint axes and yaw the prism 90°.
@@ -263,14 +409,8 @@ func _build_gaia_lodges() -> void:
 func _lodge_sign(parent: Node3D, text: String, size_px: int, x: float, z: float, roof_y: float) -> void:
 	var post_mat := ToonFactory.iron(Color(0.30, 0.28, 0.26), 0.6, 0.3, 0.55)
 	for px in [x - 3.0, x + 3.0]:
-		var post := MeshInstance3D.new()
-		post.name = "SignPost"
-		var post_mesh := BoxMesh.new()
-		post_mesh.size = Vector3(0.15, 1.6, 0.15)
-		post.mesh = post_mesh
-		post.position = Vector3(px, roof_y + 0.8, z)
-		post.material_override = post_mat
-		parent.add_child(post)
+		SceneryKit.box(parent, "SignPost", Vector3(0.15, 1.6, 0.15),
+				Vector3(px, roof_y + 0.8, z), post_mat)
 
 	var label := Label3D.new()
 	label.name = "SignText"
@@ -307,90 +447,39 @@ func _build_rabelo(parent: Node3D) -> Node3D:
 	boat.name = "Rabelo"
 	parent.add_child(boat)
 
-	var wood := ToonFactory.wood(Color(0.36, 0.24, 0.14), 0.9)
-	var sail_mat := ToonFactory.cloth(Color(0.93, 0.89, 0.79))
-	var barrel_mat := ToonFactory.wood(Color(0.55, 0.36, 0.18), 0.35)
+	# Object-space triplanar throughout, never SceneryKit.world_mapped: these hulls
+	# bob every frame and a world-mapped one swims through its own grain.
+	var wood := ToonFactory.wood(Color(0.32, 0.21, 0.12), 0.9)
+	var sail_mat := ToonFactory.cloth(Color(0.88, 0.83, 0.72))
+	var barrel_mat := ToonFactory.wood(Color(0.50, 0.33, 0.16), 0.35)
 
-	var hull := MeshInstance3D.new()
-	hull.name = "Hull"
-	var hull_mesh := BoxMesh.new()
-	hull_mesh.size = Vector3(5.5, 0.7, 1.6)
-	hull.mesh = hull_mesh
-	hull.material_override = wood
-	boat.add_child(hull)
+	SceneryKit.box(boat, "Hull", Vector3(5.5, 0.7, 1.6), Vector3.ZERO, wood)
 
 	# The upswept bow and stern are the rabelo silhouette's give-away.
 	for sx in [-1.0, 1.0]:
-		var tip := MeshInstance3D.new()
-		tip.name = "Tip"
-		var tip_mesh := BoxMesh.new()
-		tip_mesh.size = Vector3(1.6, 0.5, 1.3)
-		tip.mesh = tip_mesh
-		tip.position = Vector3(sx * 3.0, 0.55, 0.0)
+		var tip := SceneryKit.box(boat, "Tip", Vector3(1.6, 0.5, 1.3),
+				Vector3(sx * 3.0, 0.55, 0.0), wood)
 		tip.rotation.z = sx * 0.45
-		tip.material_override = wood
-		boat.add_child(tip)
 
-	var mast := MeshInstance3D.new()
-	mast.name = "Mast"
-	var mast_mesh := CylinderMesh.new()
-	mast_mesh.top_radius = 0.07
-	mast_mesh.bottom_radius = 0.09
-	mast_mesh.height = 4.5
-	mast_mesh.radial_segments = 8
-	mast.mesh = mast_mesh
-	mast.position = Vector3(-0.5, 2.5, 0.0)
-	mast.material_override = wood
-	boat.add_child(mast)
-
-	var yard := MeshInstance3D.new()
-	yard.name = "Yard"
-	var yard_mesh := BoxMesh.new()
-	yard_mesh.size = Vector3(2.6, 0.12, 0.12)
-	yard.mesh = yard_mesh
-	yard.position = Vector3(-0.5, 4.35, 0.0)
-	yard.material_override = wood
-	boat.add_child(yard)
-
+	SceneryKit.cylinder(boat, "Mast", 0.07, 0.09, 4.5, Vector3(-0.5, 2.5, 0.0), wood)
+	SceneryKit.box(boat, "Yard", Vector3(2.6, 0.12, 0.12), Vector3(-0.5, 4.35, 0.0), wood)
 	# Sail faces the camera; artistic licence over rigging accuracy.
-	var sail := MeshInstance3D.new()
-	sail.name = "Sail"
-	var sail_mesh := BoxMesh.new()
-	sail_mesh.size = Vector3(2.4, 2.0, 0.06)
-	sail.mesh = sail_mesh
-	sail.position = Vector3(-0.5, 3.2, 0.0)
-	sail.material_override = sail_mat
-	boat.add_child(sail)
+	SceneryKit.box(boat, "Sail", Vector3(2.4, 2.0, 0.06), Vector3(-0.5, 3.2, 0.0), sail_mat)
 
 	# The espadela: the long steering oar trailing up off the stern.
-	var oar := MeshInstance3D.new()
-	oar.name = "Espadela"
-	var oar_mesh := BoxMesh.new()
-	oar_mesh.size = Vector3(3.5, 0.1, 0.15)
-	oar.mesh = oar_mesh
-	oar.position = Vector3(4.2, 1.0, 0.3)
+	var oar := SceneryKit.box(boat, "Espadela", Vector3(3.5, 0.1, 0.15),
+			Vector3(4.2, 1.0, 0.3), wood)
 	oar.rotation.z = 0.35
-	oar.material_override = wood
-	boat.add_child(oar)
 
 	for bx in [-0.2, 0.7]:
-		var barrel := MeshInstance3D.new()
-		barrel.name = "Barrel"
-		var barrel_mesh := CylinderMesh.new()
-		barrel_mesh.top_radius = 0.32
-		barrel_mesh.bottom_radius = 0.32
-		barrel_mesh.height = 0.65
-		barrel_mesh.radial_segments = 10
-		barrel.mesh = barrel_mesh
-		barrel.position = Vector3(bx, 0.55, 0.0)
+		var barrel := SceneryKit.cylinder(boat, "Barrel", 0.32, 0.32, 0.65,
+				Vector3(bx, 0.55, 0.0), barrel_mat, 10)
 		barrel.rotation.x = PI * 0.5
-		barrel.material_override = barrel_mat
-		boat.add_child(barrel)
 
 	return boat
 
 
-# --- Landmarks -------------------------------------------------------------
+# --- Landmarks ---------------------------------------------------------------
 
 func _build_landmarks() -> void:
 	var marks := Node3D.new()
@@ -401,7 +490,7 @@ func _build_landmarks() -> void:
 	_build_dome(marks, Vector3(50.0, 9.0, -30.0))
 	# Clérigos Tower — the slim granite bell tower, set back uphill on the Porto
 	# side so it clears the rooflines the way the real one does.
-	_build_tower(marks, Vector3(-62.0, 7.0, -38.0))
+	_build_tower(marks, Vector3(-(CITY_BANK_X + 2.0), 7.0, -38.0))
 
 
 func _build_dome(parent: Node3D, pos: Vector3) -> void:
@@ -409,18 +498,11 @@ func _build_dome(parent: Node3D, pos: Vector3) -> void:
 	grp.position = pos
 	parent.add_child(grp)
 
-	var drum := MeshInstance3D.new()
-	var drum_mesh := CylinderMesh.new()
-	drum_mesh.top_radius = 5.0
-	drum_mesh.bottom_radius = 5.6
-	drum_mesh.height = 8.0
-	drum_mesh.radial_segments = 16
-	drum.mesh = drum_mesh
-	drum.position = Vector3(0.0, 4.0, 0.0)
-	drum.material_override = ToonFactory.plaster(Color(0.78, 0.74, 0.68), 2.2)
-	grp.add_child(drum)
+	SceneryKit.cylinder(grp, "Drum", 5.0, 5.6, 8.0, Vector3(0.0, 4.0, 0.0),
+			ToonFactory.plaster(Color(0.72, 0.68, 0.62), 2.2), 16)
 
 	var dome := MeshInstance3D.new()
+	dome.name = "Dome"
 	var dome_mesh := SphereMesh.new()
 	dome_mesh.radius = 5.0
 	dome_mesh.height = 5.0
@@ -429,46 +511,23 @@ func _build_dome(parent: Node3D, pos: Vector3) -> void:
 	dome_mesh.rings = 8
 	dome.mesh = dome_mesh
 	dome.position = Vector3(0.0, 8.0, 0.0)
-	dome.material_override = ToonFactory.stone(Color(0.55, 0.57, 0.60), 2.0)
+	dome.material_override = ToonFactory.stone(Color(0.50, 0.52, 0.55), 2.0)
 	grp.add_child(dome)
 
-	# The monastery's circular cloister colonnade ringing the drum.
-	var col_mat := ToonFactory.stone(Color(0.85, 0.82, 0.76), 1.2)
+	# The monastery's circular cloister colonnade ringing the drum. Tile pulled to
+	# 0.55: a 1.2 m tile on a 0.56 m column showed less than half a period of the
+	# granite grain, which reads as a smooth plastic post.
+	var col_mat := ToonFactory.stone(Color(0.78, 0.75, 0.69), 0.55)
 	for i in 8:
 		var ang := TAU * float(i) / 8.0
-		var col := MeshInstance3D.new()
-		col.name = "Column"
-		var col_mesh := CylinderMesh.new()
-		col_mesh.top_radius = 0.28
-		col_mesh.bottom_radius = 0.28
-		col_mesh.height = 3.0
-		col_mesh.radial_segments = 8
-		col.mesh = col_mesh
-		col.position = Vector3(cos(ang) * 6.3, 1.5, sin(ang) * 6.3)
-		col.material_override = col_mat
-		grp.add_child(col)
+		SceneryKit.cylinder(grp, "Column", 0.28, 0.28, 3.0,
+				Vector3(cos(ang) * 6.3, 1.5, sin(ang) * 6.3), col_mat)
 
-	var ring := MeshInstance3D.new()
-	ring.name = "CloisterRing"
-	var ring_mesh := CylinderMesh.new()
-	ring_mesh.top_radius = 6.4
-	ring_mesh.bottom_radius = 6.4
-	ring_mesh.height = 0.5
-	ring_mesh.radial_segments = 16
-	ring.mesh = ring_mesh
-	ring.position = Vector3(0.0, 3.4, 0.0)
-	ring.material_override = col_mat
-	grp.add_child(ring)
+	SceneryKit.cylinder(grp, "CloisterRing", 6.4, 6.4, 0.5, Vector3(0.0, 3.4, 0.0), col_mat, 16)
 
 	# A low monastery wing trailing along the clifftop.
-	var wing := MeshInstance3D.new()
-	wing.name = "Wing"
-	var wing_mesh := BoxMesh.new()
-	wing_mesh.size = Vector3(8.0, 3.5, 6.0)
-	wing.mesh = wing_mesh
-	wing.position = Vector3(5.5, 1.75, -4.0)
-	wing.material_override = ToonFactory.plaster(Color(0.80, 0.76, 0.70), 2.2)
-	grp.add_child(wing)
+	SceneryKit.box(grp, "Wing", Vector3(8.0, 3.5, 6.0), Vector3(5.5, 1.75, -4.0),
+			ToonFactory.plaster(Color(0.74, 0.70, 0.64), 2.2))
 
 
 func _build_tower(parent: Node3D, pos: Vector3) -> void:
@@ -476,79 +535,32 @@ func _build_tower(parent: Node3D, pos: Vector3) -> void:
 	grp.position = pos
 	parent.add_child(grp)
 
-	var granite_mat := ToonFactory.stone(Color(0.60, 0.58, 0.54), 2.0)
+	var granite_mat := ToonFactory.stone(Color(0.56, 0.54, 0.50), 2.0)
 	# Openings read as holes, so: no detail map, fully rough, no spec to catch.
 	var dark_inset := ToonFactory.solid(Color(0.12, 0.11, 0.10), 0.0, 1.0)
 
-	var shaft := MeshInstance3D.new()
-	var shaft_mesh := BoxMesh.new()
-	shaft_mesh.size = Vector3(4.0, 34.0, 4.0)
-	shaft.mesh = shaft_mesh
-	shaft.position = Vector3(0.0, 17.0, 0.0)
-	shaft.material_override = granite_mat
-	grp.add_child(shaft)
+	SceneryKit.box(grp, "Shaft", Vector3(4.0, 34.0, 4.0), Vector3(0.0, 17.0, 0.0), granite_mat)
 
 	# Baroque cornice bands breaking up the shaft.
 	for cy in [12.0, 22.0]:
-		var cornice := MeshInstance3D.new()
-		cornice.name = "Cornice"
-		var cornice_mesh := BoxMesh.new()
-		cornice_mesh.size = Vector3(4.8, 0.6, 4.8)
-		cornice.mesh = cornice_mesh
-		cornice.position = Vector3(0.0, cy, 0.0)
-		cornice.material_override = granite_mat
-		grp.add_child(cornice)
+		SceneryKit.box(grp, "Cornice", Vector3(4.8, 0.6, 4.8), Vector3(0.0, cy, 0.0), granite_mat)
 
 	# The clock face partway up the +z (camera) side.
-	var clock := MeshInstance3D.new()
-	clock.name = "Clock"
-	var clock_mesh := BoxMesh.new()
-	clock_mesh.size = Vector3(1.3, 1.3, 0.2)
-	clock.mesh = clock_mesh
-	clock.position = Vector3(0.0, 23.5, 2.05)
-	clock.material_override = ToonFactory.plaster(Color(0.92, 0.88, 0.78), 0.6)
-	grp.add_child(clock)
+	SceneryKit.box(grp, "Clock", Vector3(1.3, 1.3, 0.2), Vector3(0.0, 23.5, 2.05),
+			ToonFactory.plaster(Color(0.86, 0.82, 0.72), 0.6))
 
 	# Belfry stage with dark arched openings on the three visible faces.
-	var belfry := MeshInstance3D.new()
-	belfry.name = "Belfry"
-	var belfry_mesh := BoxMesh.new()
-	belfry_mesh.size = Vector3(3.7, 6.0, 3.7)
-	belfry.mesh = belfry_mesh
-	belfry.position = Vector3(0.0, 29.0, 0.0)
-	belfry.material_override = granite_mat
-	grp.add_child(belfry)
+	SceneryKit.box(grp, "Belfry", Vector3(3.7, 6.0, 3.7), Vector3(0.0, 29.0, 0.0), granite_mat)
 
 	for opening in [Vector3(0.0, 29.0, 1.95), Vector3(1.95, 29.0, 0.0), Vector3(-1.95, 29.0, 0.0)]:
-		var slot := MeshInstance3D.new()
-		slot.name = "BelfryOpening"
-		var slot_mesh := BoxMesh.new()
-		slot_mesh.size = Vector3(1.6, 2.8, 0.2) if absf(opening.z) > 0.0 else Vector3(0.2, 2.8, 1.6)
-		slot.mesh = slot_mesh
-		slot.position = opening
-		slot.material_override = dark_inset
-		grp.add_child(slot)
+		var size := Vector3(1.6, 2.8, 0.2) if absf(opening.z) > 0.0 else Vector3(0.2, 2.8, 1.6)
+		SceneryKit.box(grp, "BelfryOpening", size, opening, dark_inset)
 
-	var balustrade := MeshInstance3D.new()
-	balustrade.name = "Balustrade"
-	var bal_mesh := BoxMesh.new()
-	bal_mesh.size = Vector3(4.6, 0.5, 4.6)
-	balustrade.mesh = bal_mesh
-	balustrade.position = Vector3(0.0, 32.3, 0.0)
-	balustrade.material_override = granite_mat
-	grp.add_child(balustrade)
+	SceneryKit.box(grp, "Balustrade", Vector3(4.6, 0.5, 4.6), Vector3(0.0, 32.3, 0.0), granite_mat)
 
 	# Tapered crown, small dome and finial spike.
-	var cap := MeshInstance3D.new()
-	var cap_mesh := CylinderMesh.new()
-	cap_mesh.top_radius = 1.2
-	cap_mesh.bottom_radius = 2.4
-	cap_mesh.height = 4.0
-	cap_mesh.radial_segments = 8
-	cap.mesh = cap_mesh
-	cap.position = Vector3(0.0, 34.5, 0.0)
-	cap.material_override = ToonFactory.stone(Color(0.50, 0.48, 0.45), 1.4)
-	grp.add_child(cap)
+	var crown_mat := ToonFactory.stone(Color(0.48, 0.46, 0.43), 1.4)
+	SceneryKit.cylinder(grp, "Cap", 1.2, 2.4, 4.0, Vector3(0.0, 34.5, 0.0), crown_mat)
 
 	var crown := MeshInstance3D.new()
 	crown.name = "Crown"
@@ -560,20 +572,11 @@ func _build_tower(parent: Node3D, pos: Vector3) -> void:
 	crown_mesh.rings = 4
 	crown.mesh = crown_mesh
 	crown.position = Vector3(0.0, 36.5, 0.0)
-	crown.material_override = ToonFactory.stone(Color(0.50, 0.48, 0.45), 1.4)
+	crown.material_override = crown_mat
 	grp.add_child(crown)
 
-	var finial := MeshInstance3D.new()
-	finial.name = "Finial"
-	var finial_mesh := CylinderMesh.new()
-	finial_mesh.top_radius = 0.03
-	finial_mesh.bottom_radius = 0.08
-	finial_mesh.height = 1.4
-	finial_mesh.radial_segments = 6
-	finial.mesh = finial_mesh
-	finial.position = Vector3(0.0, 38.2, 0.0)
-	finial.material_override = ToonFactory.iron(Color(0.35, 0.33, 0.30), 0.4, 0.6, 0.4)
-	grp.add_child(finial)
+	SceneryKit.cylinder(grp, "Finial", 0.03, 0.08, 1.4, Vector3(0.0, 38.2, 0.0),
+			ToonFactory.iron(Color(0.35, 0.33, 0.30), 0.4, 0.6, 0.4), 6)
 
 
 # --- Azulejo chapel ----------------------------------------------------------
@@ -587,14 +590,11 @@ func _build_azulejo_chapel() -> void:
 	chapel.position = Vector3(-44.0, 0.0, -18.0)
 	add_child(chapel)
 
-	var body := MeshInstance3D.new()
-	body.name = "Body"
-	var body_mesh := BoxMesh.new()
-	body_mesh.size = Vector3(7.0, 15.0, 3.0)
-	body.mesh = body_mesh
-	body.position = Vector3(0.0, 7.5, 0.0)
-	body.material_override = ToonFactory.plaster(Color(0.93, 0.94, 0.91), 2.0)
-	chapel.add_child(body)
+	var dark := ToonFactory.solid(Color(0.15, 0.13, 0.12), 0.0, 1.0)
+	var trim := ToonFactory.stone(TRIM_STONE, 0.9)
+
+	SceneryKit.box(chapel, "Body", Vector3(7.0, 15.0, 3.0), Vector3(0.0, 7.5, 0.0),
+			ToonFactory.plaster(Color(0.86, 0.87, 0.84), 2.0))
 
 	var gable := MeshInstance3D.new()
 	gable.name = "Gable"
@@ -602,51 +602,39 @@ func _build_azulejo_chapel() -> void:
 	gable_mesh.size = Vector3(7.4, 2.2, 3.2)
 	gable.mesh = gable_mesh
 	gable.position = Vector3(0.0, 16.1, 0.0)
-	gable.material_override = ToonFactory.stone(Color(0.60, 0.58, 0.54), 2.0)
+	gable.material_override = trim
 	chapel.add_child(gable)
 
-	var portal := MeshInstance3D.new()
-	portal.name = "Portal"
-	var portal_mesh := BoxMesh.new()
-	portal_mesh.size = Vector3(2.0, 3.5, 0.3)
-	portal.mesh = portal_mesh
-	portal.position = Vector3(0.0, 1.75, 1.55)
-	portal.material_override = ToonFactory.solid(Color(0.15, 0.13, 0.12), 0.0, 1.0)
-	chapel.add_child(portal)
+	# Pilasters and a cornice: the chapel is the one facade the eye lands on, and
+	# four projecting edges are what stop it reading as a painted flat.
+	for sx in [-1.0, 1.0]:
+		SceneryKit.box(chapel, "Pilaster", Vector3(0.55, 15.0, 0.35),
+				Vector3(sx * 3.1, 7.5, 1.62), trim)
+	SceneryKit.box(chapel, "Cornice", Vector3(7.6, 0.35, 3.6), Vector3(0.0, 14.8, 0.0), trim)
 
-	var bell := MeshInstance3D.new()
-	bell.name = "BellOpening"
-	var bell_mesh := BoxMesh.new()
-	bell_mesh.size = Vector3(1.2, 1.8, 0.2)
-	bell.mesh = bell_mesh
-	bell.position = Vector3(0.0, 13.5, 1.55)
-	bell.material_override = ToonFactory.solid(Color(0.15, 0.13, 0.12), 0.0, 1.0)
-	chapel.add_child(bell)
+	SceneryKit.box(chapel, "Portal", Vector3(2.0, 3.5, 0.3), Vector3(0.0, 1.75, 1.55), dark)
+	SceneryKit.box(chapel, "PortalSurround", Vector3(2.5, 4.0, 0.18), Vector3(0.0, 2.0, 1.5), trim)
+	SceneryKit.box(chapel, "BellOpening", Vector3(1.2, 1.8, 0.2), Vector3(0.0, 13.5, 1.55), dark)
 
 	# The azulejo band: offset tiles read as a blue-and-white checker from afar.
 	# Deeper than the facade-palette blue — the warm sun washes lighter blues
 	# out to near-white at this distance.
-	var tile_mat := ToonFactory.ceramic(Color(0.18, 0.38, 0.66), 0.5)
+	var tiles: Array[Vector3] = []
 	for col in 4:
 		var tx := -1.5 + float(col)
 		var ty := 6.0 if col % 2 == 0 else 7.0
-		for row in 2:
-			var tile := MeshInstance3D.new()
-			tile.name = "Tile"
-			var tile_mesh := BoxMesh.new()
-			tile_mesh.size = Vector3(1.0, 1.0, 0.15)
-			tile.mesh = tile_mesh
-			tile.position = Vector3(tx, ty + float(row) * 2.0, 1.55)
-			tile.material_override = tile_mat
-			chapel.add_child(tile)
+		for r in 2:
+			tiles.append(Vector3(tx, ty + float(r) * 2.0, 1.55))
+	SceneryKit.repeat(chapel, "Azulejos", Vector3(1.0, 1.0, 0.15), tiles,
+			ToonFactory.ceramic(Color(0.16, 0.34, 0.62), 0.5))
 
 
-# --- Clouds ----------------------------------------------------------------
+# --- Clouds ------------------------------------------------------------------
 
 func _build_clouds() -> void:
 	# Fully rough and untextured: a detail normal on a 4 m puff at 50 m just
 	# shimmers, and the rim term already gives the golden-hour edge glow.
-	var cloud_mat := ToonFactory.solid(Color(0.99, 0.93, 0.86), 0.0, 1.0)
+	var cloud_mat := ToonFactory.solid(Color(0.95, 0.90, 0.84), 0.0, 1.0)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
 
@@ -702,7 +690,7 @@ func _build_gulls() -> void:
 	holder.name = "Gulls"
 	add_child(holder)
 
-	var feather := ToonFactory.solid(Color(0.97, 0.97, 0.95), 0.0, 0.90)
+	var feather := ToonFactory.solid(Color(0.94, 0.94, 0.92), 0.0, 0.90)
 
 	for i in GULL_COUNT:
 		var gull := Node3D.new()
@@ -710,18 +698,12 @@ func _build_gulls() -> void:
 		holder.add_child(gull)
 
 		for sx in [-1.0, 1.0]:
-			var wing := MeshInstance3D.new()
-			wing.name = "Wing"
-			var wing_mesh := BoxMesh.new()
-			wing_mesh.size = Vector3(1.1, 0.06, 0.35)
-			wing.mesh = wing_mesh
-			wing.position = Vector3(sx * 0.5, 0.0, 0.0)
-			wing.material_override = feather
-			gull.add_child(wing)
+			SceneryKit.box(gull, "Wing", Vector3(1.1, 0.06, 0.35),
+					Vector3(sx * 0.5, 0.0, 0.0), feather)
 
 		_gulls.append(gull)
-		# Flight envelope hugs the open air over the river: behind the far rail
-		# (z <= ~-7), short of the house fronts (z >= ~-21) and clear of the
+		# Flight envelope hugs the open air over the river: behind the far parapet
+		# (z <= ~-8), short of the house fronts (z >= ~-19) and clear of the
 		# terrace x-slots, so a loop never clips a roof or the boss.
 		_gull_data.append({
 			"center": Vector3(
