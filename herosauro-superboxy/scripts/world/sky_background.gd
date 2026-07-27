@@ -94,9 +94,11 @@ func _build_banks() -> void:
 	banks.name = "Banks"
 	add_child(banks)
 
-	var plaster := ToonFactory.solid(Color(0.60, 0.56, 0.50), 0.05)
-	var granite := ToonFactory.solid(Color(0.55, 0.52, 0.48), 0.05)
-	var cobble := ToonFactory.solid(Color(0.66, 0.63, 0.58), 0.05)
+	# Big tiles on the hillside masses: these boxes are 50-60 m across and a
+	# tight tile would alias into shimmer at this distance.
+	var plaster := ToonFactory.plaster(Color(0.60, 0.56, 0.50), 4.0)
+	var granite := ToonFactory.stone(Color(0.55, 0.52, 0.48), 3.5)
+	var cobble := ToonFactory.cobblestone(Color(0.66, 0.63, 0.58), 1.8)
 
 	for sx in [-1.0, 1.0]:
 		# Waterline shelf the quay row and lodges sit on (top y = -10).
@@ -111,10 +113,10 @@ func _build_banks() -> void:
 
 	# Serra do Pilar's cliff: one stout rock mass whose top (y = 9) meets the dome.
 	_bank_box(banks, Vector3(18.0, 24.0, 18.0), Vector3(51.0, -3.0, -30.0),
-			ToonFactory.solid(Color(0.48, 0.42, 0.36), 0.05))
+			ToonFactory.stone(Color(0.48, 0.42, 0.36), 4.5))
 
 
-func _bank_box(parent: Node3D, size: Vector3, pos: Vector3, mat: ShaderMaterial) -> void:
+func _bank_box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material) -> void:
 	var box := MeshInstance3D.new()
 	box.name = "Bank"
 	var mesh := BoxMesh.new()
@@ -174,7 +176,9 @@ func _build_terrace(parent: Node3D, center_x: float, base_z: float, count: int, 
 		wall_mesh.size = Vector3(w, h, d)
 		wall.mesh = wall_mesh
 		wall.position = Vector3(0.0, h * 0.5, 0.0)
-		wall.material_override = ToonFactory.solid(RIBEIRA_WALLS[rng.randi() % RIBEIRA_WALLS.size()], 0.05)
+		# Seven palette colours across dozens of facades, and the factory caches by
+		# colour, so the whole terrace batches onto seven materials.
+		wall.material_override = ToonFactory.plaster(RIBEIRA_WALLS[rng.randi() % RIBEIRA_WALLS.size()], 1.6)
 		building.add_child(wall)
 
 		# Pitched terracotta roof: a triangular prism whose gable faces the camera.
@@ -184,7 +188,7 @@ func _build_terrace(parent: Node3D, center_x: float, base_z: float, count: int, 
 		roof_mesh.size = Vector3(w * 1.05, rng.randf_range(1.6, 2.6), d * 1.05)
 		roof.mesh = roof_mesh
 		roof.position = Vector3(0.0, h + roof_mesh.size.y * 0.5, 0.0)
-		roof.material_override = ToonFactory.solid(ROOF_COLOR, 0.05)
+		roof.material_override = ToonFactory.terracotta(ROOF_COLOR)
 		building.add_child(roof)
 
 		_add_windows(building, w, h, d, rng)
@@ -216,8 +220,8 @@ func _build_gaia_lodges() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4711
 
-	var wall_mat := ToonFactory.solid(Color(0.93, 0.90, 0.82), 0.05)
-	var roof_mat := ToonFactory.solid(ROOF_COLOR, 0.05)
+	var wall_mat := ToonFactory.plaster(Color(0.93, 0.90, 0.82), 2.4)
+	var roof_mat := ToonFactory.terracotta(ROOF_COLOR)
 	var signs := ["PORTO", "VINHO DO PORTO", "CAVES DO DOURO"]
 	var sign_sizes := [200, 120, 120]
 
@@ -257,7 +261,7 @@ func _build_gaia_lodges() -> void:
 
 ## Rooftop skeleton sign: two thin posts on the ridge holding up big lettering.
 func _lodge_sign(parent: Node3D, text: String, size_px: int, x: float, z: float, roof_y: float) -> void:
-	var post_mat := ToonFactory.solid(Color(0.30, 0.28, 0.26), 0.0)
+	var post_mat := ToonFactory.iron(Color(0.30, 0.28, 0.26), 0.6, 0.3, 0.55)
 	for px in [x - 3.0, x + 3.0]:
 		var post := MeshInstance3D.new()
 		post.name = "SignPost"
@@ -303,9 +307,9 @@ func _build_rabelo(parent: Node3D) -> Node3D:
 	boat.name = "Rabelo"
 	parent.add_child(boat)
 
-	var wood := ToonFactory.solid(Color(0.36, 0.24, 0.14), 0.03)
-	var sail_mat := ToonFactory.solid(Color(0.93, 0.89, 0.79), 0.03)
-	var barrel_mat := ToonFactory.solid(Color(0.55, 0.36, 0.18), 0.0)
+	var wood := ToonFactory.wood(Color(0.36, 0.24, 0.14), 0.9)
+	var sail_mat := ToonFactory.cloth(Color(0.93, 0.89, 0.79))
+	var barrel_mat := ToonFactory.wood(Color(0.55, 0.36, 0.18), 0.35)
 
 	var hull := MeshInstance3D.new()
 	hull.name = "Hull"
@@ -413,7 +417,7 @@ func _build_dome(parent: Node3D, pos: Vector3) -> void:
 	drum_mesh.radial_segments = 16
 	drum.mesh = drum_mesh
 	drum.position = Vector3(0.0, 4.0, 0.0)
-	drum.material_override = ToonFactory.solid(Color(0.78, 0.74, 0.68), 0.05)
+	drum.material_override = ToonFactory.plaster(Color(0.78, 0.74, 0.68), 2.2)
 	grp.add_child(drum)
 
 	var dome := MeshInstance3D.new()
@@ -425,11 +429,11 @@ func _build_dome(parent: Node3D, pos: Vector3) -> void:
 	dome_mesh.rings = 8
 	dome.mesh = dome_mesh
 	dome.position = Vector3(0.0, 8.0, 0.0)
-	dome.material_override = ToonFactory.solid(Color(0.55, 0.57, 0.60), 0.05)
+	dome.material_override = ToonFactory.stone(Color(0.55, 0.57, 0.60), 2.0)
 	grp.add_child(dome)
 
 	# The monastery's circular cloister colonnade ringing the drum.
-	var col_mat := ToonFactory.solid(Color(0.85, 0.82, 0.76), 0.03)
+	var col_mat := ToonFactory.stone(Color(0.85, 0.82, 0.76), 1.2)
 	for i in 8:
 		var ang := TAU * float(i) / 8.0
 		var col := MeshInstance3D.new()
@@ -463,7 +467,7 @@ func _build_dome(parent: Node3D, pos: Vector3) -> void:
 	wing_mesh.size = Vector3(8.0, 3.5, 6.0)
 	wing.mesh = wing_mesh
 	wing.position = Vector3(5.5, 1.75, -4.0)
-	wing.material_override = ToonFactory.solid(Color(0.80, 0.76, 0.70), 0.05)
+	wing.material_override = ToonFactory.plaster(Color(0.80, 0.76, 0.70), 2.2)
 	grp.add_child(wing)
 
 
@@ -472,8 +476,9 @@ func _build_tower(parent: Node3D, pos: Vector3) -> void:
 	grp.position = pos
 	parent.add_child(grp)
 
-	var granite_mat := ToonFactory.solid(Color(0.60, 0.58, 0.54), 0.05)
-	var dark_inset := ToonFactory.solid(Color(0.12, 0.11, 0.10), 0.0)
+	var granite_mat := ToonFactory.stone(Color(0.60, 0.58, 0.54), 2.0)
+	# Openings read as holes, so: no detail map, fully rough, no spec to catch.
+	var dark_inset := ToonFactory.solid(Color(0.12, 0.11, 0.10), 0.0, 1.0)
 
 	var shaft := MeshInstance3D.new()
 	var shaft_mesh := BoxMesh.new()
@@ -501,7 +506,7 @@ func _build_tower(parent: Node3D, pos: Vector3) -> void:
 	clock_mesh.size = Vector3(1.3, 1.3, 0.2)
 	clock.mesh = clock_mesh
 	clock.position = Vector3(0.0, 23.5, 2.05)
-	clock.material_override = ToonFactory.solid(Color(0.92, 0.88, 0.78), 0.0)
+	clock.material_override = ToonFactory.plaster(Color(0.92, 0.88, 0.78), 0.6)
 	grp.add_child(clock)
 
 	# Belfry stage with dark arched openings on the three visible faces.
@@ -542,7 +547,7 @@ func _build_tower(parent: Node3D, pos: Vector3) -> void:
 	cap_mesh.radial_segments = 8
 	cap.mesh = cap_mesh
 	cap.position = Vector3(0.0, 34.5, 0.0)
-	cap.material_override = ToonFactory.solid(Color(0.50, 0.48, 0.45), 0.05)
+	cap.material_override = ToonFactory.stone(Color(0.50, 0.48, 0.45), 1.4)
 	grp.add_child(cap)
 
 	var crown := MeshInstance3D.new()
@@ -555,7 +560,7 @@ func _build_tower(parent: Node3D, pos: Vector3) -> void:
 	crown_mesh.rings = 4
 	crown.mesh = crown_mesh
 	crown.position = Vector3(0.0, 36.5, 0.0)
-	crown.material_override = ToonFactory.solid(Color(0.50, 0.48, 0.45), 0.05)
+	crown.material_override = ToonFactory.stone(Color(0.50, 0.48, 0.45), 1.4)
 	grp.add_child(crown)
 
 	var finial := MeshInstance3D.new()
@@ -567,7 +572,7 @@ func _build_tower(parent: Node3D, pos: Vector3) -> void:
 	finial_mesh.radial_segments = 6
 	finial.mesh = finial_mesh
 	finial.position = Vector3(0.0, 38.2, 0.0)
-	finial.material_override = ToonFactory.solid(Color(0.35, 0.33, 0.30), 0.0)
+	finial.material_override = ToonFactory.iron(Color(0.35, 0.33, 0.30), 0.4, 0.6, 0.4)
 	grp.add_child(finial)
 
 
@@ -588,7 +593,7 @@ func _build_azulejo_chapel() -> void:
 	body_mesh.size = Vector3(7.0, 15.0, 3.0)
 	body.mesh = body_mesh
 	body.position = Vector3(0.0, 7.5, 0.0)
-	body.material_override = ToonFactory.solid(Color(0.93, 0.94, 0.91), 0.05)
+	body.material_override = ToonFactory.plaster(Color(0.93, 0.94, 0.91), 2.0)
 	chapel.add_child(body)
 
 	var gable := MeshInstance3D.new()
@@ -597,7 +602,7 @@ func _build_azulejo_chapel() -> void:
 	gable_mesh.size = Vector3(7.4, 2.2, 3.2)
 	gable.mesh = gable_mesh
 	gable.position = Vector3(0.0, 16.1, 0.0)
-	gable.material_override = ToonFactory.solid(Color(0.60, 0.58, 0.54), 0.05)
+	gable.material_override = ToonFactory.stone(Color(0.60, 0.58, 0.54), 2.0)
 	chapel.add_child(gable)
 
 	var portal := MeshInstance3D.new()
@@ -606,7 +611,7 @@ func _build_azulejo_chapel() -> void:
 	portal_mesh.size = Vector3(2.0, 3.5, 0.3)
 	portal.mesh = portal_mesh
 	portal.position = Vector3(0.0, 1.75, 1.55)
-	portal.material_override = ToonFactory.solid(Color(0.15, 0.13, 0.12), 0.0)
+	portal.material_override = ToonFactory.solid(Color(0.15, 0.13, 0.12), 0.0, 1.0)
 	chapel.add_child(portal)
 
 	var bell := MeshInstance3D.new()
@@ -615,13 +620,13 @@ func _build_azulejo_chapel() -> void:
 	bell_mesh.size = Vector3(1.2, 1.8, 0.2)
 	bell.mesh = bell_mesh
 	bell.position = Vector3(0.0, 13.5, 1.55)
-	bell.material_override = ToonFactory.solid(Color(0.15, 0.13, 0.12), 0.0)
+	bell.material_override = ToonFactory.solid(Color(0.15, 0.13, 0.12), 0.0, 1.0)
 	chapel.add_child(bell)
 
 	# The azulejo band: offset tiles read as a blue-and-white checker from afar.
 	# Deeper than the facade-palette blue — the warm sun washes lighter blues
 	# out to near-white at this distance.
-	var tile_mat := ToonFactory.solid(Color(0.18, 0.38, 0.66), 0.0)
+	var tile_mat := ToonFactory.ceramic(Color(0.18, 0.38, 0.66), 0.5)
 	for col in 4:
 		var tx := -1.5 + float(col)
 		var ty := 6.0 if col % 2 == 0 else 7.0
@@ -639,7 +644,9 @@ func _build_azulejo_chapel() -> void:
 # --- Clouds ----------------------------------------------------------------
 
 func _build_clouds() -> void:
-	var cloud_mat := ToonFactory.solid(Color(0.99, 0.93, 0.86), 0.0)
+	# Fully rough and untextured: a detail normal on a 4 m puff at 50 m just
+	# shimmers, and the rim term already gives the golden-hour edge glow.
+	var cloud_mat := ToonFactory.solid(Color(0.99, 0.93, 0.86), 0.0, 1.0)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
 
@@ -695,7 +702,7 @@ func _build_gulls() -> void:
 	holder.name = "Gulls"
 	add_child(holder)
 
-	var feather := ToonFactory.solid(Color(0.97, 0.97, 0.95), 0.0)
+	var feather := ToonFactory.solid(Color(0.97, 0.97, 0.95), 0.0, 0.90)
 
 	for i in GULL_COUNT:
 		var gull := Node3D.new()

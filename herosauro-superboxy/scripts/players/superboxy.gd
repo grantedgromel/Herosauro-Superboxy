@@ -1,11 +1,15 @@
 extends PlayerBase
-## Super Boxy (Player 2): the nimble brawler in a green hoodie, denim overalls,
-## red mask, cape and boxing gloves. His signature move is the Boxy Dash — a
-## short, fast, gravity-defying lunge that bonks the boss for big combo damage,
-## throwing a punch as he connects.
+## Super Boxy: the nimble brawler in a green hoodie, denim overalls, red mask,
+## cape and boxing gloves. His signature move is the Boxy Dash — a short, fast,
+## gravity-defying lunge that bonks the boss for big combo damage, throwing a
+## punch as he connects.
+##
+## NOT SPAWNED in the solo build (main.gd only builds Herosauro). Kept intact and
+## compiling as the second playable hero, and as the reference implementation of
+## PlayerBase._custom_locomotion.
 ##
 ## Visual is a Meshy-generated, RIGGED + ANIMATED glTF (walk / run / punch),
-## driven by PlayerBase's animation driver.
+## driven by PlayerBase's AnimationTree.
 
 const DASH_SPEED_MULT := 4.0
 const DASH_DURATION := 0.25
@@ -16,9 +20,9 @@ const GHOST_INTERVAL := 0.06
 const DashTrailScene: PackedScene = preload("res://scenes/fx/dash_trail.tscn")
 const SuperBoxyModel: PackedScene = preload("res://assets/models/superboxy.glb")
 
-const MODEL_YAW := PI / 2.0     # model faces +Z; player faces +X
+const MODEL_YAW := PI / 2.0     # model faces +Z; body yaw 0 faces +X (PlayerBase._face_movement)
 const MODEL_SCALE := 0.85       # rigged model ~2u -> ~1.7u
-const MODEL_Y := -0.85          # drop feet to the bottom of the 1.7u collision box
+const MODEL_Y := -0.85          # drop feet to the bottom of the 1.7u collision capsule
 
 var _dash_time: float = 0.0
 var _dash_dir: Vector3 = Vector3.ZERO
@@ -47,7 +51,8 @@ func _build_visuals() -> void:
 	_model_root.add_child(model)
 	# "punch" substring-matches the model's punch clip — baked as "punch1" (the
 	# "Punch Combo 1" animation). Both the basic attack and the dash play it.
-	bind_animations(model, {"walk": "walk", "run": "run", "idle": "walk", "ability": "punch", "attack": "punch"})
+	# No "idle" key: the art has none, so PlayerBase synthesizes one from "walk".
+	bind_animations(model, {"walk": "walk", "run": "run", "ability": "punch", "attack": "punch"})
 
 
 func _perform_ability() -> void:

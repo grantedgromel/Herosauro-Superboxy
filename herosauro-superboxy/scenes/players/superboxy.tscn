@@ -2,11 +2,15 @@
 
 [ext_resource type="Script" path="res://scripts/players/superboxy.gd" id="1_boxy"]
 
-[sub_resource type="BoxShape3D" id="Box_body"]
-size = Vector3(1.1, 1.7, 1.1)
+; Capsule, not a box: box corners catch on the deck lip and the rail posts, and
+; a rounded body slides off the giant instead of wedging against him.
+; 1.7 tall centred on the body origin -> feet at y=-0.85, matching MODEL_Y.
+[sub_resource type="CapsuleShape3D" id="Capsule_body"]
+radius = 0.4
+height = 1.7
 
 [node name="SuperBoxy" type="CharacterBody3D"]
 script = ExtResource("1_boxy")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-shape = SubResource("Box_body")
+shape = SubResource("Capsule_body")

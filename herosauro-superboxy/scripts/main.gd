@@ -1,18 +1,19 @@
 extends Node3D
 ## Main: the root scene. At startup it shows ONLY the UI (so the menu is a real
 ## screen, not an overlay on a live arena). The gameplay world — bridge, camera,
-## players and boss — is built on the MENU->PLAYING transition and torn down when
-## we return to the menu. Kept code-driven so each sub-scene stays self-contained.
+## hero and boss — is built on the MENU->PLAYING transition and torn down when we
+## return to the menu. Kept code-driven so each sub-scene stays self-contained.
+##
+## SOLO: exactly one hero is spawned. There is no second player and no AI ally.
 
-const P1_SPAWN := Vector3(-12.0, 4.0, 0.0)
-const P2_SPAWN := Vector3(-8.0, 4.0, 2.0)
+const HERO_ID := 1                            # HUD / GameManager still key player state by id
+const HERO_SPAWN := Vector3(-12.0, 4.0, 0.0)
 const BOSS_SPAWN := Vector3(16.0, 2.0, 0.0)   # matches Adamastor.SPAWN
 
 const WorldScene: PackedScene = preload("res://scenes/world/bridge_arena.tscn")
 const HerosauroScene: PackedScene = preload("res://scenes/players/herosauro.tscn")
-const SuperBoxyScene: PackedScene = preload("res://scenes/players/superboxy.tscn")
 const AdamastorScene: PackedScene = preload("res://scenes/boss/adamastor.tscn")
-const CameraRigScript: GDScript = preload("res://scripts/camera_rig.gd")
+const PropSpawnerScene: PackedScene = preload("res://scenes/props/prop_spawner.tscn")
 const MainMenuScene: PackedScene = preload("res://scenes/ui/main_menu.tscn")
 const HUDScene: PackedScene = preload("res://scenes/ui/hud.tscn")
 const GameOverScene: PackedScene = preload("res://scenes/ui/game_over.tscn")
@@ -20,7 +21,7 @@ const GameOverScene: PackedScene = preload("res://scenes/ui/game_over.tscn")
 var _menu: Control
 var _hud: CanvasItem
 var _game_over: CanvasItem
-var _world_root: Node3D    # holds bridge + camera + players + boss; freed on return to menu
+var _world_root: Node3D    # holds bridge + camera + hero + boss; freed on return to menu
 var _spawn_root: Node3D
 
 
@@ -40,6 +41,7 @@ func _ready() -> void:
 	GameManager.state_changed.connect(_on_state_changed)
 	GameManager.game_started.connect(_on_game_started)
 	GameManager.game_over.connect(_on_game_over)
+	GameManager.player_damaged.connect(_on_player_damaged)
 
 	GameManager.change_state(GameManager.State.MENU)
 
@@ -64,22 +66,23 @@ func _build_world() -> void:
 	_spawn_root.add_to_group("spawn_root")
 	_world_root.add_child(_spawn_root)
 
-	var rig: Node3D = CameraRigScript.new()
-	rig.name = "CameraRig"
-	_world_root.add_child(rig)
+	var hero := _spawn_player(HerosauroScene, HERO_ID, HERO_SPAWN)
 
-	# id 1 = Herosauro, id 2 = Super Boxy always, so HUD/camera/boss group code is unchanged.
-	var p1 := _spawn_player(HerosauroScene, 1, P1_SPAWN)
-	var p2 := _spawn_player(SuperBoxyScene, 2, P2_SPAWN)
-
-	# 1-player: the human drives `human_hero`, the other hero gets an AI ally brain.
-	if GameManager.player_count == 1:
-		var bot: PlayerBase = p2 if GameManager.human_hero == 1 else p1
-		bot.ai_controller = AllyController.new(bot)
+	# Knockable barrels, crates and rubble along the deck. It keeps clear of the
+	# hero and boss spawns itself, so it goes in before they matter.
+	var props := PropSpawnerScene.instantiate()
+	props.name = "Props"
+	_world_root.add_child(props)
 
 	var boss := AdamastorScene.instantiate()
 	_world_root.add_child(boss)
 	boss.global_position = BOSS_SPAWN
+
+	# Last, so the rig's opening frame already knows where both hero and giant are.
+	var rig := CameraRig.new()
+	rig.name = "CameraRig"
+	rig.target = hero
+	_world_root.add_child(rig)
 
 
 func _teardown_world() -> void:
@@ -136,3 +139,17 @@ func _on_game_started() -> void:
 
 func _on_game_over(_victory: bool) -> void:
 	_hud.visible = false
+
+
+## Solo defeat bridge. GameManager still ends the run only when BOTH entries of
+## its {1, 2} health dict reach zero, and player 2 is never spawned — so without
+## this the fight can never be lost. Deferred + state-guarded so it stays a no-op
+## once GameManager's own check becomes single-player aware.
+func _on_player_damaged(id: int, _amount: int, new_health: int) -> void:
+	if id == HERO_ID and new_health <= 0:
+		_force_defeat.call_deferred()
+
+
+func _force_defeat() -> void:
+	if GameManager.state == GameManager.State.PLAYING:
+		GameManager._end_game(false)

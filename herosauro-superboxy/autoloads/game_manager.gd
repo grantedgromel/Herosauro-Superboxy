@@ -138,8 +138,29 @@ func damage_player(player_id: int, amount: int) -> void:
 		return
 	player_health[player_id] = max(0, int(player_health[player_id]) - amount)
 	player_damaged.emit(player_id, amount, player_health[player_id])
-	if int(player_health[1]) <= 0 and int(player_health[2]) <= 0:
+	if _all_heroes_down():
 		_end_game(false)
+
+
+## True once every hero actually in the world is at zero health.
+##
+## This used to test `player_health[1] and player_health[2]` directly, which
+## could never fire in the single-hero game — the absent second hero sat at full
+## health forever, so the player simply could not lose. Ask the scene instead of
+## assuming a roster, so solo and any future co-op both terminate correctly.
+func _all_heroes_down() -> bool:
+	var found := false
+	for p in get_tree().get_nodes_in_group("players"):
+		found = true
+		var pid := 1
+		if "player_id" in p:
+			pid = int(p.player_id)
+		if int(player_health.get(pid, 0)) > 0:
+			return false
+	# No hero nodes yet (menu, teardown): fall back to the health table.
+	if not found:
+		return int(player_health[1]) <= 0 and int(player_health[2]) <= 0
+	return true
 
 
 func notify_player_respawned(player_id: int) -> void:
@@ -152,12 +173,12 @@ func damage_boss(amount: int, source_player: int) -> void:
 	boss_health = max(0, boss_health - amount)
 	boss_damaged.emit(amount, boss_health)
 
-	var points := SCORE_PER_HIT
-	if source_player == 2:
-		p2_combo += 1
-		_combo_window = COMBO_TIMEOUT
-		points = SCORE_PER_HIT * p2_combo
-		combo_changed.emit(2, p2_combo)
+	# Combo used to be hard-wired to source_player == 2, so it went dead the
+	# moment the game became single-hero. Any hero's chained hits count now.
+	p2_combo += 1
+	_combo_window = COMBO_TIMEOUT
+	var points := SCORE_PER_HIT * p2_combo
+	combo_changed.emit(source_player, p2_combo)
 	add_score(points)
 
 	if boss_phase == 1 and float(boss_health) / float(MAX_BOSS_HEALTH) <= BOSS_PHASE2_RATIO:

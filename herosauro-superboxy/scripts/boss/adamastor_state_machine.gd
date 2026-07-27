@@ -17,11 +17,44 @@ extends RefCounted
 ##
 ## Movement speed, aggression and decision cadence scale with GameManager
 ## difficulty and tighten again in phase two.
+##
+## SOLO TUNING. This brain was written for two simultaneous targets, where every
+## attack the giant threw was aimed at one of two heroes and the other got a
+## free window. With a lone hero, every attack is aimed at YOU, so the same
+## numbers read as twice the pressure. Three things were retuned rather than
+## simply softened:
+##
+##   * cadence — the decision interval is longer, and SLAM_COOLDOWN forces a gap
+##     between slams. Without it the giant slammed, retreated 0.45 s, closed and
+##     slammed again, and the hero never had a punish window.
+##   * volley — phase two threw a second rock at "the other player", falling
+##     back to a fixed +3 z offset that only made sense on a narrow deck. It now
+##     throws one rock at where you are and one at where you are GOING, so
+##     changing direction beats it.
+##   * escalation — phase two shortens the wind-up and the retreat instead of
+##     just adding a projectile, which reads as the giant getting angry rather
+##     than the screen getting busier.
 
 enum { IDLE, CHASE, SLAM, ROCK_THROW, RETREAT, PHASE_TWO }
 
 const ShockwaveScene: PackedScene = preload("res://scenes/fx/shockwave.tscn")
 const RockScene: PackedScene = preload("res://scenes/fx/rock_projectile.tscn")
+
+## Seconds the slam's active-frames window stays open.
+const SLAM_WINDOW := 0.16
+## Minimum gap between slams — the hero's punish window.
+const SLAM_COOLDOWN := 1.3
+const SLAM_COOLDOWN_P2 := 0.85
+const WINDUP := 0.55
+const WINDUP_P2 := 0.4
+const RETREAT_TIME := 0.55
+const RETREAT_TIME_P2 := 0.42
+const SHOCKWAVE_DAMAGE := 14
+const SHOCKWAVE_DAMAGE_P2 := 20
+const ROCK_DAMAGE := 15
+const ROCK_DAMAGE_P2 := 18
+## How far ahead of a moving hero the second phase-two rock is aimed.
+const ROCK_LEAD := 0.55
 
 var boss: Node3D
 var state: int = IDLE
@@ -31,13 +64,14 @@ var _move_speed: float = 6.0
 var _aggression: float = 0.6        # 0..1: bias toward closing/attacking
 var _melee_range: float = 7.0       # within this -> slam
 var _rock_range: float = 16.0       # beyond this -> prefer ranged rock
-var _decide_interval: float = 3.0
-var _decide_timer: float = 3.0
-var _double_rocks: bool = false
+var _decide_interval: float = 3.4
+var _decide_timer: float = 3.4
+var _escalated: bool = false        # phase two: faster, angrier, two rocks
 
 # Busy flag: while an attack tween chain runs we don't pick a new action.
 var _busy: bool = false
 var _retreat_timer: float = 0.0
+var _slam_cd: float = 0.0
 var _strafe: float = 0.0
 var _attack_tween: Tween = null
 
@@ -49,15 +83,16 @@ func _init(p_boss: Node3D) -> void:
 func reset() -> void:
 	state = IDLE
 	var ds: float = GameManager.difficulty_scalar()
-	_move_speed = 6.0 * ds
-	_aggression = clampf(0.55 * ds, 0.3, 0.95)
+	_move_speed = 5.8 * ds
+	_aggression = clampf(0.5 * ds, 0.3, 0.9)
 	_melee_range = 7.0
 	_rock_range = 16.0
-	_decide_interval = clampf(3.0 / ds, 1.4, 4.0)
+	_decide_interval = clampf(3.4 / ds, 1.9, 4.4)
 	_decide_timer = _decide_interval
-	_double_rocks = false
+	_escalated = false
 	_busy = false
 	_retreat_timer = 0.0
+	_slam_cd = 0.0
 	_strafe = 0.0
 	_kill_attack_tween()
 
@@ -84,6 +119,8 @@ func update(delta: float) -> void:
 	if GameManager.state != GameManager.State.PLAYING:
 		return
 
+	_slam_cd = maxf(0.0, _slam_cd - delta)
+
 	match state:
 		PHASE_TWO:
 			_enter_phase_two_now()
@@ -102,11 +139,11 @@ func update(delta: float) -> void:
 # --- PHASE_TWO -------------------------------------------------------------
 
 func _enter_phase_two_now() -> void:
-	_decide_interval = maxf(1.2, _decide_interval * 0.6)
+	_decide_interval = maxf(1.6, _decide_interval * 0.65)
 	_decide_timer = minf(_decide_timer, _decide_interval)
-	_move_speed *= 1.25
-	_aggression = clampf(_aggression + 0.2, 0.3, 0.98)
-	_double_rocks = true
+	_move_speed *= 1.2
+	_aggression = clampf(_aggression + 0.2, 0.3, 0.95)
+	_escalated = true
 	state = CHASE
 
 
@@ -142,8 +179,9 @@ func _update_chase(delta: float) -> void:
 	boss.velocity.x = (dir.x + weave.x) * _move_speed
 	boss.velocity.z = (dir.z + weave.z) * _move_speed
 
-	# Commit to an attack.
-	if dist <= _melee_range:
+	# Commit to an attack. The cooldown is what gives a solo hero a window to
+	# actually swing back instead of being slammed the instant they close.
+	if dist <= _melee_range and _slam_cd <= 0.0:
 		_start_slam()
 		return
 	_decide_timer -= delta
@@ -158,7 +196,7 @@ func _update_chase(delta: float) -> void:
 
 func _begin_retreat() -> void:
 	_busy = false
-	_retreat_timer = 0.45
+	_retreat_timer = RETREAT_TIME_P2 if _escalated else RETREAT_TIME
 	state = RETREAT
 
 
@@ -182,6 +220,7 @@ func _update_retreat(delta: float) -> void:
 func _start_slam() -> void:
 	state = SLAM
 	_busy = true
+	_slam_cd = SLAM_COOLDOWN_P2 if _escalated else SLAM_COOLDOWN
 	boss.velocity.x = 0.0
 	boss.velocity.z = 0.0
 
@@ -197,7 +236,7 @@ func _start_slam() -> void:
 	_attack_tween = boss.create_tween()
 	# Windup: raise both arms.
 	_attack_tween.tween_callback(func() -> void: boss.raise_arms(true))
-	_attack_tween.tween_interval(0.5)
+	_attack_tween.tween_interval(WINDUP_P2 if _escalated else WINDUP)
 	# Slam down.
 	_attack_tween.tween_callback(_do_slam_impact)
 	_attack_tween.tween_interval(0.45)   # recover
@@ -206,13 +245,16 @@ func _start_slam() -> void:
 	_attack_tween.tween_callback(_finish_attack)
 
 
+## Two layers, and they cannot double-dip because the hero's i-frames swallow
+## whichever lands second: the boss's slam hitbox is the heavy close hit, the
+## shockwave is the wide, weaker ring that punishes a slow retreat.
 func _do_slam_impact() -> void:
 	if GameManager.state != GameManager.State.PLAYING:
 		return
 	boss.slam_arms_down()
+	boss.arm_slam(SLAM_WINDOW)
 	var wave := ShockwaveScene.instantiate()
-	if state == PHASE_TWO or _double_rocks:
-		wave.damage = 20
+	wave.damage = SHOCKWAVE_DAMAGE_P2 if _escalated else SHOCKWAVE_DAMAGE
 	_spawn(wave, boss.global_position)
 	GameManager.request_shake(0.5, 0.3)
 	AudioManager.play_boss_slam()
@@ -233,7 +275,7 @@ func _start_rock_throw() -> void:
 	_attack_tween = boss.create_tween()
 	# Windup: cock one arm back.
 	_attack_tween.tween_callback(func() -> void: boss.raise_arms(true))
-	_attack_tween.tween_interval(0.4)
+	_attack_tween.tween_interval(0.5 if not _escalated else 0.4)
 	_attack_tween.tween_callback(_do_rock_throw)
 	_attack_tween.tween_interval(0.35)
 	_attack_tween.tween_callback(func() -> void: boss.raise_arms(false))
@@ -244,9 +286,10 @@ func _start_rock_throw() -> void:
 func _do_rock_throw() -> void:
 	if GameManager.state != GameManager.State.PLAYING:
 		return
-	var targets := _throw_targets()
-	for t in targets:
+	var damage: int = ROCK_DAMAGE_P2 if _escalated else ROCK_DAMAGE
+	for t in _rock_volley():
 		var rock := RockScene.instantiate()
+		rock.damage = damage
 		# Spawn up at the boss's hands, then arc toward the target.
 		_spawn(rock, boss.global_position + Vector3(0.0, 6.0, 0.0))
 		if rock.has_method("launch"):
@@ -254,22 +297,36 @@ func _do_rock_throw() -> void:
 	AudioManager.play_boss_slam()
 
 
-func _throw_targets() -> Array:
-	var out: Array = []
-	var players := boss.get_tree().get_nodes_in_group("players")
-	if players.is_empty():
+## Where this volley lands. One rock at the hero's feet in phase one; in phase
+## two a second at where they are heading, so the answer is to change direction
+## rather than to keep running in a straight line.
+func _rock_volley() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var target: Node3D = boss.nearest_player()
+	if target == null:
 		return out
-	var primary: Node3D = boss.nearest_player()
-	if primary:
-		out.append(primary.global_position)
-	if _double_rocks:
-		# Second rock at the other player if there is one, else a spread.
-		for p in players:
-			if p != primary:
-				out.append((p as Node3D).global_position)
-				break
-		if out.size() < 2 and primary:
-			out.append(primary.global_position + Vector3(0.0, 0.0, 3.0))
+
+	var here: Vector3 = target.global_position
+	out.append(here)
+	if not _escalated:
+		return out
+
+	var drift := Vector3.ZERO
+	if target is CharacterBody3D:
+		drift = (target as CharacterBody3D).velocity
+	drift.y = 0.0
+	if drift.length() < 1.0:
+		# Standing still: put the second rock beside them instead, across the
+		# deck rather than along it, so there is still somewhere to dodge to.
+		var side := (here - boss.global_position)
+		side.y = 0.0
+		drift = Vector3(-side.z, 0.0, side.x).normalized() * 4.0
+		if drift.length() < 0.01:
+			drift = Vector3(0.0, 0.0, 3.0)
+	else:
+		drift *= ROCK_LEAD
+
+	out.append(here + drift)
 	return out
 
 
