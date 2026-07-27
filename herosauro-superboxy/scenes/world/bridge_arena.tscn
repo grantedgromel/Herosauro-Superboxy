@@ -74,12 +74,18 @@ subdivide_depth = 178
 ; a 5-unit quad cannot resolve the crest it is supposed to be sitting on. The Douro at
 ; Porto is a tidal pool between two banks; foam belongs on the near water as a hint.
 ;
-; shallow_color is the grazing-angle term, i.e. the river working as a mirror. The sky
-; shader's horizon_color is (0.929, 0.678, 0.435); the old value was more saturated and
-; brighter than the sky it was supposed to be reflecting, which no mirror can be.
-; deep_color loses some cobalt for silt-green: the Douro here is a brown-green estuary,
-; and the environment's adjustment_saturation of 1.12 was pushing the old blue further
-; than it was authored for.
+; shallow_color / deep_color / horizon_falloff, retuned against a render.
+;
+; fresnel = pow(1 - facing, horizon_falloff) and a HIGH fresnel selects shallow_color,
+; so at the authored falloff of 3.0 almost the whole surface counted as grazing and the
+; Douro rendered as a flat pale sheet barely darker than the sky -- it read as a sandbank,
+; not a river. 5.2 keeps the mirror term where it belongs, on the far water and the
+; horizon glare band, and lets deep_color own the near and middle field.
+;
+; shallow_color still sits under the sky shader's horizon_color (0.929, 0.678, 0.435),
+; because a mirror cannot out-shine what it reflects, but no longer so close to it that
+; water and sky merge. deep_color darkened toward Douro silt-green so the river reads as
+; an estuary channel with depth rather than as wet sand.
 ;
 ; wave_speed/height/scale/chop_strength/horizon_falloff/flow are Wave 1's, deliberately
 ; untouched — they were tuned against a render and the resubdivision above means the
@@ -90,8 +96,8 @@ subdivide_depth = 178
 ; general movement rather than a sideways river, so it is left alone here.
 [sub_resource type="ShaderMaterial" id="Mat_river"]
 shader = ExtResource("3_water")
-shader_parameter/shallow_color = Color(0.955, 0.75, 0.485, 1)
-shader_parameter/deep_color = Color(0.16, 0.28, 0.38, 1)
+shader_parameter/shallow_color = Color(0.86, 0.685, 0.47, 1)
+shader_parameter/deep_color = Color(0.115, 0.205, 0.245, 1)
 shader_parameter/wave_speed = 0.5
 shader_parameter/wave_height = 0.35
 shader_parameter/wave_scale = 0.18
@@ -102,7 +108,7 @@ shader_parameter/sun_direction = Vector3(-0.859785, 0.19995, -0.469882)
 shader_parameter/glint_sharpness = 165.0
 shader_parameter/chop_strength = 1.0
 shader_parameter/water_roughness = 0.07
-shader_parameter/horizon_falloff = 3.0
+shader_parameter/horizon_falloff = 5.2
 shader_parameter/foam_color = Color(0.93, 0.95, 0.96, 1)
 shader_parameter/foam_strength = 0.18
 

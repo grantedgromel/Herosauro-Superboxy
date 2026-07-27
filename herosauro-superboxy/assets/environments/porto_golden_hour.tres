@@ -214,11 +214,15 @@ fog_enabled = true
 fog_mode = 1
 fog_light_color = Color(0.878, 0.706, 0.549, 1)
 fog_sun_scatter = 0.42
-fog_density = 0.72
-fog_aerial_perspective = 0.92
+; 0.72 veiled the whole frame: at that density the depth fog blended so far
+; toward the sky colour that the Douro rendered as pale sand and the far bank
+; nearly vanished. Aerial perspective needs a GRADIENT of haze, not a constant
+; one, so density comes down and the begin distance moves out past the deck.
+fog_density = 0.34
+fog_aerial_perspective = 0.75
 fog_sky_affect = 0.0
-fog_depth_curve = 0.62
-fog_depth_begin = 26.0
+fog_depth_curve = 0.78
+fog_depth_begin = 55.0
 fog_depth_end = 340.0
 
 ; --- Volumetric fog: the god rays ---
