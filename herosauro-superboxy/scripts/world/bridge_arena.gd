@@ -148,9 +148,10 @@ func _ready() -> void:
 # --- Roadway -----------------------------------------------------------------
 
 ## Deck plates: four columns of granite bays, two per carriageway, running from
-## the tram bed out to the kerb. The 6 cm seams drop to STRUCTURE_TOP, so at the
-## sun's 11.5 degrees each course throws a hand's width of shadow onto the next —
-## which is the whole difference between a road and a grey rectangle.
+## the tram bed out to the kerb. The 6 cm-wide seams between them drop 4 cm to
+## STRUCTURE_TOP, so at the sun's 11.5 degrees every course throws a hand's width
+## of shadow across the next — which is the whole difference between a road and a
+## grey rectangle, and it costs one draw call for all 160 slabs.
 func _build_roadway() -> void:
 	var deck := Node3D.new()
 	deck.name = "Roadway"
@@ -238,6 +239,25 @@ func _build_footways() -> void:
 	var flags: Array[Vector3] = []
 	var xs := _course_line(FLAG_PITCH)
 
+	# Collision is the pavement slab plus a short ramp buried inside the
+	# kerbstones. The step has to be climbable by two very different bodies: the
+	# hero's capsule rolls up a 13 cm edge at ~43 degrees and is fine, but
+	# CharacterBody3D has no step offset and Adamastor's collider is a BOX, for
+	# which any vertical face is a wall. Left as a plain step the kerb fenced the
+	# giant two metres short of the parapet, which handed the player a safe ledge
+	# running the length of the bridge. The ramp lies entirely inside the
+	# kerbstone's own footprint, so the worst the mismatch costs is the hero's
+	# feet sinking a few centimetres into a stone he is in the act of stepping on.
+	var ramp_angle := atan(KERB_RISE / KERB_WIDTH)
+	var ramp_size := Vector3(DECK_LENGTH, 0.5,
+			sqrt(KERB_WIDTH * KERB_WIDTH + KERB_RISE * KERB_RISE))
+	# Slide the box back along its own tilted up axis, so its TOP face is the ramp
+	# and runs from the roadway at DECK_TOP up to the pavement at WALKWAY_TOP.
+	var ramp_up := Vector3(0.0, cos(ramp_angle), -sin(ramp_angle))
+	var ramp_pos := Vector3(0.0, DECK_TOP + KERB_RISE * 0.5, kerb_mid) - ramp_up * ramp_size.y * 0.5
+	var flat_inner := ROADWAY_HALF + KERB_WIDTH
+	var flat_width := WALKWAY_OUTER - flat_inner
+
 	for side in [-1.0, 1.0]:
 		# Bedding course under the lot, so a joint reads as a 5 cm groove instead
 		# of a slot dropping 17 cm into the dark of the deck mass.
@@ -246,9 +266,13 @@ func _build_footways() -> void:
 		for x in xs:
 			kerbs.append(Vector3(x, WALKWAY_TOP - kerb_size.y * 0.5, side * kerb_mid))
 			flags.append(Vector3(x, WALKWAY_TOP - flag_size.y * 0.5, side * flag_mid))
-		# One box for the kerb face and the pavement behind it.
-		SceneryKit.solid(walk, "FootwayBody", Vector3(DECK_LENGTH, KERB_RISE, step_width),
-				Vector3(0.0, DECK_TOP + KERB_RISE * 0.5, side * step_mid))
+
+		var body := SceneryKit.solid(walk, "FootwayBody",
+				Vector3(DECK_LENGTH, KERB_RISE, flat_width),
+				Vector3(0.0, DECK_TOP + KERB_RISE * 0.5, side * (flat_inner + flat_width * 0.5)))
+		SceneryKit.solid_shape(body, ramp_size,
+				Vector3(ramp_pos.x, ramp_pos.y, ramp_pos.z * side),
+				Vector3(-ramp_angle * side, 0.0, 0.0))
 
 	SceneryKit.repeat(walk, "Kerbstones", kerb_size, kerbs, kerb_mat)
 	SceneryKit.repeat(walk, "Flagstones", flag_size, flags, flag_mat)
@@ -273,7 +297,10 @@ func _build_parapets() -> void:
 
 	var bars: Array[Vector3] = []
 	var posts: Array[Vector3] = []
-	var bar_size := Vector3(0.06, 3.38 - PLINTH_TOP, 0.06)
+	# Balusters run plinth top to handrail underside; posts overlap both by 5 cm
+	# so no hairline of sky shows through a joint.
+	var handrail_under := HANDRAIL_TOP - 0.12
+	var bar_size := Vector3(0.06, handrail_under - PLINTH_TOP, 0.06)
 	var post_size := Vector3(0.17, HANDRAIL_TOP + 0.05 - (PLINTH_TOP - 0.05), 0.17)
 
 	for side in [-1.0, 1.0]:
@@ -351,8 +378,12 @@ func _build_arch() -> void:
 	arch.name = "Arch"
 	add_child(arch)
 
-	var steel := ToonFactory.iron(STEEL_COLOR)             # weathered iron grey
-	var dark_steel := ToonFactory.iron(DARK_STEEL_COLOR)
+	# ~120 short beams, welded down to two meshes. Left as MeshInstance3Ds the
+	# arch alone cost 120 draw calls under a deck you mostly see it edge-on from;
+	# baked, it is two, and the object-space triplanar grain now runs continuously
+	# along a rib instead of restarting at every segment joint.
+	var ribs := MeshBaker.new()
+	var spandrels := MeshBaker.new()
 
 	# Two parallel arch ribs, one under each kerb line, built from short straight
 	# beam segments following a parabola that dips below the deck.
@@ -362,7 +393,7 @@ func _build_arch() -> void:
 			var t := -1.0 + 2.0 * float(i) / float(ARCH_SEGMENTS)
 			var p := _arch_point(t, z_side)
 			if i > 0:
-				_beam_between(arch, prev, p, 1.0, steel)   # thicker, bolder single arch
+				ribs.add_beam(prev, p, 1.0)   # thicker, bolder single arch
 			prev = p
 
 	# A few clean spandrel posts tying the arch up to the deck (sparse, not a thicket).
@@ -372,7 +403,14 @@ func _build_arch() -> void:
 			var bottom := _arch_point(t, z_side)
 			var top := Vector3(bottom.x, DECK_BOTTOM, z_side)
 			if top.y - bottom.y > 0.8:
-				_beam_between(arch, bottom, top, 0.3, dark_steel)
+				spandrels.add_beam(bottom, top, 0.3)
+
+	# LODs off, here and on the lattice. The simplifier would be handed a hundred
+	# disjoint 0.3 m boxes, and the first thing mesh decimation does with thin
+	# disconnected geometry is collapse it — a truss that dissolves at range costs
+	# more than the triangles it saves.
+	arch.add_child(ribs.commit(ToonFactory.iron(STEEL_COLOR), "ArchRibs", false))
+	arch.add_child(spandrels.commit(ToonFactory.iron(DARK_STEEL_COLOR), "Spandrels", false))
 
 	# Two stout stone-grey piers where the arch springs off the bank. Solid: a
 	# hero knocked over the parapet near the ends can land on one, and a mesh he
@@ -398,26 +436,6 @@ func _arch_point(t: float, z: float) -> Vector3:
 	return Vector3(x, y, z)
 
 
-## Spawn a thin box "beam" spanning from a to b with the given thickness.
-func _beam_between(parent: Node3D, a: Vector3, b: Vector3, thickness: float, mat: Material) -> void:
-	var beam := MeshInstance3D.new()
-	beam.name = "Beam"
-	var length := a.distance_to(b)
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3(length, thickness, thickness)
-	beam.mesh = mesh
-	beam.material_override = mat
-	beam.position = (a + b) * 0.5
-
-	# Orient the beam's local +X (its long axis) along (b - a).
-	var dir := (b - a).normalized()
-	if dir.length() > 0.001:
-		var yaw := atan2(-dir.z, Vector2(dir.x, dir.z).length())
-		var pitch := atan2(dir.y, Vector2(dir.x, dir.z).length())
-		beam.rotation = Vector3(0.0, yaw, pitch)
-	parent.add_child(beam)
-
-
 # --- Lattice bracing ---------------------------------------------------------
 
 ## X-cross-braces between the two ribs plus a raised second chord riding each
@@ -428,17 +446,15 @@ func _build_lattice() -> void:
 	lattice.name = "Lattice"
 	add_child(lattice)
 
-	var steel := ToonFactory.iron(STEEL_COLOR)
-	# Braces live in the deck's shadow, lit almost entirely by bounce off the
-	# river, so they get a duller, less metallic iron than the sunlit ribs.
-	var brace := ToonFactory.iron(DARK_STEEL_COLOR, 1.6, 0.35, 0.72)
+	var braces := MeshBaker.new()
+	var chords := MeshBaker.new()
 
 	# X-braces between the ribs, every third segment.
 	for i in range(3, ARCH_SEGMENTS - 2, 3):
 		var t0 := -1.0 + 2.0 * float(i) / float(ARCH_SEGMENTS)
 		var t1 := -1.0 + 2.0 * float(i + 2) / float(ARCH_SEGMENTS)
-		_beam_between(lattice, _arch_point(t0, -RIB_HALF), _arch_point(t1, RIB_HALF), 0.22, brace)
-		_beam_between(lattice, _arch_point(t0, RIB_HALF), _arch_point(t1, -RIB_HALF), 0.22, brace)
+		braces.add_beam(_arch_point(t0, -RIB_HALF), _arch_point(t1, RIB_HALF), 0.22)
+		braces.add_beam(_arch_point(t0, RIB_HALF), _arch_point(t1, -RIB_HALF), 0.22)
 
 	# The second chord rides 2 units above the main rib across the middle span,
 	# thickening the arch into the truss band you see from the river.
@@ -447,8 +463,14 @@ func _build_lattice() -> void:
 		for i in range(1, 13):
 			var t := lerpf(-0.8, 0.8, float(i) / 12.0)
 			var p := _arch_point(t, z_side) + Vector3(0.0, 2.0, 0.0)
-			_beam_between(lattice, prev, p, 0.5, steel)
+			chords.add_beam(prev, p, 0.5)
 			prev = p
+
+	# Braces live in the deck's shadow, lit almost entirely by bounce off the
+	# river, so they get a duller, less metallic iron than the sunlit chords.
+	lattice.add_child(braces.commit(
+			ToonFactory.iron(DARK_STEEL_COLOR, 1.6, 0.35, 0.72), "Braces", false))
+	lattice.add_child(chords.commit(ToonFactory.iron(STEEL_COLOR), "SecondChord", false))
 
 
 # --- Lampposts ---------------------------------------------------------------
@@ -458,10 +480,17 @@ func _build_lamps() -> void:
 	lamps.name = "Lamps"        # LightingRig.LAMP_GROUP_NAME — do not rename alone
 	add_child(lamps)
 
-	var iron := ToonFactory.iron(LAMP_IRON_COLOR, 0.8, 0.2, 0.45)
+	# All the cast iron on all eight posts bakes into one mesh; only the eight
+	# glowing globes stay separate, because they are separate materials and
+	# because lighting_rig.gd has to be able to find them (see _lamp below).
+	var castings := MeshBaker.new()
 	for x in LAMP_XS:
 		for side in [-1.0, 1.0]:
-			_lamp(lamps, x, side * PARAPET_MID, iron)
+			_lamp(lamps, castings, x, side * PARAPET_MID)
+	# LODs off for the same reason as the arch: eight disjoint 13 cm poles are
+	# exactly what mesh decimation deletes first.
+	lamps.add_child(castings.commit(
+			ToonFactory.iron(LAMP_IRON_COLOR, 0.8, 0.2, 0.45), "LampCastings", false))
 
 	# Capsules, and all eight on one body: a swept-sphere SpringArm glides around
 	# a capsule where it snags on the corners of a box, and one body means one
@@ -483,18 +512,24 @@ func _build_lamps() -> void:
 			poles.add_child(cs)
 
 
-## One dusk lamppost standing on the parapet: cast-iron base, slim pole, warm
-## globe, spiked cap.
+## One dusk lamppost standing on the parapet: cast-iron base, slim pole, collar,
+## warm globe, spiked cap. The ironwork goes into the shared bake; the globe is
+## added to the tree directly.
 ##
-## Every part is added FLAT under `parent`, and the globe is the only SphereMesh.
-## Both are load-bearing: lighting_rig.gd finds the practicals by scanning this
-## node's direct children for a SphereMesh, so nesting the parts would leave the
-## bridge unlit, and a second sphere anywhere here (a finial, a lantern shell)
-## would burn one of the eight OmniLight3D slots on it.
-func _lamp(parent: Node3D, x: float, z: float, iron: Material) -> void:
-	SceneryKit.box(parent, "LampBase", Vector3(0.34, 0.22, 0.34), Vector3(x, LAMP_BASE_Y + 0.11, z), iron)
-	SceneryKit.cylinder(parent, "LampPole", 0.055, 0.075, 2.60, Vector3(x, LAMP_BASE_Y + 1.52, z), iron)
-	SceneryKit.cylinder(parent, "LampCollar", 0.11, 0.11, 0.10, Vector3(x, LAMP_GLOBE_Y - 0.23, z), iron)
+## The globe being a SphereMesh added FLAT under `parent` is load-bearing:
+## lighting_rig.gd finds the practicals by scanning the Lamps node's DIRECT
+## children for a SphereMesh, so nesting the parts would leave the bridge unlit —
+## and any second sphere here (a finial, a lantern shell) would burn one of the
+## eight OmniLight3D slots on itself.
+func _lamp(parent: Node3D, castings: MeshBaker, x: float, z: float) -> void:
+	castings.add_box(Vector3(0.34, 0.22, 0.34),
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.11, z)))
+	castings.add_cylinder(0.065, 2.60,
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 1.52, z)))
+	castings.add_cylinder(0.11, 0.10,
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_GLOBE_Y - 0.23, z)))
+	castings.add_cylinder(0.10, 0.22,
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_GLOBE_Y + 0.21, z)))
 
 	var globe := MeshInstance3D.new()
 	globe.name = "LampGlobe"
@@ -509,8 +544,6 @@ func _lamp(parent: Node3D, x: float, z: float, iron: Material) -> void:
 	# blooms rather than clipping to a flat white blob.
 	globe.material_override = ToonFactory.glow(Color(1.0, 0.85, 0.55), 2.2)
 	parent.add_child(globe)
-
-	SceneryKit.cylinder(parent, "LampCap", 0.03, 0.16, 0.22, Vector3(x, LAMP_GLOBE_Y + 0.21, z), iron)
 
 
 # --- Layout helpers ----------------------------------------------------------

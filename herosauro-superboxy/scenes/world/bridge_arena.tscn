@@ -19,21 +19,92 @@ size = Vector3(100, 2, 14)
 [sub_resource type="BoxMesh" id="Mesh_deck"]
 size = Vector3(100, 1.96, 14)
 
+; --- River ---
+; 240x240 stopped 120 units out, which was already short of the far bank; with the
+; photogrammetry backdrop standing between z = -131 and z = -390 and reaching
+; x = +-154, a plane that size would end in a hard edge right in front of it, and the
+; scan's own untextured river plane and its hanging capture skirt would be on show
+; below the cut. 900x900 recentred on z = -140 covers x,z in [-450, 450] x [-590, 310]
+; — 296 units of margin past the scan in every direction, and 310 units of water on
+; the +z side where nothing else is modelled at all.
+;
+; Subdivision scales with it rather than staying put: 900/179 = 5.03-unit quads
+; against the old 240/49 = 4.90, so the swell is sampled exactly as densely as Wave 1
+; tuned it for. That is the whole reason the wave uniforms below are left alone. The
+; cost is 32,400 vertices doing six trig ops each, in one draw call.
 [sub_resource type="PlaneMesh" id="Mesh_river"]
-size = Vector2(240, 240)
-subdivide_width = 48
-subdivide_depth = 48
+size = Vector2(900, 900)
+subdivide_width = 178
+subdivide_depth = 178
 
+; --- Mat_river ---
+; Uniform-by-uniform against assets/shaders/water_wave.gdshader.
+;
+; sun_direction was the one that was actually wrong: the shader defaults to
+; (0.354, 0.707, 0.612), a sun 45 degrees up and behind the camera, and the scene has
+; never set it. A DirectionalLight3D shines down its own -Z, so the direction *towards*
+; the sun is SunLight's +Z basis column.
+;
+; Read that column carefully. The twelve floats in a Transform3D literal are the basis
+; ROWS, not its axes — Basis::set() fills rows[0..2] in order — so the +Z axis is the
+; third element of each row, (-0.859785, 0.19995, -0.469882), and NOT the third triple
+; (0.87751, 0.095885, -0.469882). The two differ by 121 degrees of azimuth. The check
+; that settles it: asin(0.19995) = 11.53 degrees of elevation, which is the golden-hour
+; sun this scene was lit for, while the transposed reading gives 5.5.
+;
+; So the sun sits low over the -x/-z quadrant, behind the Ribeira bank and behind the
+; city backdrop. Looking down the gorge is looking within 30 degrees of into the sun,
+; which is where the glitter path belongs and why the far water carries the glare band.
+; If SunLight moves, this moves with it.
+;
+; glint_strength 0.45 -> 1.2: the shader writes the glitter as EMISSION specifically so
+; it blooms in the HDR buffer, but the environment's glow_hdr_threshold is 1.05, so at
+; 0.45 it could never reach the glow pass at all. pow(N.H, sharpness) is a very tight
+; lobe, so only the handful of facets actually pointing at the sun cross the line.
+;
+; glint_sharpness 190 -> 165 and water_roughness 0.055 -> 0.07: the plane is now 14x
+; the area, most of it grazing, and this project has MSAA + FXAA but no TAA — neither
+; of which touches shading aliasing. Widening both lobes slightly is cheap insurance
+; against sub-pixel chop sparkling along the horizon, and a low sun on water is a long
+; soft glitter path anyway, not a point.
+;
+; foam_strength 0.30 -> 0.18: whitecaps key off smoothstep(0.45, 0.95, h) on the
+; unit-amplitude swell, so they fire on the top of every crest no matter how calm the
+; water is set to be. Over 14x the area that put foam all the way to the horizon, where
+; a 5-unit quad cannot resolve the crest it is supposed to be sitting on. The Douro at
+; Porto is a tidal pool between two banks; foam belongs on the near water as a hint.
+;
+; shallow_color is the grazing-angle term, i.e. the river working as a mirror. The sky
+; shader's horizon_color is (0.929, 0.678, 0.435); the old value was more saturated and
+; brighter than the sky it was supposed to be reflecting, which no mirror can be.
+; deep_color loses some cobalt for silt-green: the Douro here is a brown-green estuary,
+; and the environment's adjustment_saturation of 1.12 was pushing the old blue further
+; than it was authored for.
+;
+; wave_speed/height/scale/chop_strength/horizon_falloff/flow are Wave 1's, deliberately
+; untouched — they were tuned against a render and the resubdivision above means the
+; bigger plane samples them just as well. One caveat for whoever owns the shader:
+; field_pos() drifts the wave field along (12, 4) in xz, i.e. mostly +x, but this
+; arena's banks are the masses at |x| >= 50, so the Douro here runs along Z. The
+; downstream drift is 90 degrees out. At flow = 0.02 it is 0.24 units/s and reads as
+; general movement rather than a sideways river, so it is left alone here.
 [sub_resource type="ShaderMaterial" id="Mat_river"]
 shader = ExtResource("3_water")
-shader_parameter/shallow_color = Color(0.945, 0.62, 0.4, 1)
-shader_parameter/deep_color = Color(0.18, 0.32, 0.5, 1)
+shader_parameter/shallow_color = Color(0.915, 0.665, 0.43, 1)
+shader_parameter/deep_color = Color(0.16, 0.28, 0.38, 1)
 shader_parameter/wave_speed = 0.5
 shader_parameter/wave_height = 0.35
 shader_parameter/wave_scale = 0.18
 shader_parameter/flow = 0.02
-shader_parameter/glint_color = Color(1, 0.85, 0.55, 1)
-shader_parameter/glint_strength = 0.45
+shader_parameter/glint_color = Color(1, 0.8, 0.55, 1)
+shader_parameter/glint_strength = 1.2
+shader_parameter/sun_direction = Vector3(-0.859785, 0.19995, -0.469882)
+shader_parameter/glint_sharpness = 165.0
+shader_parameter/chop_strength = 1.0
+shader_parameter/water_roughness = 0.07
+shader_parameter/horizon_falloff = 3.0
+shader_parameter/foam_color = Color(0.93, 0.95, 0.96, 1)
+shader_parameter/foam_strength = 0.18
 
 [node name="BridgeArena" type="Node3D"]
 script = ExtResource("1_arena")
@@ -55,8 +126,17 @@ surface_material_override/0 = ExtResource("2_deck")
 ; bridge_arena.gd builds a proper parapet in their place — granite plinth, iron
 ; balusters, handrail — with one collider box per side standing in for the lot.
 
+; Recentred from z = 0 to z = -140 so the extra water goes where the view goes: down
+; the gorge, past the procedural banks and under the photogrammetry backdrop. Still at
+; y = -15 — bridge_arena.gd buries the abutments to -16.4 against that number, and
+; sky_background.gd bobs its rabelos on it at -14.75.
+;
+; Shadows off. There is no riverbed for it to shadow, and 64k triangles of water in
+; every directional shadow split is pure cost. Left on the default GI mode: it is
+; static, it is below everything, and its warm bounce off the sunset is worth having.
 [node name="River" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -15, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -15, -140)
+cast_shadow = 0
 mesh = SubResource("Mesh_river")
 surface_material_override/0 = SubResource("Mat_river")
 

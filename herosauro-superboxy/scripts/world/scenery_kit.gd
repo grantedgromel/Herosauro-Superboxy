@@ -88,22 +88,27 @@ static func repeat(parent: Node3D, node_name: String, size: Vector3,
 ## with this will push the camera as well as the player — which is the point for
 ## a parapet and a mistake for a handrail.
 static func solid(parent: Node3D, node_name: String, size: Vector3,
-		pos: Vector3) -> StaticBody3D:
+		pos: Vector3, rot: Vector3 = Vector3.ZERO) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.name = node_name
 	body.collision_layer = PhysicsLayers.WORLD
 	body.collision_mask = 0
 	parent.add_child(body)
-	solid_shape(body, size, pos)
+	solid_shape(body, size, pos, rot)
 	return body
 
 
-static func solid_shape(body: StaticBody3D, size: Vector3, pos: Vector3) -> void:
+## `rot` is Euler radians on the shape, for the occasional wedge — a collision
+## ramp under a visual step, say. Keep it to shallow tilts: a steeply rotated box
+## is exactly the shape a swept-sphere camera probe resolves badly against.
+static func solid_shape(body: StaticBody3D, size: Vector3, pos: Vector3,
+		rot: Vector3 = Vector3.ZERO) -> void:
 	var shape := BoxShape3D.new()
 	shape.size = size
 	var cs := CollisionShape3D.new()
 	cs.shape = shape
 	cs.position = pos
+	cs.rotation = rot
 	body.add_child(cs)
 
 

@@ -1,0 +1,21 @@
+[gd_scene load_steps=2 format=3]
+
+; Deliberately holds no ext_resource for porto_backdrop.glb. The Web export preset
+; strips assets/models/backdrop/*, and a scene that hard-references a stripped file
+; fails to load; city_backdrop.gd loads it by path behind a ResourceLoader.exists()
+; guard instead. The tuning values below are the ones derived in that script's
+; header comment — they are world coordinates, so this node's parent must sit at
+; the arena origin with an identity transform.
+
+[ext_resource type="Script" path="res://scripts/world/city_backdrop.gd" id="1_backdrop"]
+
+[node name="CityBackdrop" type="Node3D"]
+script = ExtResource("1_backdrop")
+scan_yaw_degrees = -6.382
+scan_scale = 3.2
+scan_origin = Vector3(-63.467, -11.8, -150)
+unshaded = true
+albedo_tint = Color(0.95, 0.92, 0.87, 1)
+lod_bias = 3.0
+visibility_end = 0.0
+visibility_fade_length = 60.0
