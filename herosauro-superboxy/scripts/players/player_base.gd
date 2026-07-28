@@ -775,65 +775,78 @@ func _fix_model_shadow_bounds(margin: float = 1.2) -> void:
 ## the deck however good the lighting is. Every game with a low sun and a
 ## close camera carries one of these.
 ##
-## A Decal rather than a quad: it conforms to whatever is under him — roadway,
-## tram rail, kerb, the pavement step — with no z-fighting and no need to know
-## the surface normal. GL Compatibility does not render decals, so the web tier
-## simply goes without, which is the same trade the rest of that tier makes.
+## This was a Decal first, which is the tidier tool — it conforms to whatever is
+## under him with no z-fighting and no need for the surface normal. It is not
+## the one that ships. A probe over the running fight showed the decal correct
+## in every respect (visible, 1.9 x 1.0 x 1.9, ground at y=2.000 sitting inside
+## a box spanning 1.350..2.350) and two A/B renders of the same gameplay frame
+## still came back pixel-identical: nothing was drawing it. GL Compatibility
+## does not render decals at all, so the web tier could never have had one
+## either.
+##
+## So: a quad laid on the ground, multiply-blended. It draws on every renderer,
+## it costs one triangle pair, and — unlike the decal — I can actually see it in
+## a capture here. It does not conform to uneven ground, which is why it is
+## aligned to the surface normal the ray already returns; the deck is flat where
+## he walks anyway.
 ## Half the collision capsule's height (2.0 in herosauro.tscn / superboxy.tscn),
 ## i.e. how far the feet sit below the body origin. The same 1.0 the subclasses'
 ## MODEL_Y uses to drop the art onto the bottom of the capsule.
 const FEET_BELOW_ORIGIN := 1.0
 
 const CONTACT_FOOTPRINT := 1.9      ## blob diameter at the feet, metres
-## Depth of the projection box. Shallow, and centred ON the ground rather than
-## hung below the feet: Godot fades a decal by distance from the CENTRE of its
-## box, so a surface sitting at the top face is at maximum fade and paints
-## nothing. The first attempt put the deck exactly there and the blob never
-## appeared.
-const CONTACT_DEPTH := 1.0
-## How far below the contact point to bias the box centre, so the top face
-## clears his shoes rather than darkening them.
-const CONTACT_SINK := 0.15
-const CONTACT_STRENGTH := 0.5       ## opacity directly under him
+const CONTACT_STRENGTH := 0.55      ## how far towards black directly under him
+## How far above the contact point the quad floats. Enough to clear z-fighting
+## against the deck at this depth range, small enough to still read as contact.
+const CONTACT_LIFT := 0.02
 ## Airborne, the blob widens and fades — the standard read for "further from the
 ## ground". Past this height it is gone entirely.
 const CONTACT_FADE_HEIGHT := 3.0
 const CONTACT_AIR_SPREAD := 1.7
 
-var _contact: Decal
+var _contact: MeshInstance3D
+var _contact_mat: StandardMaterial3D
 
 
 func _build_contact_shadow() -> void:
-	_contact = Decal.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE          # scaled per frame, so authored at unit size
+	quad.orientation = PlaneMesh.FACE_Y
+
+	_contact_mat = StandardMaterial3D.new()
+	_contact_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_contact_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# Plain alpha over black. Multiply blend would scale the light already there,
+	# which is the more physical read, but its alpha handling differs per
+	# backend and this whole detour started with something that silently drew
+	# nothing. Predictable beats clever here.
+	_contact_mat.albedo_color = Color(0.0, 0.0, 0.0, 1.0)
+	_contact_mat.albedo_texture = _contact_texture()
+	# Lying flat and hugging the ground, it must not write depth or it fights
+	# the deck; and it must never be a shadow caster itself.
+	_contact_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	_contact_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.material = _contact_mat
+
+	_contact = MeshInstance3D.new()
 	_contact.name = "ContactShadow"
-	_contact.texture_albedo = _contact_texture()
-	# albedo_mix 1.0 replaces the surface albedo wherever the blob is opaque, and
-	# the blob is black — so this darkens rather than tints.
-	_contact.albedo_mix = 1.0
-	_contact.modulate = Color(0.0, 0.0, 0.0, 1.0)
-	# Both fades are measured from the CENTRE of the box, and the box is centred
-	# on the ground, so these soften the edges of a thin slab rather than gating
-	# whether it draws at all. Leave them at Godot's default curve.
-	_contact.upper_fade = 1.0
-	_contact.lower_fade = 1.0
-	# normal_fade stays off. It drops the decal as the receiving surface turns
-	# away from the projection, which sounds right for keeping the blob off the
-	# parapet — but it is also the second thing that can silently produce
-	# nothing at all, and one invisible-decal bug per session is enough. The
-	# deck is flat where he walks.
-	_contact.normal_fade = 0.0
+	_contact.mesh = quad
+	_contact.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# It is drawn where the ground is, not where the body is, so it must not
+	# inherit his yaw — otherwise the blob spins as he turns.
+	_contact.top_level = true
 	add_child(_contact)
 	_update_contact_shadow()
 
 
-## Black at the centre, gone at the rim. Same shape as the menu's dusk pocket,
-## for the same reason: a hard-edged disc reads as a sticker, not a shadow.
+## Opaque at the centre, gone at the rim. A hard-edged disc reads as a sticker,
+## which is the thing this is here to avoid.
 func _contact_texture() -> GradientTexture2D:
 	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	grad.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
 	grad.colors = PackedColorArray([
 		Color(0.0, 0.0, 0.0, CONTACT_STRENGTH),
-		Color(0.0, 0.0, 0.0, CONTACT_STRENGTH * 0.55),
+		Color(0.0, 0.0, 0.0, CONTACT_STRENGTH * 0.6),
 		Color(0.0, 0.0, 0.0, 0.0),
 	])
 	var gt := GradientTexture2D.new()
@@ -851,35 +864,49 @@ func _contact_texture() -> GradientTexture2D:
 func _update_contact_shadow() -> void:
 	if _contact == null:
 		return
-	var drop := _ground_drop()
-	if drop < 0.0:
+	var ground := _ground_hit()
+	if ground.is_empty():
 		_contact.visible = false
 		return
+
+	var point: Vector3 = ground["position"]
+	var normal: Vector3 = ground["normal"]
+	var feet := global_position.y - FEET_BELOW_ORIGIN
+	var drop: float = maxf(0.0, feet - point.y)
 	var t: float = clampf(drop / CONTACT_FADE_HEIGHT, 0.0, 1.0)
-	var spread: float = lerpf(1.0, CONTACT_AIR_SPREAD, t)
-	var width := CONTACT_FOOTPRINT * spread
+
 	_contact.visible = true
-	_contact.size = Vector3(width, CONTACT_DEPTH, width)
-	_contact.modulate.a = 1.0 - t
-	# Centred on the ground he is standing over — which is `drop` below his feet,
-	# so the blob stays on the deck as he jumps instead of rising with him — and
-	# sunk slightly so the top face clears his shoes.
-	_contact.position = Vector3(0.0, -FEET_BELOW_ORIGIN - drop - CONTACT_SINK, 0.0)
+	# top_level, so this is a world transform: sit on the ground point, lie along
+	# the surface, and scale to the faded footprint.
+	var basis := _basis_from_up(normal)
+	var width := CONTACT_FOOTPRINT * lerpf(1.0, CONTACT_AIR_SPREAD, t)
+	_contact.global_transform = Transform3D(basis.scaled(Vector3(width, 1.0, width)),
+			point + normal * CONTACT_LIFT)
+	# Fades out with height, so a jump lifts the blob off rather than dragging a
+	# hard disc across the deck under him.
+	_contact_mat.albedo_color = Color(0.0, 0.0, 0.0, 1.0 - t)
 
 
-## Metres from the feet down to whatever is below, or -1 if nothing is in range.
-func _ground_drop() -> float:
-	if is_on_floor():
-		return 0.0
+## Any orthonormal basis whose +Y is `up`. Which way it faces about that axis is
+## unobservable — the blob is radially symmetric.
+func _basis_from_up(up: Vector3) -> Basis:
+	var n := up.normalized()
+	var ref := Vector3.FORWARD if absf(n.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT
+	var x := ref.cross(n).normalized()
+	var z := n.cross(x)
+	return Basis(x, n, z)
+
+
+## The ground under the hero: position and normal, or empty if nothing is within
+## reach. Always raycasts — is_on_floor() alone gives no contact point, and the
+## blob has to sit somewhere.
+func _ground_hit() -> Dictionary:
 	var space := get_world_3d().direct_space_state
-	var from := global_position + Vector3(0.0, -FEET_BELOW_ORIGIN + 0.05, 0.0)
-	var to := from + Vector3(0.0, -(CONTACT_FADE_HEIGHT + 0.5), 0.0)
+	var from := global_position + Vector3(0.0, -FEET_BELOW_ORIGIN + 0.2, 0.0)
+	var to := from + Vector3(0.0, -(CONTACT_FADE_HEIGHT + 0.7), 0.0)
 	var query := PhysicsRayQueryParameters3D.create(from, to, PhysicsLayers.WORLD)
 	query.exclude = [get_rid()]
-	var hit := space.intersect_ray(query)
-	if hit.is_empty():
-		return -1.0
-	return from.y - (hit["position"] as Vector3).y
+	return space.intersect_ray(query)
 
 
 func _model_meshes(node: Node) -> Array[MeshInstance3D]:
