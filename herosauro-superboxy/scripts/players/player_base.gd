@@ -22,7 +22,10 @@ extends CharacterBody3D
 @export var ability_cooldown: float = 2.0
 @export var attack_cooldown: float = 0.45   # basic-attack rate (fast, spammable)
 @export var attack_damage: int = 8          # basic-attack damage (low vs the special)
-@export var attack_range: float = 3.0       # forward reach of the basic melee
+## Forward reach of the basic melee, measured from the hero's centre to the far
+## face of the swing volume. 3.9 rather than 3.0 because the giant shoves the
+## hero out to ~3.65 m; see _build_swing_box().
+@export var attack_range: float = 3.9
 @export var attack_hold: float = 0.32       # how long the swing anim freezes locomotion
 @export var knockback_decay: float = 14.0
 @export var invuln_time: float = 1.5
@@ -81,7 +84,7 @@ var _flicker: float = 0.0
 var _ability_timer: float = 0.0
 var _attack_timer: float = 0.0
 var _attack_swing: float = 0.0    # active-frames window during which the swing can connect
-var _attack_landed: bool = false
+var _swing: Hitbox = null
 var _knockback: Vector3 = Vector3.ZERO
 var _model_root: Node3D
 var _wish_dir: Vector3 = Vector3.ZERO   # world-space move intent this tick
@@ -120,6 +123,7 @@ func _ready() -> void:
 		_model_root.name = "Model"
 		add_child(_model_root)
 	_build_visuals()
+	_build_swing_box()
 	reset_state()
 
 
@@ -334,31 +338,88 @@ func _handle_attack() -> void:
 	if InputManager.is_attack_just_pressed():
 		_attack_timer = attack_cooldown
 		_attack_swing = 0.14
-		_attack_landed = false
 		_aim_at_camera(attack_hold)
 		play_action_anim("attack", attack_hold)
 
 
+## Build the swing volume once. Armed for the active frames of an attack.
+##
+## This replaces a distance + dot-product cone that measured to the BOSS'S
+## ORIGIN, which is at his feet — so the reach had to cover his half-extent as
+## well as the gap. His collider is 5 x 9 x 4, so his surface stands 2.0-2.5 m
+## out; add the hero's 0.45 m capsule and the closest legal approach is ~2.95 m
+## against an attack_range of 3.0. Five centimetres of margin head-on, and from
+## a diagonal the corner sits ~3.65 m away, which is simply unreachable. The
+## basic melee could not reliably land a hit on a stationary target.
+##
+## A volume in front of the hero has no such problem: it overlaps the giant's
+## collider rather than trying to out-reach it, and it catches props too.
+func _build_swing_box() -> void:
+	# Sized so the volume's far face lands at attack_range. That has to clear the
+	# giant's PUSH-OUT, not just his collider: his body box is 5 x 9 x 4 and the
+	# shove volume is that +1.4 on X and Z, so with the hero's 0.45 m capsule he
+	# can be held 3.65 m from the giant's centre. A 3.0 m reach measured to the
+	# giant's origin never stood a chance.
+	#
+	# Offset along local +X, NOT -Z: _face_movement sets
+	# rotation.y = atan2(-facing_dir.z, facing_dir.x), so yaw 0 means facing +X and
+	# the body's forward axis is local +X. (The models carry MODEL_YAW = +-PI/2 to
+	# reconcile their own -Z forward with that; the hitbox hangs off the body, so
+	# it follows the body's convention, not the model's.) Verified by probe: the
+	# volume sits on facing_dir with dot 1.000 at all four cardinal headings.
+	var near := 0.2                       # starts just clear of the hero's own capsule
+	var depth: float = maxf(attack_range - near, 1.0)
+	_swing = Hitbox.box(self, Vector3(depth, 2.0, 2.4),
+		Vector3(near + depth * 0.5, 0.2, 0.0),
+		PhysicsLayers.BOSS | PhysicsLayers.PROPS, "SwingVolume")
+	_swing.damage = attack_damage
+	_swing.knockback = 4.0
+	_swing.lift = 0.0
+	_swing.prop_impulse = 9.0
+	_swing.source_player = player_id
+	# Knockback should push away from the hero, not off the offset volume's centre.
+	_swing.origin_node = self
+	_swing.landed.connect(_on_swing_landed)
+
+
+func _on_swing_landed(target: Node3D) -> void:
+	if target.is_in_group("boss"):
+		AudioManager.play_boss_hit()
+		GameManager.hit_stop(0.03)
+		if target.has_method("nudge"):
+			target.nudge(facing_dir, 0.4)
+
+
 func _process_attack_hit() -> void:
-	if _attack_swing <= 0.0 or _attack_landed:
+	if _swing == null:
 		return
-	var boss := get_tree().get_first_node_in_group("boss")
-	if boss == null:
+	var want := _attack_swing > 0.0
+	if want and not _swing.is_armed():
+		# Re-sync from the exports every swing rather than trusting the values
+		# they had at _ready(). Both subclasses call super._ready() FIRST and set
+		# attack_range/attack_damage AFTER it, so anything baked in at build time
+		# is the base default, not the hero's own number.
+		_sync_swing_shape()
+		_swing.damage = attack_damage
+		_swing.source_player = player_id
+		_swing.arm(_attack_swing)
+	elif not want and _swing.is_armed():
+		_swing.disarm()
+
+
+## Keep the volume's far face at attack_range.
+func _sync_swing_shape() -> void:
+	var box := _swing.shape as BoxShape3D
+	if box == null:
 		return
-	var to: Vector3 = (boss as Node3D).global_position - global_position
-	to.y = 0.0
-	var dist := to.length()
-	if dist > attack_range:
+	var near := 0.2
+	var depth: float = maxf(attack_range - near, 1.0)
+	if is_equal_approx(box.size.x, depth):
 		return
-	# Must be roughly facing the boss (forward cone), so it reads as a directed swing.
-	if dist > 0.1 and facing_dir.dot(to.normalized()) < 0.3:
-		return
-	GameManager.damage_boss(attack_damage, player_id)
-	AudioManager.play_boss_hit()
-	if boss.has_method("nudge"):
-		boss.nudge(facing_dir, 0.4)
-	GameManager.hit_stop(0.03)
-	_attack_landed = true
+	# The shape is this hitbox's own, built in _build_swing_box, so mutating it
+	# cannot leak into another node.
+	box.size = Vector3(depth, box.size.y, box.size.z)
+	_swing.position = Vector3(near + depth * 0.5, _swing.position.y, _swing.position.z)
 
 
 ## Snap to face a world point. Kept as public API for scripted moments (cutscene
@@ -435,7 +496,6 @@ func reset_state() -> void:
 	_ability_timer = 0.0
 	_attack_timer = 0.0
 	_attack_swing = 0.0
-	_attack_landed = false
 	_aim_lock = 0.0
 	_wish_dir = Vector3.ZERO
 	_blend_speed = 0.0

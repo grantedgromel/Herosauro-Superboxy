@@ -160,8 +160,9 @@ static var _tex_cache: Dictionary = {}
 
 # --- Text --------------------------------------------------------------------
 
-## Primary text factory. `scale` is a Scale entry.
-static func text(scale: int, body: String, color: Color = TEXT_PRIMARY,
+## Primary text factory: UI face, left-aligned, sized by a Scale entry.
+## Every factory here takes the string first, then the scale.
+static func text(body: String, scale: int = Scale.BODY, color: Color = TEXT_PRIMARY,
 		align: int = HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	return _make_label(body, scale, color, false, align, false)
 
@@ -462,7 +463,7 @@ static func key_cap(key: String) -> PanelContainer:
 	sb.content_margin_top = 3
 	sb.content_margin_bottom = 3
 	p.add_theme_stylebox_override("panel", sb)
-	var l := text(Scale.MICRO, key.to_upper(), TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_CENTER)
+	var l := text(key.to_upper(), Scale.MICRO, TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_CENTER)
 	l.custom_minimum_size = Vector2(18, 0)
 	p.add_child(l)
 	return p
@@ -480,7 +481,7 @@ static func hint_row(entries: Array, gap: int = SPACE_LG) -> HBoxContainer:
 		pair.add_theme_constant_override("separation", SPACE_SM)
 		pair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		pair.add_child(key_cap(String(e[0])))
-		pair.add_child(text(Scale.CAPTION, String(e[1]), TEXT_SECONDARY))
+		pair.add_child(text(String(e[1]), Scale.CAPTION, TEXT_SECONDARY))
 		row.add_child(pair)
 	return row
 
@@ -492,10 +493,10 @@ static func stat_row(name: String, value: String, value_color: Color = GOLD,
 	var row := HBoxContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_theme_constant_override("separation", SPACE_MD)
-	var n := text(Scale.LABEL, name.to_upper(), TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
+	var n := text(name.to_upper(), Scale.LABEL, TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
 	n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(n)
-	var v := text(emphasis, value, value_color, HORIZONTAL_ALIGNMENT_RIGHT)
+	var v := text(value, emphasis, value_color, HORIZONTAL_ALIGNMENT_RIGHT)
 	v.name = "Value"
 	row.add_child(v)
 	return row

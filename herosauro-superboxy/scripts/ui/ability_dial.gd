@@ -29,7 +29,7 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	_glyph_label = UIStyle.text(UIStyle.Scale.SUBHEAD, glyph, UIStyle.TEXT_PRIMARY,
+	_glyph_label = UIStyle.text(glyph, UIStyle.Scale.SUBHEAD, UIStyle.TEXT_PRIMARY,
 		HORIZONTAL_ALIGNMENT_CENTER)
 	_glyph_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_glyph_label.offset_bottom = -2.0

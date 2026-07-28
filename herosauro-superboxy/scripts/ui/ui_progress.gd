@@ -58,3 +58,17 @@ static func submit(score: int, seconds: float, victory: bool) -> bool:
 static func format_time(seconds: float) -> String:
 	var s := maxi(0, int(seconds))
 	return "%d:%02d" % [s / 60, s % 60]
+
+
+## 1240 -> "1,240". A long score read as one run of digits is a number nobody
+## can compare against their last one, which defeats the point of showing it.
+static func format_score(n: int) -> String:
+	var digits := str(absi(n))
+	var out := ""
+	var count := 0
+	for i in range(digits.length() - 1, -1, -1):
+		out = digits[i] + out
+		count += 1
+		if count % 3 == 0 and i > 0:
+			out = "," + out
+	return ("-" if n < 0 else "") + out

@@ -40,7 +40,7 @@ func pop(body: String, at: Vector2, color: Color = UIStyle.GOLD, crit: bool = fa
 			oldest.queue_free()
 
 	var scale_step: int = UIStyle.Scale.HEADING if crit else UIStyle.Scale.READOUT
-	var l := UIStyle.text(scale_step, body, color, HORIZONTAL_ALIGNMENT_CENTER)
+	var l := UIStyle.text(body, scale_step, color, HORIZONTAL_ALIGNMENT_CENTER)
 	l.size = BOX
 	l.pivot_offset = BOX * 0.5
 	l.position = at - BOX * 0.5
@@ -51,7 +51,9 @@ func pop(body: String, at: Vector2, color: Color = UIStyle.GOLD, crit: bool = fa
 	var end := l.position + Vector2(DRIFT * _side * randf_range(0.6, 1.2), -RISE * randf_range(0.85, 1.2))
 
 	l.scale = Vector2(0.55, 0.55)
-	var t := create_tween()
+	# Bound to the label, not to this layer: clear_all() frees the labels, and a
+	# tween bound to a freed target dies with it instead of erroring on a ghost.
+	var t := l.create_tween()
 	t.set_parallel(true)
 	t.tween_property(l, "scale", Vector2(1.22, 1.22) if crit else Vector2.ONE, 0.16) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)

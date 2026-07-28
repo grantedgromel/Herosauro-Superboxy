@@ -1,102 +1,265 @@
 extends Control
-## Victory / Defeat screen — a polished centred card with the result, run stats
-## and replay options. Appears a beat after the fight ends.
+## Victory / Defeat card.
+##
+## Two-column: the character who decided the fight on the left (the hero on a
+## win, the giant on a loss) and the verdict, the run's numbers and the two
+## things you can do next on the right. Using the concept art here is the whole
+## point — a results screen with a face on it is authored, one with a font on it
+## is a debug print.
+##
+## It animates in rather than appearing: the scrim fades, the card rises and
+## settles, then the verdict pops. Roughly half a second, and it turns "the game
+## stopped" into "the game is telling you something".
+
+const CARD_W := 760.0
+## Declared height. The PanelContainer grows past this if its content demands it,
+## so the reveal takes its pivot from the measured size, not from this constant.
+const CARD_H := 452.0
+const ART_H := 310.0
+const REVEAL := 0.42
 
 var _dim: ColorRect
+## Full-rect wrapper the card is centred inside. The rise animation moves THIS,
+## because `position` on an anchor-centred control is measured from the parent's
+## top-left, not from the anchor — tweening the card itself would fling it to the
+## top of the screen.
+var _stage: Control
+var _card: PanelContainer
+var _glow: TextureRect
+var _art: TextureRect
 var _title: Label
 var _subtitle: Label
-var _stats: Label
+var _rows: VBoxContainer
+var _badge: Label
 var _again_btn: Button
+var _menu_btn: Button
+## Input is ignored until the reveal finishes, so a mashed attack button on the
+## killing blow cannot skip straight past the results.
+var _interactive: bool = false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	visible = false
+	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	_dim = ColorRect.new()
-	_dim.color = Color(0.02, 0.02, 0.06, 0.72)
+	_dim.color = UIStyle.OVERLAY
 	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_dim)
 
-	var card := PanelContainer.new()
-	card.add_theme_stylebox_override("panel", UIStyle.panel(Color(0.07, 0.06, 0.11, 0.96), 22, 34))
-	card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	card.offset_left = -300.0
-	card.offset_right = 300.0
-	card.offset_top = -220.0
-	card.offset_bottom = 220.0
-	add_child(card)
+	_stage = Control.new()
+	_stage.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_stage)
 
-	var box := VBoxContainer.new()
-	box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 16)
-	card.add_child(box)
+	_card = UIStyle.card(UIStyle.Elev.MODAL, UIStyle.RADIUS_LG, UIStyle.SPACE_XL)
+	_card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	_card.offset_left = -CARD_W * 0.5
+	_card.offset_right = CARD_W * 0.5
+	_card.offset_top = -CARD_H * 0.5
+	_card.offset_bottom = CARD_H * 0.5
+	_stage.add_child(_card)
 
-	_title = UIStyle.title("", 76, UIStyle.VICTORY)
-	box.add_child(_title)
-	_subtitle = UIStyle.label("", 24, UIStyle.CREAM)
-	box.add_child(_subtitle)
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation", UIStyle.SPACE_XL)
+	_card.add_child(columns)
 
-	var divider := Panel.new()
-	divider.custom_minimum_size = Vector2(0, 2)
-	var dsb := StyleBoxFlat.new(); dsb.bg_color = Color(1, 1, 1, 0.12)
-	divider.add_theme_stylebox_override("panel", dsb)
-	box.add_child(divider)
-
-	_stats = UIStyle.label("", 26, UIStyle.GOLD, true)
-	box.add_child(_stats)
-
-	var spacer := Control.new(); spacer.custom_minimum_size = Vector2(0, 14)
-	box.add_child(spacer)
-
-	_again_btn = UIStyle.button("▶  PLAY AGAIN", true)
-	_again_btn.pressed.connect(_on_play_again)
-	box.add_child(_again_btn)
-	var menu_btn := UIStyle.button("MAIN MENU")
-	menu_btn.pressed.connect(_on_main_menu)
-	box.add_child(menu_btn)
+	columns.add_child(_build_art_column())
+	columns.add_child(_build_body_column())
 
 	GameManager.game_over.connect(_on_game_over)
 	GameManager.game_started.connect(_hide_now)
 
 
+func _build_art_column() -> Control:
+	var holder := Control.new()
+	holder.custom_minimum_size = Vector2(232, ART_H)
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+
+	# Soft coloured bloom behind the figure so the line art lifts off the panel.
+	_glow = TextureRect.new()
+	_glow.stretch_mode = TextureRect.STRETCH_SCALE
+	_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(_glow)
+	_glow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_glow.offset_left = -40.0
+	_glow.offset_right = 40.0
+	_glow.offset_top = -20.0
+	_glow.offset_bottom = 20.0
+
+	_art = TextureRect.new()
+	_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_art.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(_art)
+	_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return holder
+
+
+func _build_body_column() -> Control:
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	col.add_theme_constant_override("separation", UIStyle.SPACE_SM)
+
+	_title = UIStyle.title("", UIStyle.Scale.TITLE, UIStyle.VICTORY)
+	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	col.add_child(_title)
+
+	_subtitle = UIStyle.text("", UIStyle.Scale.BODY, UIStyle.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
+	_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_subtitle.custom_minimum_size = Vector2(0, 42)
+	col.add_child(_subtitle)
+
+	col.add_child(UIStyle.divider(2, 0.12))
+
+	_rows = VBoxContainer.new()
+	_rows.add_theme_constant_override("separation", UIStyle.SPACE_XS)
+	col.add_child(_rows)
+
+	_badge = UIStyle.text("NEW PERSONAL BEST", UIStyle.Scale.LABEL, UIStyle.GOLD,
+		HORIZONTAL_ALIGNMENT_LEFT)
+	_badge.visible = false
+	col.add_child(_badge)
+
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, UIStyle.SPACE_MD)
+	col.add_child(gap)
+
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", UIStyle.SPACE_MD)
+	col.add_child(actions)
+
+	_again_btn = UIStyle.button("PLAY AGAIN", true, Vector2(230, 56))
+	_again_btn.pressed.connect(_on_play_again)
+	actions.add_child(_again_btn)
+
+	_menu_btn = UIStyle.button("MAIN MENU", false, Vector2(190, 56))
+	_menu_btn.pressed.connect(_on_main_menu)
+	actions.add_child(_menu_btn)
+	return col
+
+
+# --- Presentation -------------------------------------------------------------
+
 func _on_game_over(victory: bool) -> void:
+	# Let the death animation land before the UI takes the screen.
 	await get_tree().create_timer(2.0 if victory else 1.0).timeout
 	if GameManager.state != GameManager.State.VICTORY and GameManager.state != GameManager.State.DEFEAT:
 		return
+
+	var accent := UIStyle.VICTORY if victory else UIStyle.DEFEAT
+	var actor: int = UIStyle.Actor.HEROSAURO if victory else UIStyle.Actor.ADAMASTOR
+
+	_title.text = "VICTORY!" if victory else "DEFEAT"
+	_title.add_theme_color_override("font_color", accent)
+	_subtitle.text = "Porto stands. The giant of the Douro is stone again." if victory \
+		else "Adamastor still holds the bridge. The city waits."
+
+	_art.texture = UIStyle.portrait_scaled(actor, int(ART_H * 1.6))
+	_glow.texture = _bloom(accent)
+
+	var beat := UIProgress.submit(GameManager.score, GameManager.fight_time, victory)
+	_fill_rows(victory, accent, beat)
+	_badge.visible = beat
+
 	if victory:
-		_title.text = "VICTORY!"
-		_title.add_theme_color_override("font_color", UIStyle.VICTORY)
-		_subtitle.text = "Porto is safe — the brothers triumph!"
 		AudioManager.play_victory()
 	else:
-		_title.text = "DEFEAT"
-		_title.add_theme_color_override("font_color", UIStyle.DEFEAT)
-		_subtitle.text = "Adamastor stands unbroken…"
 		AudioManager.play_defeat()
-	var m := int(GameManager.fight_time) / 60
-	var s := int(GameManager.fight_time) % 60
-	_stats.text = "SCORE  %d        TIME  %d:%02d" % [GameManager.score, m, s]
+
+	_reveal()
+
+
+func _fill_rows(victory: bool, accent: Color, beat: bool) -> void:
+	for c in _rows.get_children():
+		_rows.remove_child(c)
+		c.queue_free()
+	_rows.add_child(UIStyle.stat_row("Score", UIProgress.format_score(GameManager.score),
+		accent if beat else UIStyle.GOLD))
+	_rows.add_child(UIStyle.stat_row("Time", UIProgress.format_time(GameManager.fight_time),
+		UIStyle.TEXT_PRIMARY))
+	var best := UIProgress.best_score()
+	_rows.add_child(UIStyle.stat_row("Best score", UIProgress.format_score(best),
+		UIStyle.TEXT_SECONDARY))
+	if victory:
+		var bt := UIProgress.best_time()
+		if bt >= 0.0:
+			_rows.add_child(UIStyle.stat_row("Fastest win", UIProgress.format_time(bt),
+				UIStyle.TEXT_SECONDARY))
+
+
+## Radial bloom, opaque-ish in the middle and gone at the edges — the inverse of
+## the screen vignette, used as a backlight for the character art.
+func _bloom(tint: Color) -> GradientTexture2D:
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	grad.colors = PackedColorArray([
+		Color(tint.r, tint.g, tint.b, 0.30),
+		Color(tint.r, tint.g, tint.b, 0.11),
+		Color(tint.r, tint.g, tint.b, 0.0),
+	])
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 192
+	gt.height = 192
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.52)
+	gt.fill_to = Vector2(1.0, 0.52)
+	return gt
+
+
+func _reveal() -> void:
 	visible = true
-	_again_btn.grab_focus()
+	_interactive = false
+	_dim.modulate.a = 0.0
+	_stage.modulate.a = 0.0
+	_stage.position.y = 28.0
+	_card.pivot_offset = _card.size * 0.5
+	_card.scale = Vector2(0.94, 0.94)
+	_title.scale = Vector2(0.72, 0.72)
+	_title.pivot_offset = Vector2(0.0, _title.size.y * 0.5)
+
+	var t := create_tween()
+	t.set_parallel(true)
+	t.tween_property(_dim, "modulate:a", 1.0, REVEAL * 0.6)
+	t.tween_property(_stage, "modulate:a", 1.0, REVEAL * 0.7)
+	t.tween_property(_stage, "position:y", 0.0, REVEAL).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(_card, "scale", Vector2.ONE, REVEAL).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.chain().tween_property(_title, "scale", Vector2.ONE, 0.30) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.chain().tween_callback(func() -> void:
+		_interactive = true
+		_again_btn.grab_focus())
 
 
 func _hide_now() -> void:
 	visible = false
+	_interactive = false
 
+
+# --- Input --------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
-	if visible and event.is_action_pressed("ui_confirm"):
+	if not visible or not _interactive:
+		return
+	if event.is_action_pressed("ui_confirm"):
 		_on_play_again()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("ui_cancel"):
+		_on_main_menu()
 		get_viewport().set_input_as_handled()
 
 
 func _on_play_again() -> void:
-	visible = false
+	_hide_now()
 	GameManager.start_game()
 
 
 func _on_main_menu() -> void:
-	visible = false
+	_hide_now()
 	GameManager.go_to_menu()
