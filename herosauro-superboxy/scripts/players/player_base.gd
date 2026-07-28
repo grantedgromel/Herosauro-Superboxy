@@ -785,7 +785,15 @@ func _fix_model_shadow_bounds(margin: float = 1.2) -> void:
 const FEET_BELOW_ORIGIN := 1.0
 
 const CONTACT_FOOTPRINT := 1.9      ## blob diameter at the feet, metres
-const CONTACT_DEPTH := 3.2          ## how far the projection box reaches down
+## Depth of the projection box. Shallow, and centred ON the ground rather than
+## hung below the feet: Godot fades a decal by distance from the CENTRE of its
+## box, so a surface sitting at the top face is at maximum fade and paints
+## nothing. The first attempt put the deck exactly there and the blob never
+## appeared.
+const CONTACT_DEPTH := 1.0
+## How far below the contact point to bias the box centre, so the top face
+## clears his shoes rather than darkening them.
+const CONTACT_SINK := 0.15
 const CONTACT_STRENGTH := 0.5       ## opacity directly under him
 ## Airborne, the blob widens and fades — the standard read for "further from the
 ## ground". Past this height it is gone entirely.
@@ -803,13 +811,17 @@ func _build_contact_shadow() -> void:
 	# the blob is black — so this darkens rather than tints.
 	_contact.albedo_mix = 1.0
 	_contact.modulate = Color(0.0, 0.0, 0.0, 1.0)
-	# Nothing above the contact point should be painted, or the blob climbs the
-	# kerb face and his own shins.
-	_contact.upper_fade = 0.1
-	_contact.lower_fade = 1.4
-	# Steep faces are not the ground. Without this the blob wraps the parapet
-	# when he walks up against it.
-	_contact.normal_fade = 0.6
+	# Both fades are measured from the CENTRE of the box, and the box is centred
+	# on the ground, so these soften the edges of a thin slab rather than gating
+	# whether it draws at all. Leave them at Godot's default curve.
+	_contact.upper_fade = 1.0
+	_contact.lower_fade = 1.0
+	# normal_fade stays off. It drops the decal as the receiving surface turns
+	# away from the projection, which sounds right for keeping the blob off the
+	# parapet — but it is also the second thing that can silently produce
+	# nothing at all, and one invisible-decal bug per session is enough. The
+	# deck is flat where he walks.
+	_contact.normal_fade = 0.0
 	add_child(_contact)
 	_update_contact_shadow()
 
@@ -849,10 +861,10 @@ func _update_contact_shadow() -> void:
 	_contact.visible = true
 	_contact.size = Vector3(width, CONTACT_DEPTH, width)
 	_contact.modulate.a = 1.0 - t
-	# The Decal's box is centred on the node, so hang it entirely BELOW the feet:
-	# top face at the feet, reaching CONTACT_DEPTH down. Centre it any higher and
-	# the projection climbs his own shins.
-	_contact.position = Vector3(0.0, -FEET_BELOW_ORIGIN - CONTACT_DEPTH * 0.5, 0.0)
+	# Centred on the ground he is standing over — which is `drop` below his feet,
+	# so the blob stays on the deck as he jumps instead of rising with him — and
+	# sunk slightly so the top face clears his shoes.
+	_contact.position = Vector3(0.0, -FEET_BELOW_ORIGIN - drop - CONTACT_SINK, 0.0)
 
 
 ## Metres from the feet down to whatever is below, or -1 if nothing is in range.

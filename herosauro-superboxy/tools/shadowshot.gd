@@ -85,6 +85,14 @@ func _aim() -> void:
 	var deck: Vector3 = hit["position"]
 	_hero.global_position = deck + Vector3(0.0, HERO_HALF_HEIGHT, 0.0)
 
+	# The hero is placed here rather than simulated — PlayerBase._physics_process
+	# returns early outside State.PLAYING — so anything it would normally drive
+	# per frame has to be driven by hand. Without this the contact-shadow decal
+	# keeps the position it was given in _ready(), 20 m up with no ground under
+	# it, and the probe reports "no contact shadow" whatever the code does.
+	if _hero.has_method("_update_contact_shadow"):
+		_hero.call("_update_contact_shadow")
+
 	var aim := deck + Vector3(SUN_XZ.x, 0.0, SUN_XZ.y) * AIM_ALONG_SUN
 	_cam.global_position = deck + CAM_OFFSET
 	_cam.look_at(aim, Vector3.UP)
