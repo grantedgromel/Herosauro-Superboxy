@@ -23,14 +23,20 @@ extends Control
 ## the rest.
 
 # --- Proportions (fractions of the frame) ------------------------------------
+#
+# THESE EIGHT NUMBERS ARE THE VISUAL PASS. They were set by reasoning about the
+# composite (top and left overlap in the corner where the logo sits, so their
+# strengths multiply out to about 0.73 there and fall off fast from it) but
+# nobody has yet seen them over a real render. If the menu comes back muddy,
+# these are the dials — nothing else in this screen needs touching.
 
 const TOP_SCRIM := 0.36
-const TOP_STRENGTH := 0.54
-const BOTTOM_SCRIM := 0.26
-const BOTTOM_STRENGTH := 0.60
-const LEFT_SCRIM := 0.46
-const LEFT_STRENGTH := 0.58
-const VIGNETTE_ALPHA := 0.55
+const TOP_STRENGTH := 0.48
+const BOTTOM_SCRIM := 0.24
+const BOTTOM_STRENGTH := 0.55
+const LEFT_SCRIM := 0.50
+const LEFT_STRENGTH := 0.52
+const VIGNETTE_ALPHA := 0.50
 const VIGNETTE_INNER := 0.36
 
 ## The sun in this world is low and off the left of the shot for most of the
@@ -88,10 +94,13 @@ func relayout() -> void:
 ## has a column of UI running down one edge of a live 3D shot.
 func _side_scrim() -> TextureRect:
 	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 0.52, 1.0])
+	# Holds most of its weight out to 60% of its span before letting go, so the
+	# far end of the menu column — the difficulty pills — still has something
+	# under it rather than sitting straight on the river.
+	grad.offsets = PackedFloat32Array([0.0, 0.60, 1.0])
 	grad.colors = PackedColorArray([
 		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, LEFT_STRENGTH),
-		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, LEFT_STRENGTH * 0.30),
+		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, LEFT_STRENGTH * 0.40),
 		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, 0.0),
 	])
 	var gt := GradientTexture2D.new()

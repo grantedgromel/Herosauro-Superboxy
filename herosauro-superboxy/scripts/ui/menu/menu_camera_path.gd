@@ -131,3 +131,13 @@ static func sample(u: float) -> Dictionary:
 		"fov": FOV.x + FOV.y * sin(a + FOV_PHASE),
 		"focus": position.distance_to(target) * FOCUS_SCALE,
 	}
+
+
+## Where the swing is, as -1 (over the Ribeira) to +1 (over Gaia). Read every
+## frame by the foreground cut-outs, so it deliberately re-derives the azimuth
+## harmonics rather than going through `sample()` and its dictionary.
+static func sway(u: float) -> float:
+	var a := TAU * fposmod(u, 1.0)
+	var swing := AZIMUTH.y * sin(a + AZIMUTH_PHASE.x) \
+			+ AZIMUTH.z * sin(2.0 * a + AZIMUTH_PHASE.y)
+	return clampf(swing / (AZIMUTH.y + AZIMUTH.z), -1.0, 1.0)

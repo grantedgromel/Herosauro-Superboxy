@@ -93,6 +93,7 @@ func _fit_card() -> void:
 
 func open(heading: String, body: Control) -> void:
 	for child in _body_host.get_children():
+		_body_host.remove_child(child)
 		child.queue_free()
 	_heading.text = heading
 	_body_host.add_child(body)
@@ -277,7 +278,10 @@ static func build_credits() -> Control:
 				UIStyle.actor_color(actor), HORIZONTAL_ALIGNMENT_LEFT)
 		who.custom_minimum_size = Vector2(150, 0)
 		line.add_child(who)
-		line.add_child(UIStyle.text(UIStyle.actor_epithet(actor).capitalize(),
+		# Left in the palette's own casing rather than title-cased: the epithets
+		# are set as small caps against the coloured name, which is a credits
+		# convention, and Title Case Every Word Is Not.
+		line.add_child(UIStyle.text(UIStyle.actor_epithet(actor),
 				UIStyle.Scale.CAPTION, UIStyle.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT))
 		column.add_child(line)
 

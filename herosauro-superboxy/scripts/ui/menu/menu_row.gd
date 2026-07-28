@@ -92,9 +92,14 @@ func setup(row_id: StringName, caption: String, row_kind: int = Kind.ACTION,
 	_refresh()
 
 
+## Only `focus` carries the highlight fill, and `hover` is deliberately empty.
+## Button draws the focus box ON TOP of whichever of normal/hover/pressed applies
+## rather than instead of it, so putting the same fill on both would make a
+## moused row (which takes focus on hover) exactly twice as bright as a
+## keyboarded one. Pressed still stacks, which is what a press should do.
 func _style() -> void:
 	add_theme_stylebox_override("normal", StyleBoxEmpty.new())
-	add_theme_stylebox_override("hover", _fill(HOT_FILL))
+	add_theme_stylebox_override("hover", StyleBoxEmpty.new())
 	add_theme_stylebox_override("focus", _fill(HOT_FILL))
 	add_theme_stylebox_override("pressed", _fill(DOWN_FILL))
 	add_theme_stylebox_override("disabled", StyleBoxEmpty.new())

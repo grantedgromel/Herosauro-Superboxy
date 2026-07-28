@@ -119,6 +119,24 @@ func _check_type_scale() -> void:
 	_ok(tracked.get_theme_font("font") is FontVariation, "tracked scales get a FontVariation")
 	tracked.free()
 
+	# Bangers is a decorative Latin set. Anything it is handed that it does not
+	# cover falls back to the engine default mid-word, which looks like a bug —
+	# so every string the display face actually renders is checked here.
+	var display_strings := ["VICTORY!", "DEFEAT", "PAUSED", "0123456789"]
+	for s2 in display_strings:
+		var missing := ""
+		for i in s2.length():
+			if not UIStyle.TITLE_FONT.has_char(s2.unicode_at(i)):
+				missing += s2[i]
+		_ok(missing.is_empty(), "display face covers \"%s\" %s" % [s2, missing])
+	# The UI face carries the glyphs the readouts are built from.
+	for s3 in ["0123456789", "/", "-", ",", ":", "."]:
+		var gone := ""
+		for i in s3.length():
+			if not UIStyle.UI_BOLD.has_char(s3.unicode_at(i)):
+				gone += s3[i]
+		_ok(gone.is_empty(), "UI face covers \"%s\" %s" % [s3, gone])
+
 
 func _check_surfaces() -> void:
 	var flat := UIStyle.surface(UIStyle.Elev.FLAT)

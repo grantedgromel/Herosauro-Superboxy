@@ -47,7 +47,10 @@ const DOF_AMOUNT := 0.055         # a suggestion of softness, not a portrait len
 ## for free.
 const NEAR_PLANE := 0.5
 
-signal first_frame_ready
+## The pristine Environment, captured the very first time an arena is built —
+## which, because main.gd builds nothing at MENU, is always this menu's own.
+## See `_isolate_environment()` for why it has to be kept.
+static var _pristine_environment: Environment
 
 var camera: Camera3D
 
@@ -72,14 +75,40 @@ func _ready() -> void:
 
 	_arena = WorldScene.instantiate()
 	_arena.name = "Arena"
+	# Before add_child, because add_child is what runs LightingRig._ready().
+	_isolate_environment(_arena)
 	add_child(_arena)
 
 	_running = true
-	_announce_ready.call_deferred()
 
 
-func _announce_ready() -> void:
-	first_frame_ready.emit()
+## Give this copy of the arena its own Environment.
+##
+## `porto_golden_hour.tres` is referenced by path from sky_background.tscn, so
+## every instance of the arena shares one cached Environment object — and
+## LightingRig's renderer tiering does not just read it, it multiplies into it:
+##
+##     env.ambient_light_energy *= COMPAT_AMBIENT_SCALE
+##
+## That is idempotent exactly once. Instantiate the arena a second time on GL
+## Compatibility (the web build) or on Forward+ with SDFGI off, and the ambient
+## term is scaled again on top of the first pass — 1.7, then 2.89, then 4.91.
+## Since this screen deliberately builds a second arena, it would be the thing
+## that lit the fuse.
+##
+## Two fixes in one: the menu duplicates the environment so its own tiering can
+## never touch the game's, and it duplicates from a snapshot taken before ANY
+## tiering ran, so returning to the menu a fifth time still looks like the first.
+## The compounding in the game's own copy across repeated MENU -> PLAYING cycles
+## is a pre-existing issue in lighting_rig.gd and is called out in the handover
+## notes rather than patched from here.
+func _isolate_environment(arena: Node3D) -> void:
+	var host := arena.find_child("WorldEnvironment", true, false) as WorldEnvironment
+	if host == null or host.environment == null:
+		return
+	if _pristine_environment == null:
+		_pristine_environment = host.environment.duplicate(true) as Environment
+	host.environment = _pristine_environment.duplicate(true) as Environment
 
 
 # --- Lifetime ----------------------------------------------------------------
@@ -131,11 +160,7 @@ func _place(u: float) -> void:
 ## hero_stage.gd shears the foreground cut-outs against this so they parallax
 ## with the world instead of floating over it.
 func sway() -> float:
-	var shot := CameraPath.sample(_clock / CameraPath.PERIOD)
-	var pos: Vector3 = shot["position"]
-	var azimuth := atan2(pos.x - CameraPath.PIVOT.x, pos.z - CameraPath.PIVOT.z)
-	var span := CameraPath.AZIMUTH.y + CameraPath.AZIMUTH.z
-	return clampf((azimuth - CameraPath.AZIMUTH.x) / maxf(span, 0.001), -1.0, 1.0)
+	return CameraPath.sway(_clock / CameraPath.PERIOD)
 
 
 # --- Depth of field ----------------------------------------------------------

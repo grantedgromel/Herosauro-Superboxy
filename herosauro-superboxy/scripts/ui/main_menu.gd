@@ -12,12 +12,20 @@ extends Control
 ##
 ##   MenuWorld    bridge_arena.tscn plus a camera on a 74-second loop
 ##   Atmosphere   scrims, horizon glare, vignette, drifting motes
+##   Veil         opaque until Porto is standing; the reveal fades it
 ##   HeroStage    Adamastor, Super Boxy, Herosauro, parallaxed against the camera
 ##   TitleLogo    the display lockup
 ##   MenuList     START / DIFFICULTY / CONTROLS / CREDITS / QUIT
 ##   Hints        the key legend
 ##   Modal        CONTROLS and CREDITS panels
-##   Curtain      the fade this screen enters and leaves through
+##   Curtain      the fade to black on START and QUIT
+##
+## THE LOAD IS PART OF THE SEQUENCE. Assembling the arena — terrain, Ribeira
+## facades, landmarks, ironwork — takes a good second and a half and blocks the
+## main thread while it does, so there is no animating through it. Instead the
+## logo is brought up on black first and left holding while the build runs; the
+## world, the cast and the menu column then all arrive together as the veil
+## lifts. A held title card is a load screen nobody reads as one.
 ##
 ## COMPOSITION. Everything readable hangs off the left margin and everything
 ## drawn owns the right. That is not a style choice so much as a consequence of
@@ -61,12 +69,14 @@ const LIST_BOTTOM_CLEAR := 92.0
 
 # --- Timing ------------------------------------------------------------------
 
-const CURTAIN_IN := 0.95         # fade up from black once the world is standing
+const VEIL_LIFT := 1.00          # fade up from black once the world is standing
 const CURTAIN_OUT := 0.28        # fade to black on START / QUIT
-const LOGO_DELAY := 0.06
-const STAGE_DELAY := 0.14
+## How long the logo is left alone on black before the (blocking) world build.
+## Must outlast title_logo.gd's own entry or the settle is cut off by the stall.
+const LOGO_HOLD := 0.72
+const STAGE_DELAY := 0.10
 const STAGE_STAGGER := 0.13
-const LIST_DELAY := 0.44
+const LIST_DELAY := 0.34
 const LIST_STAGGER := 0.07
 
 var _world: MenuWorldScript
@@ -76,6 +86,7 @@ var _logo: TitleLogoScript
 var _list: MenuListScript
 var _modal: MenuModalScript
 var _hints: Control
+var _veil: ColorRect
 var _curtain: ColorRect
 
 var _awake: bool = false
@@ -105,6 +116,9 @@ func _build() -> void:
 	_atmosphere.name = "Atmosphere"
 	add_child(_atmosphere)
 
+	_veil = _sheet("Veil", 1.0)
+	add_child(_veil)
+
 	_stage = HeroStageScript.new()
 	_stage.name = "HeroStage"
 	add_child(_stage)
@@ -124,6 +138,7 @@ func _build() -> void:
 	], UIStyle.SPACE_LG)
 	_hints.name = "Hints"
 	(_hints as HBoxContainer).alignment = BoxContainer.ALIGNMENT_BEGIN
+	_hints.modulate.a = 0.0
 	add_child(_hints)
 
 	_modal = MenuModalScript.new()
@@ -131,14 +146,17 @@ func _build() -> void:
 	_modal.closed.connect(_on_modal_closed)
 	add_child(_modal)
 
-	# Opaque from frame one. It hides the boot hitch while bridge_arena builds
-	# its terrain, facades and landmarks, and it is what START fades out through.
-	_curtain = ColorRect.new()
-	_curtain.name = "Curtain"
-	_curtain.color = UIStyle.BASE
-	_curtain.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_curtain.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_curtain = _sheet("Curtain", 0.0)
 	add_child(_curtain)
+
+
+func _sheet(sheet_name: String, alpha: float) -> ColorRect:
+	var r := ColorRect.new()
+	r.name = sheet_name
+	r.color = Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, alpha)
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return r
 
 
 # --- Layout ------------------------------------------------------------------
@@ -167,8 +185,12 @@ func _relayout() -> void:
 	_list.position = Vector2(margin, maxf(list_y, _logo.position.y + logo_h + 8.0 * ui))
 	_list.size = Vector2(column_w, column_h)
 
+	# Sized to its own content, not to the remaining width: a hint row stretched
+	# across the frame is an invisible box lying over the character art, and the
+	# first thing that goes wrong with one of those is hit-testing.
+	var hint_w := maxf(_hints.get_combined_minimum_size().x, 120.0)
 	_hints.position = Vector2(margin, size.y - HINTS_BASELINE * ui)
-	_hints.size = Vector2(maxf(size.x - margin * 2.0, 100.0), 30.0 * ui)
+	_hints.size = Vector2(hint_w, 30.0 * ui)
 
 
 # --- Waking and sleeping -----------------------------------------------------
@@ -192,10 +214,19 @@ func _wake() -> void:
 		return
 	_awake = true
 	_leaving = false
-	_curtain.color = Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, 1.0)
-	_list.set_locked(false)
+	_veil.color.a = 1.0
+	_curtain.color.a = 0.0
+	_hints.modulate.a = 0.0
+	# The cast and the column sit ABOVE the veil so they can animate in as it
+	# lifts, which means they have to be held back by hand until then.
+	_stage.modulate.a = 0.0
+	_list.modulate.a = 0.0
+	# Locked until the reveal: a keypress that lands during the build would fire
+	# into a menu the player has not been shown yet.
+	_list.set_locked(true)
 	_list.sync_difficulty(GameManager.difficulty)
 	set_process(true)
+	_logo.play_entry(0.0)
 	_spawn_world()
 
 
@@ -219,12 +250,23 @@ func _spawn_world() -> void:
 		return
 	await get_tree().process_frame
 	await get_tree().process_frame
-	if not _awake or GameManager.state != GameManager.State.MENU:
+	if not _still_here():
+		return
+	# Hold on the logo. Ignoring time scale and the pause flag because the tree
+	# can be paused when the player backs out of a fight.
+	await get_tree().create_timer(LOGO_HOLD, true, false, true).timeout
+	if not _still_here():
 		return
 	_world = MenuWorldScript.new()
 	_world.name = "MenuWorld"
 	add_child(_world)
-	_play_entry()
+	_reveal()
+
+
+## Guard for every await point in the spawn: the player can be out of the menu
+## again before the timer lands.
+func _still_here() -> bool:
+	return _awake and is_inside_tree() and GameManager.state == GameManager.State.MENU
 
 
 func _release_world() -> void:
@@ -238,16 +280,23 @@ func _process(_delta: float) -> void:
 		_stage.camera_sway = _world.sway()
 
 
-# --- Entry -------------------------------------------------------------------
+# --- Reveal ------------------------------------------------------------------
 
-func _play_entry() -> void:
+## Porto is standing. Lift the veil and bring the cast and the column in with it.
+## Layout is re-run first because the world build ran a blocking second and a
+## half ago and the window may have been resized in the middle of it.
+func _reveal() -> void:
 	_relayout()
-	_logo.play_entry(LOGO_DELAY)
+	_stage.modulate.a = 1.0
+	_list.modulate.a = 1.0
 	_stage.play_entry(STAGE_DELAY, STAGE_STAGGER)
 	_list.play_entry(LIST_DELAY, LIST_STAGGER)
+	_list.set_locked(false)
 	_list.focus_row(_return_focus)
-	var tw := create_tween()
-	tw.tween_property(_curtain, "color:a", 0.0, CURTAIN_IN).set_trans(Tween.TRANS_SINE)
+
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(_veil, "color:a", 0.0, VEIL_LIFT).set_trans(Tween.TRANS_SINE)
+	tw.tween_property(_hints, "modulate:a", 1.0, 0.5).set_delay(LIST_DELAY + 0.25)
 
 
 # --- Actions -----------------------------------------------------------------

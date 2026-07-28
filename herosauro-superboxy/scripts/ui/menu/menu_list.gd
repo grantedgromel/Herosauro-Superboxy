@@ -96,7 +96,6 @@ func relayout(ui_scale: float = -1.0) -> void:
 		row.position = Vector2(0.0, y)
 		row.size = Vector2(size.x, h)
 		y += h + gap
-	custom_minimum_size = Vector2(size.x, maxf(y - gap, 0.0))
 
 
 ## Total height the column needs, so the screen can stack things under it.

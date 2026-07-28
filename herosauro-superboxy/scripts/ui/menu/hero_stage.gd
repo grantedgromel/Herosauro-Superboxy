@@ -31,7 +31,11 @@ extends Control
 # capped against its width so a tall window (4:3 letterboxed by the project's
 # `expand` stretch) cannot inflate the art until it runs into the menu column.
 
-const WIDTH_CAP := 0.62
+## Tuned against the four-aspect sweep in _flow_probe.gd. At 0.62 a 4:3 window
+## grew the cast until Super Boxy's shoulder was 32 px off the menu column; 0.58
+## leaves ~90 px there and changes nothing at all at 16:9 or wider, where the
+## height is the binding constraint anyway.
+const WIDTH_CAP := 0.58
 
 ## Per figure: how tall it stands, where its centre sits measured back from the
 ## right edge, and how far its feet drop past the bottom of the frame. Adamastor
@@ -62,7 +66,10 @@ const HERO_TINT := Color(1.0, 1.0, 1.0, 1.0)
 const HERO_RIM := Color(1.00, 0.80, 0.44, 0.60)
 const SHADOW_TINT := Color(0.05, 0.03, 0.08, 0.34)
 const SHADOW_OFFSET := Vector2(0.016, 0.010)   # in stage units, down and right
-const RIM_GROW := 1.018
+## The rim is a fixed width in screen pixels, not a percentage of the figure.
+## Scaling it with the art would give Adamastor a fat halo and Super Boxy none,
+## when what backlighting actually does is put the same thin edge on everything.
+const RIM_PIXELS := 0.005                      # of the stage unit
 
 # --- Motion ------------------------------------------------------------------
 
@@ -174,7 +181,7 @@ func relayout() -> void:
 		return
 	for fig in _figures:
 		_fit(fig)
-	_apply_motion(0.0, true)
+	_apply_motion()
 
 
 func _fit(fig: Dictionary) -> void:
@@ -214,7 +221,7 @@ func _fit(fig: Dictionary) -> void:
 	# Grown about the centre so the halo is even, then pushed back behind the
 	# body by the child order set up in _build().
 	var rim: TextureRect = fig["rim"]
-	var grow := Vector2(w, h) * (RIM_GROW - 1.0)
+	var grow := Vector2.ONE * (RIM_PIXELS * _unit * 2.0)
 	rim.position = -grow * 0.5
 	rim.size = Vector2(w, h) + grow
 
@@ -222,6 +229,11 @@ func _fit(fig: Dictionary) -> void:
 	var pad := Vector2(w * 0.75, h * 0.40)
 	pocket.position = -pad * 0.5 + Vector2(0.0, h * 0.10)
 	pocket.size = Vector2(w, h) + pad
+
+	# Kept in step with the layout rather than set once in play_entry(): the
+	# entry scale pivots on the figure's feet, and a stale pivot after a resize
+	# would make it grow out of the wrong place.
+	holder.pivot_offset = Vector2(w * 0.5, h)
 
 
 # --- Motion ------------------------------------------------------------------
@@ -233,10 +245,10 @@ func _process(delta: float) -> void:
 		want = (get_local_mouse_position() / size - Vector2(0.5, 0.5)).clamp(
 				Vector2(-0.5, -0.5), Vector2(0.5, 0.5))
 	_pointer = _pointer.lerp(want, 1.0 - exp(-POINTER_LAMBDA * delta))
-	_apply_motion(delta, false)
+	_apply_motion()
 
 
-func _apply_motion(_delta: float, _snap: bool) -> void:
+func _apply_motion() -> void:
 	for fig in _figures:
 		var depth := float(fig["depth"])
 		var breathe := sin(TAU * _clock / float(fig["breath"]))
@@ -260,10 +272,10 @@ func play_entry(delay: float, stagger: float) -> void:
 		var tw := create_tween().set_parallel(true)
 		var wait := delay + stagger * float(i)
 		tw.tween_property(holder, "modulate:a", 1.0, 0.72).set_delay(wait)
-		# The offset is applied to the holder every frame by _apply_motion, so the
-		# slide has to ride on the pivot instead of on position.
-		holder.pivot_offset = holder.size * Vector2(0.5, 1.0)
-		holder.scale = Vector2(1.0, 1.0)
+		# Rising is done with scale about the feet, not with position: position is
+		# rewritten every frame by _apply_motion for the breath and the parallax,
+		# and a tween on it would be overwritten before it drew.
+		holder.scale = Vector2.ONE
 		tw.tween_property(holder, "scale", Vector2.ONE, 0.9) \
 				.from(Vector2(1.0, 0.955)).set_delay(wait) \
 				.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)

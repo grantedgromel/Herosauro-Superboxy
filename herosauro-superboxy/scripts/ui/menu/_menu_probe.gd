@@ -14,6 +14,7 @@ extends SceneTree
 
 const CameraPath := preload("res://scripts/ui/menu/menu_camera_path.gd")
 const TitleLogo := preload("res://scripts/ui/menu/title_logo.gd")
+const MenuModal := preload("res://scripts/ui/menu/menu_modal.gd")
 
 ## Everything the camera must not fly into, as world-space AABBs. The deck slab,
 ## the arch, the piers and the abutments are one box (bridge_arena.gd's own
@@ -36,7 +37,37 @@ func _initialize() -> void:
 	_probe_fonts()
 	_probe_logo_shader()
 	_probe_camera_path()
+	_probe_panels()
 	quit()
+
+
+# --- CONTROLS / CREDITS ------------------------------------------------------
+
+## Builds both modal bodies and reads the text back out. The controls panel
+## derives every binding from the live InputMap, so this is the only way to see
+## what it will actually say without running the game and clicking on it.
+func _probe_panels() -> void:
+	for pair in [["CONTROLS", MenuModal.build_controls()], ["CREDITS", MenuModal.build_credits()]]:
+		var body: Control = pair[1]
+		print("[probe] %s panel:" % pair[0])
+		for line in _text_lines(body):
+			print("    %s" % line)
+		body.queue_free()
+
+
+## Flattens a built panel into one line per grid/box row, so key badges stay
+## next to the action they belong to instead of arriving as loose words.
+func _text_lines(node: Node, depth: int = 0) -> Array[String]:
+	var out: Array[String] = []
+	if node is Label:
+		out.append((node as Label).text)
+		return out
+	var parts: Array[String] = []
+	for c in node.get_children():
+		parts.append_array(_text_lines(c, depth + 1))
+	if node is HBoxContainer or node is PanelContainer:
+		return [" ".join(parts)] as Array[String]
+	return parts
 
 
 # --- Font coverage -----------------------------------------------------------

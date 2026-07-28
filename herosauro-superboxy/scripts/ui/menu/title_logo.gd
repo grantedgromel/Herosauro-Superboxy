@@ -32,17 +32,19 @@ const USE_SHINE_SHADER := true
 
 const LINE_ONE := "HEROSAURO"
 const LINE_TWO := "& SUPER BOXY"
-## Spaced by hand as well as by FontVariation: the wide gaps between words are
-## what make a strapline read as a strapline rather than as a caption.
+## Tracked out at run time through a FontVariation rather than by padding the
+## string with spaces: spacing_glyph widens the word gaps in proportion too, so
+## the strapline stays a strapline instead of collapsing into a caption when the
+## lockup auto-fits down.
 const STRAPLINE := "LEGENDS OF PORTO"
 
 # --- Type scale (at design height; main_menu.gd scales these) ----------------
 
-const SIZE_ONE := 84
-const SIZE_TWO := 63
-const SIZE_STRAP := 21
+const SIZE_ONE := 92
+const SIZE_TWO := 68
+const SIZE_STRAP := 20
 const GAP_LINES := -12.0          # display faces overlap slightly; Bangers has deep bearing
-const GAP_RULE := 16.0
+const GAP_RULE := 22.0
 const GAP_STRAP := 12.0
 const RULE_HEIGHT := 3.0
 const SHADOW_OFFSET := Vector2(5.0, 6.0)
@@ -55,8 +57,15 @@ const SHINE_REST := -0.40         # parked off the left edge, i.e. invisible
 
 ## Warm gradient, expressed as a per-channel multiplier over the label's own
 ## colour so the shader can be removed without changing the design intent.
-const TINT_TOP := Vector3(1.20, 1.12, 0.88)
-const TINT_BOTTOM := Vector3(0.84, 0.58, 0.30)
+## Against UIStyle.GOLD these land on pale sunlit gold at the cap line and burnt
+## amber at the baseline — hot metal, which is what a comic logo wants.
+const TINT_TOP := Vector3(1.15, 1.28, 1.36)
+const TINT_BOTTOM := Vector3(0.90, 0.60, 0.28)
+## The gradient is mapped over this multiple of the font size rather than over
+## the label's box, because the box is 34% taller than the glyphs and mapping to
+## it would leave the bottom of the letters only three quarters of the way down
+## the ramp — a gradient that visibly stops short.
+const GRADIENT_SPAN := 0.95
 
 ## Authored here rather than in assets/shaders/ deliberately — this stream owns
 ## scripts/ui/menu/ and nothing else, and a two-uniform canvas shader is not
@@ -85,13 +94,18 @@ void fragment() {
 	src.rgb *= mix(tint_top, tint_bottom, v);
 	float h = clamp(local_pos.x / max(rect_size.x, 1.0), 0.0, 1.0);
 	float band = 1.0 - smoothstep(0.0, shine_width, abs(h - shine_pos));
-	src.rgb += band * shine_gain * src.a;
+	// Gated on luminance so the sweep lights the gold face and leaves the
+	// outline alone. Label emits its outline as its own quads through the same
+	// material, and an ungated add turns a near-black rim mid-grey every time
+	// the band crosses it — a flicker exactly where the contrast has to hold.
+	float lit = smoothstep(0.15, 0.45, dot(src.rgb, vec3(0.299, 0.587, 0.114)));
+	src.rgb += band * shine_gain * src.a * lit;
 	COLOR = src;
 }
 """
 
-var _rows: Array[Dictionary] = []      # {face: Label, shadow: Label, size: int}
-var _rule: ColorRect
+var _rows: Array[Dictionary] = []      # {face, shadow, size, px}
+var _rule: TextureRect
 var _strap: Label
 var _strap_font: FontVariation
 var _materials: Array[ShaderMaterial] = []
@@ -103,14 +117,13 @@ func _ready() -> void:
 	_rows.append(_display_row(LINE_ONE, SIZE_ONE))
 	_rows.append(_display_row(LINE_TWO, SIZE_TWO))
 
-	_rule = ColorRect.new()
-	_rule.color = UIStyle.GOLD
-	_rule.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rule = _gold_rule()
 	add_child(_rule)
 
 	_strap_font = FontVariation.new()
 	_strap_font.base_font = UIStyle.UI_BOLD
-	_strap = UIStyle.label(STRAPLINE, SIZE_STRAP, UIStyle.CREAM, true, HORIZONTAL_ALIGNMENT_LEFT)
+	_strap = UIStyle.label(STRAPLINE, SIZE_STRAP, UIStyle.TEXT_PRIMARY, true,
+			HORIZONTAL_ALIGNMENT_LEFT)
 	_strap.add_theme_font_override("font", _strap_font)
 	add_child(_strap)
 
@@ -124,14 +137,16 @@ func _ready() -> void:
 ## label shadow sits *under* the outline, which on a heavy outline like this one
 ## makes it disappear entirely.
 func _display_row(text: String, size: int) -> Dictionary:
-	var shadow := _face(text, size, Color(0.03, 0.02, 0.05, 0.62), false)
+	var ink := Color(0.04, 0.025, 0.06, 0.60)
+	var shadow := _face(text, size, ink, ink, false)
 	add_child(shadow)
-	var face := _face(text, size, UIStyle.GOLD, USE_SHINE_SHADER)
+	var face := _face(text, size, UIStyle.GOLD, Color(0.05, 0.03, 0.07, 0.92),
+			USE_SHINE_SHADER)
 	add_child(face)
-	return {"face": face, "shadow": shadow, "size": size}
+	return {"face": face, "shadow": shadow, "size": size, "px": size}
 
 
-func _face(text: String, size: int, color: Color, shaded: bool) -> Label:
+func _face(text: String, size: int, color: Color, outline: Color, shaded: bool) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -140,7 +155,7 @@ func _face(text: String, size: int, color: Color, shaded: bool) -> Label:
 	l.add_theme_font_override("font", UIStyle.TITLE_FONT)
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
-	l.add_theme_color_override("font_outline_color", Color(0.05, 0.03, 0.07, 0.92))
+	l.add_theme_color_override("font_outline_color", outline)
 	l.add_theme_constant_override("outline_size", maxi(6, roundi(size * 0.11)))
 	if shaded:
 		var sh := Shader.new()
@@ -182,12 +197,13 @@ func relayout(max_width: float, ui_scale: float) -> float:
 			l.add_theme_font_size_override("font_size", px)
 			l.add_theme_constant_override("outline_size", maxi(4, roundi(px * 0.11)))
 			l.size = Vector2(max_width, px * 1.34)
+		row["px"] = px
 		var offset := SHADOW_OFFSET * ui_scale * fit
 		face.position = Vector2(0.0, y)
 		shadow.position = Vector2(0.0, y) + offset
 		y += px * 1.34 + GAP_LINES * ui_scale * fit
 
-	var rule_w := max_width * 0.86
+	var rule_w := max_width * 0.88
 	y += GAP_RULE * ui_scale
 	_rule.position = Vector2(0.0, y)
 	_rule.size = Vector2(rule_w, maxf(2.0, RULE_HEIGHT * ui_scale))
@@ -211,7 +227,32 @@ func _push_rect_size() -> void:
 	for row in _rows:
 		var face: Label = row["face"]
 		if face.material is ShaderMaterial:
-			(face.material as ShaderMaterial).set_shader_parameter("rect_size", face.size)
+			(face.material as ShaderMaterial).set_shader_parameter("rect_size",
+					Vector2(face.size.x, float(row["px"]) * GRADIENT_SPAN))
+
+
+## The rule fades out to the right instead of stopping dead. A hard bar under a
+## logo laid over a moving photographic backdrop reads as a UI divider; a fade
+## reads as part of the lockup.
+func _gold_rule() -> TextureRect:
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	grad.colors = PackedColorArray([
+		UIStyle.GOLD,
+		Color(UIStyle.GOLD_DEEP.r, UIStyle.GOLD_DEEP.g, UIStyle.GOLD_DEEP.b, 0.55),
+		Color(UIStyle.GOLD_DEEP.r, UIStyle.GOLD_DEEP.g, UIStyle.GOLD_DEEP.b, 0.0),
+	])
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 256
+	gt.height = 2
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(1, 0)
+	var tr := TextureRect.new()
+	tr.texture = gt
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return tr
 
 
 # --- Shine -------------------------------------------------------------------

@@ -8,8 +8,10 @@ extends RefCounted
 ## outline, colour and depth, so no call site has to invent a font size again.
 ##
 ## Two rules the whole system rests on:
-##   * Bangers (the comic face) is DISPLAY ONLY. It has no numerals worth reading
-##     and no lowercase rhythm, so it never touches body copy, stats or timers.
+##   * Bangers (the comic face) is DISPLAY ONLY — titles, verdicts, the combo
+##     splash. Its all-caps rhythm and hand-inked weight make it unreadable as
+##     body copy and unscannable as a tabular readout, so score, timers, health
+##     and every sentence use Fredoka instead. It is chosen for impact, not text.
 ##   * Every piece of text carries BOTH a dark outline and a soft drop shadow,
 ##     because the UI now sits over a live golden-hour sky that is brighter than
 ##     any of our text colours.
@@ -55,10 +57,15 @@ const _FACE := [0, 0, 1, 1, 1, 2, 1, 2, 1]
 # Porto at golden hour: a warm plum ink lit from above by a low orange sun.
 # Surfaces climb in lightness as they climb in elevation.
 
-const BASE := Color("100c18")            # furthest back — full-screen scrims
-const SURFACE := Color("1d1526")         # standard panel
-const SURFACE_RAISED := Color("281e34")  # card sitting on a panel
-const SURFACE_HIGH := Color("342847")    # popovers, selected states
+## Surfaces keep a few percent of transparency on purpose. Every screen now sits
+## over a live 3D Porto rather than a flat backdrop, and a fully opaque panel
+## punches a dead rectangle in it; letting the world ghost through by 4-5% keeps
+## the UI reading as glass laid over the scene. Not enough to cost contrast — see
+## the ratios asserted in _ui_probe.gd.
+const BASE := Color("100c18")              # furthest back — full-screen scrims
+const SURFACE := Color("1d1526f2")         # standard panel
+const SURFACE_RAISED := Color("281e34f5")  # card sitting on a panel
+const SURFACE_HIGH := Color("342847f7")    # popovers, selected states
 const OVERLAY := Color(0.035, 0.025, 0.055, 0.74)   # dim behind a modal
 
 ## Hairlines are warm, never neutral — a cold 1 px white rim is the fastest way
