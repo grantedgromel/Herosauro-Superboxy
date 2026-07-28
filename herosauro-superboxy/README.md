@@ -74,7 +74,7 @@ props and boss at runtime, and everything cross-cutting flows through the
 autoloads/
   game_manager.gd     # state machine, score, combo, health, hit-stop, shake requests
   input_manager.gd    # input abstraction
-  audio_manager.gd    # procedural SFX synthesised at startup (no audio files)
+  audio_manager.gd    # music + SFX; shipped samples, procedural synthesis as fallback
 scripts/
   toon_factory.gd     # PBR StandardMaterial3D factory, cached and shared
   camera_rig.gd       # third-person SpringArm orbit camera with collision
@@ -102,8 +102,12 @@ tools/
   derivatives, with a Fresnel depth blend, whitecaps and a sun-glint lobe.
 - **Renderer-aware lighting:** one Environment authors both tiers; a runtime rig
   strips the Forward+-only effects when running on Compatibility.
-- **Procedural audio:** every sound is synthesised from sine/noise envelopes at
-  startup — no audio assets ship.
+- **Audio:** the soundtrack and SFX set ship under `assets/audio/`, mixed over
+  separate Music and SFX buses. Music crossfades with the fight — title, battle,
+  a phase-two escalation at half boss health, and win/lose — driven entirely off
+  `GameManager`'s signals, so no scene has to start or stop it. Every effect keeps
+  its original sine/noise synthesis as a fallback, so a missing or unimported
+  sample degrades to a blip rather than to silence.
 
 ## Third-party assets
 

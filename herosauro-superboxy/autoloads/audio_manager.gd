@@ -3,10 +3,11 @@ extends Node
 ##
 ## Two independent halves on two buses:
 ##
-##   SFX    fully procedural — every effect is synthesised into an
-##          AudioStreamWAV at startup, no files shipped. Entities call the named
-##          play_* helpers; a round-robin pool lets sounds overlap.
-##   Music  the shipped soundtrack, on a pair of players so one track can
+##   SFX    shipped samples from res://assets/audio/sfx/, each falling back to a
+##          synthesised AudioStreamWAV when its file is absent — so a missing or
+##          unimported sample degrades to a blip rather than to silence. Entities
+##          call the named play_* helpers; a round-robin pool lets sounds overlap.
+##   Music  the shipped soundtrack, on a small pool of players so one track can
 ##          crossfade into another. Driven entirely from GameManager's signals,
 ##          so no scene has to remember to start or stop it.
 
@@ -15,6 +16,37 @@ const POOL_SIZE := 10
 
 const SFX_BUS := "SFX"
 const MUSIC_BUS := "Music"
+
+# --- SFX ---------------------------------------------------------------------
+
+const SFX_DIR := "res://assets/audio/sfx/"
+
+## Logical name -> file. Loaded over the synthesised library, so a name missing
+## here (or whose file is absent) keeps its procedural fallback. `dino_fire` is
+## deliberately absent: its upload was a corrupt MP3 and it rides the synth.
+const SFX_FILES := {
+	"jump": "jump.wav",
+	"land": "land.wav",
+	"hurt": "hurt.wav",
+	"dash": "dash.wav",
+	"dino_hit": "dino_hit.wav",
+	"boss_hit": "boss_hit.wav",
+	"boss_slam": "boss_slam.wav",
+	"rock_throw": "rock_throw.wav",
+	"rock_impact": "rock_impact.wav",
+	"super_boxy_hit": "super_boxy_hit.wav",
+}
+
+## Per-sound headroom. The shipped samples are peak-normalised to -1 dBFS, while
+## the synthesis they replace baked its level into the generator calls. These
+## trim the ones that are both hot and frequent so a flurry of hits does not
+## swamp the music. Anything unlisted plays flat.
+const SFX_GAIN_DB := {
+	"boss_hit": -4.0,
+	"dino_hit": -4.0,
+	"jump": -3.0,
+	"land": -3.0,
+}
 
 # --- Music -------------------------------------------------------------------
 
@@ -38,7 +70,11 @@ var _streams: Dictionary = {}
 var _players: Array[AudioStreamPlayer] = []
 var _next_player: int = 0
 
-var _music: Array[AudioStreamPlayer] = []   ## exactly two, so A can fade into B
+## Three, not two: a transition arriving inside the previous fade needs a player
+## that is not still audible. See _pick_music_player().
+const MUSIC_PLAYERS := 3
+
+var _music: Array[AudioStreamPlayer] = []
 var _music_active: int = 0
 var _music_track: String = ""
 var _music_base_db: float = 0.0             ## the Music bus level before ducking
@@ -55,7 +91,7 @@ func _ready() -> void:
 		add_child(p)
 		_players.append(p)
 
-	for i in 2:
+	for i in MUSIC_PLAYERS:
 		var m := AudioStreamPlayer.new()
 		m.name = "Music%d" % i
 		# Music must keep playing while the tree is paused — the pause menu ducks
@@ -71,6 +107,9 @@ func _ready() -> void:
 		_music_base_db = AudioServer.get_bus_volume_db(bus)
 
 	_build_library()
+	# After the synth pass, so a shipped sample wins and anything without one
+	# silently keeps its fallback.
+	_load_sfx_files()
 	_connect_game_signals()
 
 
@@ -85,16 +124,32 @@ func play_boss_hit() -> void: _play("boss_hit")
 func play_victory() -> void: _play("victory")
 func play_defeat() -> void: _play("defeat")
 func play_hurt() -> void: _play("hurt")
+func play_land() -> void: _play("land")
+func play_rock_throw() -> void: _play("rock_throw")
+func play_rock_impact() -> void: _play("rock_impact")
+func play_super_boxy_hit() -> void: _play("super_boxy_hit")
 
 
-func _play(name: String, volume_db: float = 0.0) -> void:
-	if not _streams.has(name):
+func _play(key: String, volume_db: float = 0.0) -> void:
+	# `key`, not `name`: a parameter called `name` shadows Node.name.
+	if not _streams.has(key):
 		return
 	var p := _players[_next_player]
 	_next_player = (_next_player + 1) % _players.size()
-	p.stream = _streams[name]
-	p.volume_db = volume_db
+	p.stream = _streams[key]
+	p.volume_db = volume_db + SFX_GAIN_DB.get(key, 0.0)
 	p.play()
+
+
+## Overlay the shipped samples on top of the synthesised library.
+func _load_sfx_files() -> void:
+	for key in SFX_FILES:
+		var path: String = SFX_DIR + SFX_FILES[key]
+		if not ResourceLoader.exists(path):
+			continue
+		var s := load(path) as AudioStream
+		if s != null:
+			_streams[key] = s
 
 
 # --- Music API ---------------------------------------------------------------
@@ -111,8 +166,7 @@ func play_music(track: String, loop: bool = true, fade: float = MUSIC_FADE) -> v
 		return
 	_set_stream_loop(stream, loop)
 
-	var outgoing := _music[_music_active]
-	_music_active = 1 - _music_active
+	_music_active = _pick_music_player()
 	var incoming := _music[_music_active]
 
 	incoming.stream = stream
@@ -125,13 +179,44 @@ func play_music(track: String, loop: bool = true, fade: float = MUSIC_FADE) -> v
 	_music_tween = create_tween()
 	_music_tween.set_parallel(true)
 	_music_tween.tween_property(incoming, "volume_db", 0.0, fade)
-	if outgoing.playing:
-		_music_tween.tween_property(outgoing, "volume_db", -80.0, fade)
-		# Chained off the same tween so it cannot stop a player that a later
-		# play_music() call has already reused.
-		_music_tween.chain().tween_callback(func() -> void:
-			if outgoing != _music[_music_active]:
-				outgoing.stop())
+	# Fade out EVERY other live player, not just the previous one. Killing the
+	# tween above also cancelled its stop-callback, so an earlier transition can
+	# still have a player running; without this it stays audible behind the new
+	# track forever.
+	for i in _music.size():
+		if i != _music_active and _music[i].playing:
+			_music_tween.tween_property(_music[i], "volume_db", -80.0, fade)
+	_music_tween.chain().tween_callback(_stop_idle_music)
+
+
+## Retire every player that is not the live one. Safe to run late: it reads
+## _music_active at call time, so a transition that landed in the meantime keeps
+## its player.
+func _stop_idle_music() -> void:
+	for i in _music.size():
+		if i != _music_active:
+			_music[i].stop()
+
+
+## A player that is not currently audible, so starting a track never cuts one
+## off mid-sample.
+##
+## Alternating between two players looked fine but was not: tweens do not
+## advance until the next frame, so a player whose fade-out was only just
+## scheduled is still sitting at full volume. Reusing it called play() on a live
+## node and killed the track mid-sample with a click — audible on menu -> START
+## inside the fade, and on phase two landing near the end of a fight.
+func _pick_music_player() -> int:
+	for i in _music.size():
+		if not _music[i].playing:
+			return i
+	# All busy (three transitions inside one fade): take the quietest, which is
+	# the one closest to being retired anyway.
+	var best := 0
+	for i in _music.size():
+		if _music[i].volume_db < _music[best].volume_db:
+			best = i
+	return best
 
 
 ## Fade the soundtrack out entirely.
@@ -270,6 +355,10 @@ func _build_library() -> void:
 	_streams["boss_slam"] = _make(_thud(40.0, 0.32, 0.9))
 	_streams["boss_hit"] = _make(_thud(150.0, 0.13, 0.7))
 	_streams["hurt"] = _make(_sweep(420.0, 160.0, 0.16, 0.5))
+	_streams["land"] = _make(_thud(90.0, 0.12, 0.5))
+	_streams["rock_throw"] = _make(_whoosh(0.2, 0.45))
+	_streams["rock_impact"] = _make(_rumble(60.0, 0.28, 0.8))
+	_streams["super_boxy_hit"] = _make(_thud(190.0, 0.12, 0.7))
 	_streams["victory"] = _make(_fanfare([523.25, 659.25, 783.99, 1046.5, 1318.5], 0.18, true))
 	_streams["defeat"] = _make(_fanfare([659.25, 523.25, 440.0], 0.36, false))
 

@@ -79,6 +79,8 @@ var facing_dir: Vector3 = Vector3(1, 0, 0)
 
 var _coyote: float = 0.0
 var _jump_buffer: float = 0.0
+var _was_on_floor: bool = true
+var _air_time: float = 0.0
 var _invuln: float = 0.0
 var _flicker: float = 0.0
 var _ability_timer: float = 0.0
@@ -141,6 +143,7 @@ func _physics_process(delta: float) -> void:
 	_handle_ability()
 	_handle_attack()
 	move_and_slide()
+	_handle_landing(delta)
 	_face_movement(delta)
 	_process_attack_hit()
 	_handle_fall()
@@ -223,6 +226,25 @@ func _handle_jump(delta: float) -> void:
 		_jump_buffer = 0.0
 		_coyote = 0.0
 		AudioManager.play_jump()
+
+
+## Minimum time off the ground before touching down counts as a landing. Walking
+## the bridge drops is_on_floor() for a frame here and there over seams; without
+## this gate every one of those would chirp.
+const LAND_MIN_AIR_TIME := 0.14
+
+
+## Sampled straight after move_and_slide(), so is_on_floor() reflects this
+## frame's resolved position rather than last frame's.
+func _handle_landing(delta: float) -> void:
+	var grounded := is_on_floor()
+	if grounded:
+		if not _was_on_floor and _air_time >= LAND_MIN_AIR_TIME:
+			AudioManager.play_land()
+		_air_time = 0.0
+	else:
+		_air_time += delta
+	_was_on_floor = grounded
 
 
 ## Face the way we are trying to go. While an attack or ability is committed the
@@ -384,7 +406,13 @@ func _build_swing_box() -> void:
 
 func _on_swing_landed(target: Node3D) -> void:
 	if target.is_in_group("boss"):
-		AudioManager.play_boss_hit()
+		# Adamastor answers every damage event with its own play_boss_hit() (see its
+		# boss_damaged handler), and the shipped boss_hit sample is the same file, so
+		# playing one here too put two identical buffers on the bus in a single frame
+		# and combed instead of hitting. Only Boxy adds a sound, and his gloves get
+		# their own sample.
+		if player_id == 2:
+			AudioManager.play_super_boxy_hit()
 		GameManager.hit_stop(0.03)
 		if target.has_method("nudge"):
 			target.nudge(facing_dir, 0.4)

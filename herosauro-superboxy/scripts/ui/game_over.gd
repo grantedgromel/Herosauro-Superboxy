@@ -167,10 +167,8 @@ func _on_game_over(victory: bool) -> void:
 	_fill_rows(victory, accent, beat)
 	_badge.visible = beat
 
-	if victory:
-		AudioManager.play_victory()
-	else:
-		AudioManager.play_defeat()
+	# The win/lose music is started by AudioManager off GameManager.game_over.
+	# The old synth fanfare played on top of that real track, so it is gone.
 
 	_reveal()
 
