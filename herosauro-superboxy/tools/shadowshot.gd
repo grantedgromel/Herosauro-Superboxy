@@ -18,17 +18,26 @@ extends Node
 const ArenaScene: PackedScene = preload("res://scenes/world/bridge_arena.tscn")
 const HeroScene: PackedScene = preload("res://scenes/players/herosauro.tscn")
 
-## Where the hero is dropped. High enough to be above the deck whatever its
-## datum is; gravity puts him on it and the camera is then placed off his
-## SETTLED position rather than off a guessed one. The first attempt hardcoded
-## both and put the camera out over the water, looking along the parapet.
-const HERO_DROP := Vector3(0.0, 6.0, 0.0)
+## Where to look for the deck from. PlayerBase._physics_process returns early
+## unless GameManager is PLAYING, so a dropped hero does not fall — the second
+## attempt left him hovering at y = 6, where his shadow lands about 25 m away
+## and very possibly off frame. So the deck is found by raycast and he is placed
+## standing on it, which is also the situation the captured frames show.
+const PROBE_FROM := Vector3(0.0, 20.0, 0.0)
+const PROBE_TO := Vector3(0.0, -10.0, 0.0)
+const HERO_HALF_HEIGHT := 1.0   ## origin is the capsule centre; feet are this far below
 
-## Camera offset from the settled hero: high and behind, looking down. From
-## above, an 8 m shadow at an 11.5 degree sun lies flat across the deck in full
-## view — the gameplay camera is nearly along the sun's own axis, which is the
-## one angle that foreshortens that shadow into nothing.
-const CAM_OFFSET := Vector3(1.0, 9.0, 7.0)
+## The sun's horizontal travel, from SunLight's basis in bridge_arena.tscn:
+## light direction (0.860, -0.200, 0.470), normalised in XZ. A shadow runs from
+## the caster's feet along this, for height / tan(11.5 deg) = height * 4.91.
+const SUN_XZ := Vector2(0.878, 0.479)
+
+## High enough, and offset back along -sun, that the hero AND the whole length
+## of the shadow he should be throwing are both in frame. Looking down the sun's
+## own axis — which is roughly what the gameplay camera does — foreshortens that
+## shadow to nothing, and that is the ambiguity this probe exists to remove.
+const CAM_OFFSET := Vector3(-4.0, 14.0, 9.0)
+const AIM_ALONG_SUN := 5.0      ## look this far down the expected shadow
 
 const SETTLE := 26   ## frames for the arena build + the renderer's temporal passes
 const GAP := 8       ## frames between the two exposures
@@ -50,7 +59,7 @@ func _ready() -> void:
 
 	_hero = HeroScene.instantiate()
 	add_child(_hero)
-	_hero.global_position = HERO_DROP
+	_hero.global_position = PROBE_FROM   # real height set in _aim, once the deck exists
 
 	# Our own camera, marked current after the arena's so it wins. Aimed in
 	# _aim(), once the hero has actually landed.
@@ -63,13 +72,26 @@ func _ready() -> void:
 	print("shadowshot: adapter=", RenderingServer.get_video_adapter_name())
 
 
-## Frame the hero where he ended up, not where he was dropped.
+## Stand the hero on the deck, then frame him together with the ground his
+## shadow has to fall on.
 func _aim() -> void:
-	var at := _hero.global_position
-	_cam.global_position = at + CAM_OFFSET
-	_cam.look_at(at, Vector3.UP)
+	var space := get_viewport().world_3d.direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(PROBE_FROM, PROBE_TO)
+	query.exclude = [_hero.get_rid()]
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		return   # arena still building; try again next frame
+
+	var deck: Vector3 = hit["position"]
+	_hero.global_position = deck + Vector3(0.0, HERO_HALF_HEIGHT, 0.0)
+
+	var aim := deck + Vector3(SUN_XZ.x, 0.0, SUN_XZ.y) * AIM_ALONG_SUN
+	_cam.global_position = deck + CAM_OFFSET
+	_cam.look_at(aim, Vector3.UP)
 	_cam.current = true
-	print("shadowshot: hero settled at ", at, "  camera ", _cam.global_position)
+	if _frame % 10 == 1:
+		print("shadowshot: deck at ", deck, "  hero ", _hero.global_position,
+				"  camera ", _cam.global_position)
 
 
 func _process(_d: float) -> void:
