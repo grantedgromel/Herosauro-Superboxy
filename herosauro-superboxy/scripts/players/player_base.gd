@@ -784,11 +784,21 @@ func _fix_model_shadow_bounds(margin: float = 1.2) -> void:
 ## does not render decals at all, so the web tier could never have had one
 ## either.
 ##
-## So: a quad laid on the ground, multiply-blended. It draws on every renderer,
-## it costs one triangle pair, and — unlike the decal — I can actually see it in
-## a capture here. It does not conform to uneven ground, which is why it is
-## aligned to the surface normal the ray already returns; the deck is flat where
-## he walks anyway.
+## So: a quad laid on the ground. It draws on every renderer, costs one triangle
+## pair, and — unlike the decal — measurably shows up in a capture from here. It
+## does not conform to uneven ground, which is why it is aligned to the surface
+## normal the ray already returns; the deck is flat where he walks anyway.
+##
+## HOW MUCH IT BUYS, measured. A/B of the same gameplay frame: -6.0 of 255 under
+## the shoes, -3.3 just below the feet, against -0.3/-0.5 to either side of him
+## and +0.1 on far deck. Localised and real, but small in absolute terms, and
+## that is the honest limit of it — he spawns on the tram bed, whose albedo is
+## 0.235 by deliberate choice (see bridge_arena.gd: an up-facing plane much over
+## 0.6 clips to cream through AgX at 2.4 sun energy). Darkening something that
+## is already near-black cannot read, whatever draws it. The blob earns its keep
+## on the pale kerb and flagstones, and on the tram bed the hero is separated
+## from the ground by his own value instead. Lightening the tram bed is the only
+## thing that would change that, and it is an art call, not a bug fix.
 ## Half the collision capsule's height (2.0 in herosauro.tscn / superboxy.tscn),
 ## i.e. how far the feet sit below the body origin. The same 1.0 the subclasses'
 ## MODEL_Y uses to drop the art onto the bottom of the capsule.
