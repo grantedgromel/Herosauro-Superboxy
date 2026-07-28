@@ -30,15 +30,31 @@ extends RefCounted
 ## tower are on the left in silhouette, Serra do Pilar is on the right, and the
 ## photogrammetry city closes the far end.
 ##
-## u = 0 is deliberately the low, close, arch-heavy end of the loop — the camera
-## skimming the water under the truss — and the first ~20 seconds are the rise
-## and pull-back that opens the city out behind it.
+## u = 0 is the low, close, arch-heavy end of the loop — the camera skimming the
+## water under the truss — and the next ~20 seconds are the rise and pull-back
+## that opens the city out behind it. The menu does NOT open there: see
+## START_PHASE.
 
 # --- Loop --------------------------------------------------------------------
 
 ## Seconds for one lap. Long enough that nobody sitting on the menu sees it
 ## repeat, short enough that the reveal happens while they read the title.
 const PERIOD := 74.0
+
+## Where in the lap the menu opens. Not zero, because zero is the bottom of the
+## boom: down under the deck, where the truss fills the upper half of the frame
+## and the deck itself eclipses the sun. That is a good beat to pass through and
+## a bad one to arrive on, and arriving is what a title screen does — captured
+## frames of the opening seconds were a dark tangle of ironwork with the Ribeira
+## nowhere in it.
+##
+## 0.5 is the top of the boom: HEIGHT peaks near a = pi (about +9.9 over the
+## deck datum) and RADIUS is near its far end (~47), which is the wide
+## establishing angle with the sun clear over the Ribeira. The move then descends
+## into the arch skim about half a lap later, once the shot has already
+## introduced itself. Every term is periodic, so shifting the start costs
+## nothing: the loop is as seamless from here as from anywhere.
+const START_PHASE := 0.5
 
 ## Orbit centre, in the channel downstream of the bridge centre. Y is unused —
 ## the shot's vertical aim comes from PITCH_* below, not from this point, so the

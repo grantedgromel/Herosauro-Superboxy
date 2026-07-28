@@ -56,7 +56,9 @@ var camera: Camera3D
 
 var _arena: Node3D
 var _dof: CameraAttributesPractical
-var _clock: float = 0.0
+## Seeded, not zeroed: the lap starts at CameraPath.START_PHASE so the menu
+## opens on the wide, high end of the boom rather than under the deck.
+var _clock: float = CameraPath.START_PHASE * CameraPath.PERIOD
 var _running: bool = false
 
 

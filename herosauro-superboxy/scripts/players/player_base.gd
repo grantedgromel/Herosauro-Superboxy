@@ -133,6 +133,7 @@ func _ready() -> void:
 		_model_root.name = "Model"
 		add_child(_model_root)
 	_build_visuals()
+	_fix_model_shadow_bounds()
 	_build_swing_box()
 	reset_state()
 
@@ -733,6 +734,42 @@ func _idle_weight(k: int) -> float:
 
 func _build_visuals() -> void:
 	pass
+
+
+## The hero was throwing no shadow at all while everything around him — the
+## giant, the parapets, the lampposts — threw long ones. A probe over the
+## instantiated scene found why: his glTF is a single skinned MeshInstance3D
+## whose AABB is 0.69 x 1.70 x 0.44, the box of its REST pose, with a cull
+## margin of zero and no custom AABB on the mesh.
+##
+## A skinned mesh does not update that box as the skeleton moves it. The colour
+## pass forgives it, because the camera is right on top of him and the box is
+## still on screen. The shadow pass does not: it culls against the light's
+## frustum, the sun sits at 11.5 degrees so the caster has to be found from a
+## direction that is nearly edge-on to the box, and a pose that reaches outside
+## it — a swing, a jump, a cape — leaves the renderer testing a stale volume.
+##
+## Growing the cull margin is the documented remedy and it is the cheap one: it
+## widens the culling test only, and costs nothing per frame.
+func _fix_model_shadow_bounds(margin: float = 1.2) -> void:
+	for mi in _model_meshes(_model_root):
+		mi.extra_cull_margin = maxf(mi.extra_cull_margin, margin)
+		# Belt and braces: an imported glTF can carry SHADOW_CASTING_SETTING_OFF
+		# from the DCC tool it came out of, and nothing else here checks.
+		if mi.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+func _model_meshes(node: Node) -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	if node == null:
+		return out
+	var mi := node as MeshInstance3D
+	if mi != null:
+		out.append(mi)
+	for c in node.get_children():
+		out.append_array(_model_meshes(c))
+	return out
 
 
 func _perform_ability() -> void:
