@@ -1,18 +1,19 @@
 name: Web export
 
-# Rebuilds the Godot HTML5 export under herosauro-superboxy/web/ from source and
-# commits it back, so the web preview always matches the latest .gd/.tscn source.
+# Rebuilds the Godot HTML5 export from source and publishes it straight to the
+# gh-pages branch, so the live preview always matches the latest .gd/.tscn.
 #
-# Triggers on source pushes only: changes under web/ are ignored (and the bot's
-# own commit is tagged [skip ci]) so the auto-commit can't retrigger the workflow.
+# The build is NOT committed back to the source branch. It used to be, and that
+# made every pull request conflict: main and the feature branch each regenerate
+# a 16 MB index.pck, and git cannot merge binaries. gh-pages is force_orphan'd
+# on each deploy, so the artifact lives in exactly one place and never enters
+# the history being merged.
 
 on:
   push:
     branches:
       - main
       - "claude/**"
-    paths-ignore:
-      - "herosauro-superboxy/web/**"
   workflow_dispatch:
 
 permissions:
@@ -66,19 +67,6 @@ jobs:
           mkdir -p web
           godot --headless --export-release "${EXPORT_PRESET}" web/index.html
           test -f web/index.pck && test -f web/index.wasm
-
-      - name: Commit refreshed web export to the branch
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${PROJECT_DIR}/web"
-          if git diff --cached --quiet; then
-            echo "Web export unchanged — nothing to commit."
-          else
-            git commit -m "chore(web): rebuild Godot web export from source [skip ci]"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
 
       # Publish the build to gh-pages so the live GitHub Pages preview always
       # reflects the latest source. force_orphan keeps gh-pages a single commit

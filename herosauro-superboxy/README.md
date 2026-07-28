@@ -39,9 +39,15 @@ an **LDR** framebuffer, so the web build has **no** SSR, GI, volumetric fog, TAA
 depth of field. It keeps PBR materials, the HDRI sky, real shadows, SSAO, glow and
 tone mapping. The photogrammetry backdrop is skipped there for download size.
 
+The live build is published by CI to the `gh-pages` branch on every push to `main`
+or `claude/**`. It is **not** committed to the source tree — a 16 MB `index.pck`
+regenerated on two branches is an unmergeable binary conflict on every pull
+request. To play it locally, build it yourself:
+
 ```bash
-# Play the committed build:
-python3 -m http.server --directory web 8000   # then open http://localhost:8000
+godot --headless --import .                              # once, to build the import cache
+godot --headless --export-release "Web" web/index.html
+python3 -m http.server --directory web 8000              # open http://localhost:8000
 ```
 
 A plain `file://` open will not work — wasm needs to be served over HTTP.

@@ -6,6 +6,19 @@
 /export/
 *.tmp
 
+# Generated HTML5 export. CI rebuilds this from source on every push and
+# publishes it to the gh-pages branch; it is deliberately NOT committed back
+# here. A 16 MB index.pck regenerated on two branches is an unmergeable binary
+# conflict on every pull request, and the artifact carries no information the
+# source doesn't already have.
+#
+# The two marker files ARE tracked: .gdignore keeps Godot from re-importing a
+# local export as project resources, and .nojekyll keeps Pages serving the
+# directory verbatim.
+/web/*
+!/web/.gdignore
+!/web/.nojekyll
+
 # OS cruft
 .DS_Store
 Thumbs.db
