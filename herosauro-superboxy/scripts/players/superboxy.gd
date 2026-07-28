@@ -38,7 +38,8 @@ func _ready() -> void:
 	# Basic attack: a fast, light standing jab (shares the punch clip with the dash).
 	attack_cooldown = 0.38
 	attack_damage = 7
-	attack_range = 2.8
+	# Shorter than Herosauro's by design, but still past the giant's push-out.
+	attack_range = 3.7
 	attack_hold = 0.28
 
 

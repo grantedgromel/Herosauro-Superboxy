@@ -112,7 +112,7 @@ func _physics_process(delta: float) -> void:
 
 	_yaw_node.rotation.y = _yaw
 	_pitch_node.rotation.x = _pitch
-	_pitch_node.position = Vector3(shoulder_offset, eye_height, 0.0)
+	_pitch_node.position = Vector3(_usable_shoulder(), eye_height, 0.0)
 
 	_dist_extra = lerpf(_dist_extra, _dist_extra_target, _damp(extend_lambda, delta))
 	_update_arm(delta)
@@ -120,6 +120,35 @@ func _physics_process(delta: float) -> void:
 	# Applied here rather than as a position offset: SpringArm3D overwrites the
 	# origin of every direct child each tick, so a translated Camera3D is wiped.
 	camera.rotation = Vector3(0.0, 0.0, _shake_roll)
+
+
+## Shoulder offset, faded out as the hero nears a parapet.
+##
+## The offset is applied in yaw-local space, so with the hero facing along the
+## bridge it slides the pivot sideways in world Z — straight into the parapet.
+## Standing at the river edge (z = 6.10, where the collider stops the capsule) a
+## flat 0.7 put the pivot at z = 6.80, which is *inside* the parapet's own plan
+## footprint of 6.55–7.00 and just above its top. Two visible consequences: the
+## railing collapsed to a stripe and the deck read as an unguarded ledge, and the
+## arm's probe sphere passed within 25 mm of every lamppost collider on that side
+## and slammed the camera into the hero's back at each one.
+##
+## Fading the offset toward zero over the last metre keeps the over-the-shoulder
+## framing everywhere it is safe and degrades to a centred shot exactly where it
+## is not.
+func _usable_shoulder() -> float:
+	var subject := _resolve_target()
+	if subject == null:
+		return shoulder_offset
+	var margin := SAFE_HALF_WIDTH - absf(subject.global_position.z)
+	if margin >= shoulder_offset + 0.35:
+		return shoulder_offset
+	return clampf(margin - 0.35, 0.0, shoulder_offset)
+
+
+## Half-width of the deck the pivot may occupy: the footway's outer edge, inside
+## the parapet. Matches BridgeArena.WALKWAY_OUTER.
+const SAFE_HALF_WIDTH := 6.55
 
 
 ## Pull in the instant something blocks the shot, ease back out once it clears.

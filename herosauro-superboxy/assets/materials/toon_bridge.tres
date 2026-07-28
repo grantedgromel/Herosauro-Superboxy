@@ -21,7 +21,7 @@ roughness = 0.88
 ; Kept deliberately low: the granite detail normal is high-contrast noise, and
 ; at deck scale anything above ~0.4 reads as loose gravel rather than paving.
 normal_enabled = true
-normal_scale = 0.3
+normal_scale = 0.22
 normal_texture = ExtResource("1_normal")
 roughness_texture = ExtResource("2_mask")
 ao_enabled = true

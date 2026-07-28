@@ -22,7 +22,9 @@ func _ready() -> void:
 	# Basic attack: a slower, heavier jab (his "cast" stays the big special).
 	attack_cooldown = 0.55
 	attack_damage = 10
-	attack_range = 3.2
+	# Reach is now hero-centre to the far face of the swing volume, and has to
+	# clear the giant's ~3.65 m push-out. Herosauro is the longer-reach hero.
+	attack_range = 4.0
 	attack_hold = 0.34
 
 
