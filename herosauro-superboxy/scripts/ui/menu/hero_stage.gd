@@ -31,11 +31,13 @@ extends Control
 # capped against its width so a tall window (4:3 letterboxed by the project's
 # `expand` stretch) cannot inflate the art until it runs into the menu column.
 
-## Tuned against the four-aspect sweep in _flow_probe.gd. At 0.62 a 4:3 window
-## grew the cast until Super Boxy's shoulder was 32 px off the menu column; 0.58
-## leaves ~90 px there and changes nothing at all at 16:9 or wider, where the
-## height is the binding constraint anyway.
-const WIDTH_CAP := 0.58
+## Tuned against the four-aspect sweep in _flow_probe.gd. It has to be low
+## enough that the WIDTH binds at 16:9 rather than the height: once it does,
+## 1280x720 and 1280x960 resolve to the same stage unit, and the composition
+## stops changing when the window gets taller. 0.58 left the height binding at
+## 16:9 and let a 4:3 window inflate the cast to 30 px off the menu column;
+## 0.56 pulls 16:9 in by 3 px and holds every taller aspect at that same size.
+const WIDTH_CAP := 0.56
 
 ## Per figure: how tall it stands, where its centre sits measured back from the
 ## right edge, and how far its feet drop past the bottom of the frame. Adamastor
@@ -45,11 +47,23 @@ const ADAMASTOR_SIZE := 0.88
 const ADAMASTOR_X := 0.2085           # centre, back from the right edge
 const ADAMASTOR_FEET := -0.055        # negative lifts the feet up into the frame
 const HEROSAURO_SIZE := 0.60
-const HEROSAURO_X := 0.72
+## Moved out from 0.72 when Super Boxy's real width appeared. The two heroes
+## have to be far enough apart that the smaller one isn't half-eaten by the
+## larger; the room for it comes from letting Herosauro's shoulder cross
+## Adamastor's leg, which is the read we want anyway — heroes in FRONT of him.
+const HEROSAURO_X := 0.65
 const HEROSAURO_FEET := 0.012
-const SUPERBOXY_SIZE := 0.545
-const SUPERBOXY_X := 0.855
-const SUPERBOXY_FEET := 0.002
+## Retuned when superboxy.png was re-extracted. The sheet is a 2x2 grid of poses
+## and the first extraction sliced a column spanning both rows, so the texture
+## was the front pose with the BACK pose stacked under it: the menu drew a
+## second Super Boxy, half off the bottom of the frame, and the front pose only
+## ever filled the top 47% of its own box. These numbers are for a texture that
+## is one figure edge to edge — hence the smaller height and the much wider art.
+const SUPERBOXY_SIZE := 0.50
+const SUPERBOXY_X := 0.82
+## Feet a few pixels shy of Herosauro's ground line, so he reads as standing
+## just behind his brother rather than beside him on the same mark.
+const SUPERBOXY_FEET := 0.005
 
 ## Requested texture heights are rounded to this so that dragging a window edge
 ## cannot fire a Lanczos resample of a 900 px sheet on every single frame.
