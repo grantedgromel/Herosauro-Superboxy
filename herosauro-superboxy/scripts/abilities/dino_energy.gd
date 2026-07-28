@@ -67,8 +67,10 @@ func _impact(body: Node3D) -> void:
 		_finish()
 		return
 	if body.is_in_group("boss"):
+		# damage_boss makes Adamastor play its own hit reaction, and the shipped
+		# dino_hit / boss_hit samples are the same file - playing both stacked two
+		# identical buffers in one frame.
 		GameManager.damage_boss(damage, source_player)
-		AudioManager.play_dino_hit()
 		GameManager.hit_stop(0.07)
 	elif body is PropBody:
 		(body as PropBody).apply_hit_impulse(direction * 34.0 + Vector3.UP * 6.0, global_position)

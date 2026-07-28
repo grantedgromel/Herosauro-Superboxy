@@ -99,6 +99,11 @@ func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("players"):
 		var dir := global_position.direction_to((body as Node3D).global_position)
 		body.take_hit(damage, dir * 6.0 + Vector3.UP * 4.0)
+		# queue_free() only lands at end of frame, so a rock overlapping two bodies
+		# can re-enter here first; reuse the _settle guard so the thud plays once.
+		if not _settling:
+			_settling = true
+			AudioManager.play_rock_impact()
 		queue_free()
 	elif body is PropBody:
 		var push := linear_velocity
@@ -116,4 +121,5 @@ func _settle() -> void:
 	if _settling:
 		return
 	_settling = true
+	AudioManager.play_rock_impact()
 	_life = minf(_life, 0.3)

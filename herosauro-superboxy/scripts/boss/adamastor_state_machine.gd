@@ -287,14 +287,18 @@ func _do_rock_throw() -> void:
 	if GameManager.state != GameManager.State.PLAYING:
 		return
 	var damage: int = ROCK_DAMAGE_P2 if _escalated else ROCK_DAMAGE
-	for t in _rock_volley():
+	var volley := _rock_volley()
+	for t in volley:
 		var rock := RockScene.instantiate()
 		rock.damage = damage
 		# Spawn up at the boss's hands, then arc toward the target.
 		_spawn(rock, boss.global_position + Vector3(0.0, 6.0, 0.0))
 		if rock.has_method("launch"):
 			rock.launch(t)
-	AudioManager.play_boss_slam()
+	# One throw gesture, one sound - a phase-two double volley is still one heave.
+	# Skipped on an empty volley (no target), so there is no heave without a rock.
+	if not volley.is_empty():
+		AudioManager.play_rock_throw()
 
 
 ## Where this volley lands. One rock at the hero's feet in phase one; in phase
