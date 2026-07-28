@@ -134,6 +134,7 @@ func _ready() -> void:
 		add_child(_model_root)
 	_build_visuals()
 	_fix_model_shadow_bounds()
+	_build_contact_shadow()
 	_build_swing_box()
 	reset_state()
 
@@ -156,6 +157,9 @@ func _physics_process(delta: float) -> void:
 	_process_attack_hit()
 	_handle_fall()
 	_handle_flicker(delta)
+	# After move_and_slide, so the blob is placed against the height he actually
+	# ended the frame at rather than the one he started it at.
+	_update_contact_shadow()
 	_drive_anim(delta)
 
 
@@ -736,21 +740,23 @@ func _build_visuals() -> void:
 	pass
 
 
-## The hero was throwing no shadow at all while everything around him — the
-## giant, the parapets, the lampposts — threw long ones. A probe over the
-## instantiated scene found why: his glTF is a single skinned MeshInstance3D
-## whose AABB is 0.69 x 1.70 x 0.44, the box of its REST pose, with a cull
-## margin of zero and no custom AABB on the mesh.
+## Hygiene for a skinned mesh, NOT the reason the hero looked unshadowed.
 ##
-## A skinned mesh does not update that box as the skeleton moves it. The colour
-## pass forgives it, because the camera is right on top of him and the box is
-## still on screen. The shadow pass does not: it culls against the light's
-## frustum, the sun sits at 11.5 degrees so the caster has to be found from a
-## direction that is nearly edge-on to the box, and a pose that reaches outside
-## it — a swing, a jump, a cape — leaves the renderer testing a stale volume.
+## His glTF is a single skinned MeshInstance3D carrying the AABB of its REST
+## pose (0.69 x 1.70 x 0.44) with a cull margin of zero and no custom AABB, and
+## a skinned mesh does not grow that box as the skeleton moves it. A pose that
+## reaches outside it — a swing, a jump, a cape — leaves the renderer culling
+## against a stale volume. Widening the margin is the documented remedy and
+## costs nothing per frame, so it stays.
 ##
-## Growing the cull margin is the documented remedy and it is the cheap one: it
-## widens the culling test only, and costs nothing per frame.
+## But it is not why he read as unshadowed in captured frames. tools/shadowshot
+## renders the same frame with him visible and hidden and subtracts: standing on
+## the deck he throws a full-length streak along the sun, exactly where the
+## geometry says it should be. It is invisible in play for two compounding
+## reasons that have nothing to do with culling — the gameplay camera looks
+## almost straight down the sun's own axis, which foreshortens the streak to
+## nearly nothing, and what is left lands on the near-black tramway strip.
+## _build_contact_shadow() is what actually fixes the read.
 func _fix_model_shadow_bounds(margin: float = 1.2) -> void:
 	for mi in _model_meshes(_model_root):
 		mi.extra_cull_margin = maxf(mi.extra_cull_margin, margin)
@@ -758,6 +764,110 @@ func _fix_model_shadow_bounds(margin: float = 1.2) -> void:
 		# from the DCC tool it came out of, and nothing else here checks.
 		if mi.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+## The contact shadow: a soft dark blob projected straight down under the hero.
+##
+## Not a substitute for the sun's shadow — that one is real and still there.
+## This is the one that says "his feet are ON that". A raking 11.5 degree sun
+## throws its shadow sideways and far, so it never touches the point of contact,
+## and a third-person character with nothing under his feet reads as pasted onto
+## the deck however good the lighting is. Every game with a low sun and a
+## close camera carries one of these.
+##
+## A Decal rather than a quad: it conforms to whatever is under him — roadway,
+## tram rail, kerb, the pavement step — with no z-fighting and no need to know
+## the surface normal. GL Compatibility does not render decals, so the web tier
+## simply goes without, which is the same trade the rest of that tier makes.
+## Half the collision capsule's height (2.0 in herosauro.tscn / superboxy.tscn),
+## i.e. how far the feet sit below the body origin. The same 1.0 the subclasses'
+## MODEL_Y uses to drop the art onto the bottom of the capsule.
+const FEET_BELOW_ORIGIN := 1.0
+
+const CONTACT_FOOTPRINT := 1.9      ## blob diameter at the feet, metres
+const CONTACT_DEPTH := 3.2          ## how far the projection box reaches down
+const CONTACT_STRENGTH := 0.5       ## opacity directly under him
+## Airborne, the blob widens and fades — the standard read for "further from the
+## ground". Past this height it is gone entirely.
+const CONTACT_FADE_HEIGHT := 3.0
+const CONTACT_AIR_SPREAD := 1.7
+
+var _contact: Decal
+
+
+func _build_contact_shadow() -> void:
+	_contact = Decal.new()
+	_contact.name = "ContactShadow"
+	_contact.texture_albedo = _contact_texture()
+	# albedo_mix 1.0 replaces the surface albedo wherever the blob is opaque, and
+	# the blob is black — so this darkens rather than tints.
+	_contact.albedo_mix = 1.0
+	_contact.modulate = Color(0.0, 0.0, 0.0, 1.0)
+	# Nothing above the contact point should be painted, or the blob climbs the
+	# kerb face and his own shins.
+	_contact.upper_fade = 0.1
+	_contact.lower_fade = 1.4
+	# Steep faces are not the ground. Without this the blob wraps the parapet
+	# when he walks up against it.
+	_contact.normal_fade = 0.6
+	add_child(_contact)
+	_update_contact_shadow()
+
+
+## Black at the centre, gone at the rim. Same shape as the menu's dusk pocket,
+## for the same reason: a hard-edged disc reads as a sticker, not a shadow.
+func _contact_texture() -> GradientTexture2D:
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	grad.colors = PackedColorArray([
+		Color(0.0, 0.0, 0.0, CONTACT_STRENGTH),
+		Color(0.0, 0.0, 0.0, CONTACT_STRENGTH * 0.55),
+		Color(0.0, 0.0, 0.0, 0.0),
+	])
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 128
+	gt.height = 128
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	return gt
+
+
+## Sized and faded against the drop to the ground, so a jump lifts the blob off
+## rather than dragging a hard disc through the air with him.
+func _update_contact_shadow() -> void:
+	if _contact == null:
+		return
+	var drop := _ground_drop()
+	if drop < 0.0:
+		_contact.visible = false
+		return
+	var t: float = clampf(drop / CONTACT_FADE_HEIGHT, 0.0, 1.0)
+	var spread: float = lerpf(1.0, CONTACT_AIR_SPREAD, t)
+	var width := CONTACT_FOOTPRINT * spread
+	_contact.visible = true
+	_contact.size = Vector3(width, CONTACT_DEPTH, width)
+	_contact.modulate.a = 1.0 - t
+	# The Decal's box is centred on the node, so hang it entirely BELOW the feet:
+	# top face at the feet, reaching CONTACT_DEPTH down. Centre it any higher and
+	# the projection climbs his own shins.
+	_contact.position = Vector3(0.0, -FEET_BELOW_ORIGIN - CONTACT_DEPTH * 0.5, 0.0)
+
+
+## Metres from the feet down to whatever is below, or -1 if nothing is in range.
+func _ground_drop() -> float:
+	if is_on_floor():
+		return 0.0
+	var space := get_world_3d().direct_space_state
+	var from := global_position + Vector3(0.0, -FEET_BELOW_ORIGIN + 0.05, 0.0)
+	var to := from + Vector3(0.0, -(CONTACT_FADE_HEIGHT + 0.5), 0.0)
+	var query := PhysicsRayQueryParameters3D.create(from, to, PhysicsLayers.WORLD)
+	query.exclude = [get_rid()]
+	var hit := space.intersect_ray(query)
+	if hit.is_empty():
+		return -1.0
+	return from.y - (hit["position"] as Vector3).y
 
 
 func _model_meshes(node: Node) -> Array[MeshInstance3D]:
