@@ -18,16 +18,24 @@ extends Node
 const ArenaScene: PackedScene = preload("res://scenes/world/bridge_arena.tscn")
 const HeroScene: PackedScene = preload("res://scenes/players/herosauro.tscn")
 
-## Off to the side and low, looking across the hero rather than down the deck.
-## Down the deck is the one angle that hides a shadow running along it.
-const CAM_POS := Vector3(6.0, 3.4, 11.0)
-const HERO_POS := Vector3(0.0, 1.05, 0.0)
+## Where the hero is dropped. High enough to be above the deck whatever its
+## datum is; gravity puts him on it and the camera is then placed off his
+## SETTLED position rather than off a guessed one. The first attempt hardcoded
+## both and put the camera out over the water, looking along the parapet.
+const HERO_DROP := Vector3(0.0, 6.0, 0.0)
+
+## Camera offset from the settled hero: high and behind, looking down. From
+## above, an 8 m shadow at an 11.5 degree sun lies flat across the deck in full
+## view — the gameplay camera is nearly along the sun's own axis, which is the
+## one angle that foreshortens that shadow into nothing.
+const CAM_OFFSET := Vector3(1.0, 9.0, 7.0)
 
 const SETTLE := 26   ## frames for the arena build + the renderer's temporal passes
 const GAP := 8       ## frames between the two exposures
 
 var _out: String = "/tmp/shadowshot"
 var _hero: Node3D
+var _cam: Camera3D
 var _frame: int = 0
 var _stage: int = 0
 
@@ -42,22 +50,34 @@ func _ready() -> void:
 
 	_hero = HeroScene.instantiate()
 	add_child(_hero)
-	_hero.global_position = HERO_POS
+	_hero.global_position = HERO_DROP
 
-	# Our own camera, marked current after the arena's so it wins.
-	var cam := Camera3D.new()
-	cam.name = "ProbeCamera"
-	add_child(cam)
-	cam.global_position = CAM_POS
-	cam.look_at(HERO_POS + Vector3(0.0, -0.3, 0.0), Vector3.UP)
-	cam.fov = 50.0
-	cam.current = true
+	# Our own camera, marked current after the arena's so it wins. Aimed in
+	# _aim(), once the hero has actually landed.
+	_cam = Camera3D.new()
+	_cam.name = "ProbeCamera"
+	add_child(_cam)
+	_cam.fov = 50.0
+	_cam.current = true
 
 	print("shadowshot: adapter=", RenderingServer.get_video_adapter_name())
 
 
+## Frame the hero where he ended up, not where he was dropped.
+func _aim() -> void:
+	var at := _hero.global_position
+	_cam.global_position = at + CAM_OFFSET
+	_cam.look_at(at, Vector3.UP)
+	_cam.current = true
+	print("shadowshot: hero settled at ", at, "  camera ", _cam.global_position)
+
+
 func _process(_d: float) -> void:
 	_frame += 1
+	# Re-aim every frame until the exposure: the hero is still falling, and the
+	# arena's own camera may become current partway through its build.
+	if _stage == 0:
+		_aim()
 	match _stage:
 		0:
 			if _frame >= SETTLE:
