@@ -294,7 +294,8 @@ func _do_rock_throw() -> void:
 		_spawn(rock, boss.global_position + Vector3(0.0, 6.0, 0.0))
 		if rock.has_method("launch"):
 			rock.launch(t)
-	AudioManager.play_boss_slam()
+	# The throw is a heave, not a slam — the slam cue belongs to the melee arms.
+	AudioManager.play_rock_throw()
 
 
 ## Where this volley lands. One rock at the hero's feet in phase one; in phase

@@ -116,4 +116,7 @@ func _settle() -> void:
 	if _settling:
 		return
 	_settling = true
+	# The guard is also what keeps this to one impact per rock rather than one
+	# per contact report as it bounces.
+	AudioManager.play_rock_impact()
 	_life = minf(_life, 0.3)

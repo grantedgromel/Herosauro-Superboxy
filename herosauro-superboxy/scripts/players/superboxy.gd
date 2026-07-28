@@ -41,6 +41,8 @@ func _ready() -> void:
 	# Shorter than Herosauro's by design, but still past the giant's push-out.
 	attack_range = 3.7
 	attack_hold = 0.28
+	# His glove has its own recorded impact, distinct from Herosauro's.
+	melee_hit_sfx = "super_boxy_hit"
 
 
 func _build_visuals() -> void:

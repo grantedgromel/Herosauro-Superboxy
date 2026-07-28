@@ -74,9 +74,19 @@ const BLEND_PARAM := "parameters/locomotion/blend_position"
 const ACTION_SPEED_PARAM := "parameters/action_speed/scale"
 const ACTION_REQUEST_PARAM := "parameters/action/request"
 
+## How fast we have to be falling for a touchdown to be worth a sound. Below
+## this, the hero is walking off a kerb or being nudged down a step, and a thud
+## every time would be constant.
+const LAND_SFX_SPEED := 6.0
+
 var spawn_position: Vector3 = Vector3.ZERO
 var facing_dir: Vector3 = Vector3(1, 0, 0)
 
+## The one-shot played when this hero's melee connects. Subclasses override it;
+## AudioManager falls back to a synth thud for any name it has no file for.
+var melee_hit_sfx: String = "boss_hit"
+
+var _airborne_speed: float = 0.0   # downward speed on the last airborne frame
 var _coyote: float = 0.0
 var _jump_buffer: float = 0.0
 var _invuln: float = 0.0
@@ -209,8 +219,14 @@ func _handle_gravity(delta: float) -> void:
 
 func _handle_jump(delta: float) -> void:
 	if is_on_floor():
+		# Touchdown. _airborne_speed still holds the last airborne frame's fall
+		# speed, because is_on_floor() only flips after the move that landed us.
+		if _airborne_speed >= LAND_SFX_SPEED:
+			AudioManager.play_land()
+		_airborne_speed = 0.0
 		_coyote = coyote_time
 	else:
+		_airborne_speed = maxf(0.0, -velocity.y)
 		_coyote = max(0.0, _coyote - delta)
 
 	if InputManager.is_jump_just_pressed():
@@ -384,7 +400,7 @@ func _build_swing_box() -> void:
 
 func _on_swing_landed(target: Node3D) -> void:
 	if target.is_in_group("boss"):
-		AudioManager.play_boss_hit()
+		AudioManager.play_sfx(melee_hit_sfx)
 		GameManager.hit_stop(0.03)
 		if target.has_method("nudge"):
 			target.nudge(facing_dir, 0.4)
