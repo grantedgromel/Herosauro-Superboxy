@@ -27,8 +27,13 @@ func _ready() -> void:
 	# animation, it just costs 20 minutes; the tweens are long finished by frame
 	# ten. What the counts still buy is a couple of frames for the renderer's
 	# temporal passes to converge before the buffer is read back.
+	# The first wait is the long one. The menu's reveal is gated on the arena
+	# actually finishing its build, not on a timer, and that build is where all
+	# the terrain, facades and landmarks are generated — under a software
+	# rasteriser it is not done at frame twelve, and the shot came back as the
+	# logo over near-black.
 	_shots = [
-		["menu_a", 12, ""],
+		["menu_a", 26, ""],
 		["menu_b", 10, ""],
 		["menu_c", 10, "start"],
 		["hud_a", 14, ""],
