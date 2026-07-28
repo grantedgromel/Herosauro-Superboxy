@@ -166,7 +166,7 @@ func _update_arm(delta: float) -> void:
 
 func _apply_look(delta: float) -> void:
 	# Both sources arrive as (+x = turn right, +y = look up).
-	var look := InputManager.get_look_vector() * stick_sensitivity * delta
+	var look := _target_look() * stick_sensitivity * delta
 	look += _look_accum * mouse_sensitivity
 	_look_accum = Vector2.ZERO
 
@@ -195,6 +195,20 @@ func _resolve_target() -> Node3D:
 		return target
 	target = get_tree().get_first_node_in_group("players") as Node3D
 	return target
+
+
+## Look input from whoever is driving the hero this rig is following, rather
+## than from a global. Identical to reading the autoload while there is one
+## hero; the difference is that a second hero on a second action set orbits his
+## own camera instead of fighting over this one.
+##
+## Falls back to neutral rather than to the global: a rig pointed at something
+## that is not a PlayerBase has no player whose look this could be.
+func _target_look() -> Vector2:
+	var hero := _resolve_target() as PlayerBase
+	if hero == null or hero.input == null:
+		return Vector2.ZERO
+	return hero.input.get_look_vector()
 
 
 ## Jump straight to the framing we want at the start of a fight: sat behind the

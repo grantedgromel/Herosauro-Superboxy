@@ -7,11 +7,21 @@ extends CharacterBody3D
 ## move. Everything else - camera-relative locomotion, jumping, i-frames,
 ## knockback, fall respawn, cooldowns and the AnimationTree - lives here.
 ##
-## Movement is third-person camera-relative: the pad vector from InputManager is
-## rotated through the active camera's yaw, so "forward" always means "away from
-## the camera" no matter where the orbit rig has been swung.
+## Movement is third-person camera-relative: the pad vector from this hero's
+## `input` is rotated through the active camera's yaw, so "forward" always means
+## "away from the camera" no matter where the orbit rig has been swung.
 
 @export var player_id: int = 1
+
+## Who is driving this hero. Defaults to a human on the unprefixed action set,
+## which is what a solo game wants and what the InputManager autoload used to
+## provide globally; main.gd overrides it per roster slot before _ready() runs.
+##
+## It lives on the hero rather than in an autoload so that two heroes in one
+## scene can be driven by different things — two humans, or a human and an
+## AgentInput some AI writes into. Every read below goes through here, so
+## nothing in this class knows or cares which it is.
+var input: InputSource = DeviceInput.new()
 @export var move_speed: float = 8.0
 @export var sprint_multiplier: float = 1.3
 @export var jump_velocity: float = 13.0
@@ -167,7 +177,7 @@ func _physics_process(delta: float) -> void:
 
 ## World-space move intent, built from the pad vector and the camera's yaw.
 func _wish_direction() -> Vector3:
-	var pad := InputManager.get_move_vector()
+	var pad := input.get_move_vector()
 	if pad.length_squared() < 0.0001:
 		return Vector3.ZERO
 	var fwd := _camera_forward()
@@ -195,7 +205,7 @@ func _camera_forward() -> Vector3:
 
 func _handle_movement(delta: float) -> void:
 	_wish_dir = _wish_direction()
-	var speed := move_speed * (sprint_multiplier if InputManager.is_sprinting() else 1.0)
+	var speed := move_speed * (sprint_multiplier if input.is_sprinting() else 1.0)
 	var target := _wish_dir * speed
 
 	# Accelerate only the *controlled* part of the velocity; knockback rides on
@@ -217,7 +227,7 @@ func _handle_gravity(delta: float) -> void:
 	if not is_on_floor():
 		var g := gravity
 		# Variable jump height: cut the rise short if jump is released early.
-		if velocity.y > 0.0 and not InputManager.is_jump_held():
+		if velocity.y > 0.0 and not input.is_jump_held():
 			g *= low_jump_gravity_mult
 		velocity.y -= g * delta
 
@@ -234,7 +244,7 @@ func _handle_jump(delta: float) -> void:
 		_airborne_speed = maxf(0.0, -velocity.y)
 		_coyote = max(0.0, _coyote - delta)
 
-	if InputManager.is_jump_just_pressed():
+	if input.is_jump_just_pressed():
 		_jump_buffer = jump_buffer_time
 	else:
 		_jump_buffer = max(0.0, _jump_buffer - delta)
@@ -342,7 +352,7 @@ func _start_iframes() -> void:
 func _handle_ability() -> void:
 	if _ability_timer > 0.0:
 		return
-	if InputManager.is_ability_just_pressed():
+	if input.is_ability_just_pressed():
 		_ability_timer = ability_cooldown
 		_aim_at_camera(ABILITY_AIM_HOLD)
 		_perform_ability()
@@ -356,7 +366,7 @@ func _handle_ability() -> void:
 func _handle_attack() -> void:
 	if _attack_timer > 0.0 or _action_timer > 0.0:
 		return   # gated by its own cooldown and by any in-progress action anim (incl. specials/dash)
-	if InputManager.is_attack_just_pressed():
+	if input.is_attack_just_pressed():
 		_attack_timer = attack_cooldown
 		_attack_swing = 0.14
 		_aim_at_camera(attack_hold)

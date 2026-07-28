@@ -4,14 +4,15 @@ extends Node3D
 ## hero and boss — is built on the MENU->PLAYING transition and torn down when we
 ## return to the menu. Kept code-driven so each sub-scene stays self-contained.
 ##
-## SOLO: exactly one hero is spawned. There is no second player and no AI ally.
+## WHO IS PLAYING is a roster, not a constant. MatchConfig.solo() returns one
+## slot and that is what ships, but the spawn loop below does not know that —
+## hand it two slots and it spawns two heroes, each with its own InputSource.
+## See match_config.gd for what co-op still needs beyond this file (a p2_ action
+## set, a two-subject camera rule, a second HUD row).
 
-const HERO_ID := 1                            # HUD / GameManager still key player state by id
-const HERO_SPAWN := Vector3(-12.0, 4.0, 0.0)
 const BOSS_SPAWN := Vector3(16.0, 2.0, 0.0)   # matches Adamastor.SPAWN
 
 const WorldScene: PackedScene = preload("res://scenes/world/bridge_arena.tscn")
-const HerosauroScene: PackedScene = preload("res://scenes/players/herosauro.tscn")
 const AdamastorScene: PackedScene = preload("res://scenes/boss/adamastor.tscn")
 const PropSpawnerScene: PackedScene = preload("res://scenes/props/prop_spawner.tscn")
 const MainMenuScene: PackedScene = preload("res://scenes/ui/main_menu.tscn")
@@ -66,7 +67,12 @@ func _build_world() -> void:
 	_spawn_root.add_to_group("spawn_root")
 	_world_root.add_child(_spawn_root)
 
-	var hero := _spawn_player(HerosauroScene, HERO_ID, HERO_SPAWN)
+	# The first slot is the one the camera follows and the HUD reads. With a
+	# one-slot roster that is simply "the hero".
+	var heroes: Array[PlayerBase] = []
+	for slot in MatchConfig.solo():
+		heroes.append(_spawn_player(slot))
+	var hero: PlayerBase = heroes[0]
 
 	# Knockable barrels, crates and rubble along the deck. It keeps clear of the
 	# hero and boss spawns itself, so it goes in before they matter.
@@ -92,12 +98,15 @@ func _teardown_world() -> void:
 	_spawn_root = null
 
 
-func _spawn_player(scene: PackedScene, id: int, spawn: Vector3) -> PlayerBase:
-	var p: PlayerBase = scene.instantiate()
-	p.player_id = id
-	p.spawn_position = spawn
+func _spawn_player(slot: MatchConfig.Slot) -> PlayerBase:
+	var p: PlayerBase = slot.scene.instantiate()
+	p.player_id = slot.player_id
+	p.spawn_position = slot.spawn
+	# Before add_child, so _ready() already sees the right source rather than
+	# reading a frame of the default one.
+	p.input = slot.input
 	_world_root.add_child(p)
-	p.global_position = spawn
+	p.global_position = slot.spawn
 	return p
 
 
@@ -141,13 +150,20 @@ func _on_game_over(_victory: bool) -> void:
 	_hud.visible = false
 
 
-## Solo defeat bridge. GameManager still ends the run only when BOTH entries of
-## its {1, 2} health dict reach zero, and player 2 is never spawned — so without
-## this the fight can never be lost. Deferred + state-guarded so it stays a no-op
-## once GameManager's own check becomes single-player aware.
-func _on_player_damaged(id: int, _amount: int, new_health: int) -> void:
-	if id == HERO_ID and new_health <= 0:
-		_force_defeat.call_deferred()
+## Solo defeat bridge. GameManager seeds its health dict {1, 2} whatever the
+## roster is, so with only slot 1 spawned the "both down" test can never fire and
+## the fight could never be lost.
+##
+## Guarded on the roster rather than on a hardcoded id: with two heroes actually
+## in the scene this must NOT end the run when one of them falls, and
+## GameManager's own _all_heroes_down() — which counts live players — is already
+## correct for that case.
+func _on_player_damaged(_id: int, _amount: int, new_health: int) -> void:
+	if new_health > 0:
+		return
+	if get_tree().get_nodes_in_group("players").size() > 1:
+		return   # co-op: let GameManager decide, it counts the live heroes
+	_force_defeat.call_deferred()
 
 
 func _force_defeat() -> void:
