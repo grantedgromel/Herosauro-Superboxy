@@ -9,7 +9,7 @@ extends Button
 ## NO ICON GLYPHS ANYWHERE. The obvious focus caret is a triangle, and neither
 ## Bangers nor Chillax carries one; a missing glyph on the web export is a
 ## tofu box in the most visible spot on the screen. The focus marker is therefore
-## a drawn gold bar, and the difficulty control is three pills rather than a pair
+## a drawn crimson bar, and the difficulty control is three pills rather than a pair
 ## of chevrons — which is clearer anyway, because it shows the whole scale
 ## instead of only the current value.
 
@@ -41,9 +41,9 @@ const PAD_RIGHT := 18.0
 ## whole column into one block of near-white. Against a flat dark field the idle
 ## rows can recede properly, so the focused one is the only thing the eye lands
 ## on — the single biggest reason a minimal menu reads as designed.
-const IDLE_TEXT := Color(0.78, 0.75, 0.73, 0.58)
-const HOT_FILL := Color(1.0, 0.86, 0.62, 0.11)
-const DOWN_FILL := Color(1.0, 0.86, 0.62, 0.18)
+const IDLE_TEXT := Color(UIStyle.PAPER_INK_SOFT, 0.62)
+const HOT_FILL := Color(0.30, 0.19, 0.12, 0.06)
+const DOWN_FILL := Color(0.30, 0.19, 0.12, 0.11)
 
 var id: StringName = &""
 var kind: int = Kind.ACTION
@@ -78,7 +78,9 @@ func setup(row_id: StringName, caption: String, row_kind: int = Kind.ACTION,
 	_marker = Panel.new()
 	_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var mk := StyleBoxFlat.new()
-	mk.bg_color = UIStyle.GOLD
+	# Crimson, not gold. Gold on parchment is a two-to-one contrast ratio — it
+	# was the right marker against a dark sky and is nearly invisible on paper.
+	mk.bg_color = UIStyle.CHART_SPLASH
 	mk.set_corner_radius_all(int(MARKER_WIDTH / 2.0))
 	mk.corner_detail = 6
 	_marker.add_theme_stylebox_override("panel", mk)
@@ -91,6 +93,7 @@ func setup(row_id: StringName, caption: String, row_kind: int = Kind.ACTION,
 	add_child(_content)
 
 	_label = UIStyle.label(caption, TEXT_PX, IDLE_TEXT, true, HORIZONTAL_ALIGNMENT_LEFT)
+	UIStyle.flatten(_label)
 	_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_label.size_flags_vertical = Control.SIZE_FILL
 	_content.add_child(_label)
@@ -115,7 +118,7 @@ func setup(row_id: StringName, caption: String, row_kind: int = Kind.ACTION,
 ## from the water behind it. Against a flat field the plate is the thing that
 ## looks unfinished — it reads as a button in a screen that has no other buttons,
 ## and it boxes in a row whose whole job is to be a line of type. Focus is now
-## carried by three things that cost nothing: the gold bar, the slide right, and
+## carried by three things that cost nothing: the crimson bar, the slide right, and
 ## the row growing a fifth larger.
 ##
 ## Pressed keeps its fill. A press is a moment, not a state, and a brief flash is
@@ -151,7 +154,7 @@ func _build_pills(options: PackedStringArray, colors: Array[Color]) -> void:
 		_pill_colors.append(tint)
 		var pill := PanelContainer.new()
 		pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var l := UIStyle.label(options[i], PILL_PX, UIStyle.TEXT_SECONDARY, true,
+		var l := UIStyle.label(options[i], PILL_PX, UIStyle.PAPER_INK_SOFT, true,
 				HORIZONTAL_ALIGNMENT_CENTER)
 		l.custom_minimum_size = Vector2(52, 0)
 		pill.add_child(l)
@@ -241,7 +244,7 @@ func _pill_at(local: Vector2) -> int:
 
 func _refresh() -> void:
 	var hot := has_focus()
-	_label.add_theme_color_override("font_color", UIStyle.TEXT_PRIMARY if hot else IDLE_TEXT)
+	_label.add_theme_color_override("font_color", UIStyle.PAPER_INK if hot else IDLE_TEXT)
 	if _shift != null and _shift.is_valid():
 		_shift.kill()
 	_shift = create_tween().set_parallel(true)

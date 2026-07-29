@@ -122,8 +122,9 @@ func _ready() -> void:
 
 	_strap_font = FontVariation.new()
 	_strap_font.base_font = UIStyle.UI_BOLD
-	_strap = UIStyle.label(STRAPLINE, SIZE_STRAP, UIStyle.TEXT_PRIMARY, true,
+	_strap = UIStyle.label(STRAPLINE, SIZE_STRAP, UIStyle.PAPER_INK, true,
 			HORIZONTAL_ALIGNMENT_LEFT)
+	UIStyle.flatten(_strap)
 	_strap.add_theme_font_override("font", _strap_font)
 	add_child(_strap)
 
@@ -237,10 +238,12 @@ func _push_rect_size() -> void:
 func _gold_rule() -> TextureRect:
 	var grad := Gradient.new()
 	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
+	# Crimson on paper rather than gold on paper, for the contrast reason in
+	# menu_row.gd — and it ties the lockup to the wash under the cast.
 	grad.colors = PackedColorArray([
-		UIStyle.GOLD,
-		Color(UIStyle.GOLD_DEEP.r, UIStyle.GOLD_DEEP.g, UIStyle.GOLD_DEEP.b, 0.55),
-		Color(UIStyle.GOLD_DEEP.r, UIStyle.GOLD_DEEP.g, UIStyle.GOLD_DEEP.b, 0.0),
+		UIStyle.CHART_SPLASH,
+		Color(UIStyle.CHART_SPLASH, 0.55),
+		Color(UIStyle.CHART_SPLASH, 0.0),
 	])
 	var gt := GradientTexture2D.new()
 	gt.gradient = grad

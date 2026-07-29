@@ -9,7 +9,7 @@ extends Control
 ## LAYER ORDER, back to front. Every layer is a CanvasItem — there is no 3D on
 ## this screen any more:
 ##
-##   Backdrop     a flat graded field
+##   Backdrop     the chart: parchment, graticule, rhumb lines, compass rose
 ##   HeroStage    Adamastor, Super Boxy, Herosauro, on a slow drift
 ##   TitleLogo    the display lockup
 ##   MenuList     START / DIFFICULTY / CONTROLS / CREDITS / QUIT
@@ -18,7 +18,7 @@ extends Control
 ##   Modal        CONTROLS and CREDITS panels
 ##   Curtain      the fade to black on START and QUIT
 ##
-## THE BACKDROP IS FLAT ON PURPOSE. It used to be bridge_arena.tscn rendered
+## THE BACKDROP IS A CHART, NOT A RENDER. It used to be bridge_arena.tscn drawn
 ## live, with a cinematic camera on a 74-second loop — the real gorge, at golden
 ## hour, behind the menu. It looked good in isolation and cost more than it
 ## returned:
@@ -33,15 +33,21 @@ extends Control
 ##   * It welded the menu's look to the game's time of day. Re-theming the title
 ##     screen meant re-lighting the fight.
 ##
-## A flat field fixes all three at once and hands the screen to the art, which is
-## the point: the cast is the game's identity and it now has the contrast to read
-## as such. Gameplay keeps golden hour; the two are no longer coupled.
+## A drawn chart fixes all three and changes the register: the old screen was a
+## picture of Porto, this is the map of it. Porto is a port on the Douro and
+## Adamastor is the Cape of Storms giant out of Camões, so rhumb lines and a
+## compass rose are this game's own iconography rather than a borrowed one.
+##
+## It also inverts the screen. The menu is dark ink on paper now, where the HUD
+## stays light-on-dark — each sits on what it sits on. Gameplay keeps golden
+## hour; the two are no longer coupled, which is what made this possible.
 ##
 ## COMPOSITION. Everything readable hangs off the left margin and everything
 ## drawn owns the right. Adamastor is cropped by the frame because a giant that
 ## fits on screen is not a giant, and the heroes stand in front of him. A centred
 ## logo and a centred button stack would have sat straight on top of that.
 
+const ChartBackdropScript := preload("res://scripts/ui/menu/chart_backdrop.gd")
 const HeroStageScript := preload("res://scripts/ui/menu/hero_stage.gd")
 const TitleLogoScript := preload("res://scripts/ui/menu/title_logo.gd")
 const MenuListScript := preload("res://scripts/ui/menu/menu_list.gd")
@@ -72,19 +78,6 @@ const HINTS_BASELINE := 58.0     # up from the bottom edge
 const BUILD_BASELINE := 26.0     # the version stamp, below the hints
 const LIST_BOTTOM_CLEAR := 92.0
 
-# --- Backdrop ----------------------------------------------------------------
-#
-# Two stops, corner to corner. A single flat colour across 1280x720 reads as an
-# empty buffer rather than as a designed field, and the diagonal puts the lighter
-# end behind the cast on the right where it separates them from the ground.
-#
-# Both stops are UIStyle.BASE — the palette's darkest ink, and the one colour in
-# it that was never tied to the sunset. When the new theme lands these are the
-# two values to change and nothing else on this screen needs to move.
-
-const BACKDROP_NEAR := Color("14101f")   # behind the menu column, left
-const BACKDROP_FAR := Color("241a30")    # behind the cast, right
-
 # --- Timing ------------------------------------------------------------------
 
 const CURTAIN_OUT := 0.28        # fade to black on START / QUIT
@@ -99,7 +92,7 @@ const LIST_STAGGER := 0.07
 const DRIFT_RATE := 0.11
 const DRIFT_AMPLITUDE := 0.55
 
-var _backdrop: TextureRect
+var _backdrop: ChartBackdropScript
 var _stage: HeroStageScript
 var _logo: TitleLogoScript
 var _list: MenuListScript
@@ -132,7 +125,8 @@ func _ready() -> void:
 # --- Construction ------------------------------------------------------------
 
 func _build() -> void:
-	_backdrop = _make_backdrop()
+	_backdrop = ChartBackdropScript.new()
+	_backdrop.name = "ChartBackdrop"
 	add_child(_backdrop)
 
 	_stage = HeroStageScript.new()
@@ -151,7 +145,7 @@ func _build() -> void:
 
 	_hints = UIStyle.hint_row([
 		["W", "Up"], ["S", "Down"], ["Enter", "Select"], ["Esc", "Back"],
-	], UIStyle.SPACE_LG)
+	], UIStyle.SPACE_LG, true)
 	_hints.name = "Hints"
 	(_hints as HBoxContainer).alignment = BoxContainer.ALIGNMENT_BEGIN
 	_hints.modulate.a = 0.0
@@ -160,7 +154,7 @@ func _build() -> void:
 	# Bottom-left build stamp. Small, dim, and deliberately not centred on
 	# anything: it is for bug reports, not for the player.
 	_build_label = UIStyle.text(_build_stamp(), UIStyle.Scale.MICRO,
-			Color(UIStyle.TEXT_DISABLED, 0.55), HORIZONTAL_ALIGNMENT_LEFT)
+			Color(UIStyle.PAPER_INK_FAINT, 0.75), HORIZONTAL_ALIGNMENT_LEFT)
 	_build_label.name = "Build"
 	_build_label.modulate.a = 0.0
 	add_child(_build_label)
@@ -181,28 +175,6 @@ func _sheet(sheet_name: String, alpha: float) -> ColorRect:
 	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	return r
-
-
-## The flat field. A GradientTexture2D rather than two stacked ColorRects so the
-## ramp is resampled by the GPU at whatever size the window is, with no banding
-## at 8 bits and nothing to re-lay-out on resize.
-func _make_backdrop() -> TextureRect:
-	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 1.0])
-	grad.colors = PackedColorArray([BACKDROP_NEAR, BACKDROP_FAR])
-	var gt := GradientTexture2D.new()
-	gt.gradient = grad
-	gt.width = 256
-	gt.height = 256
-	gt.fill_from = Vector2(0.12, 0.0)
-	gt.fill_to = Vector2(1.0, 1.0)
-	var tr := TextureRect.new()
-	tr.name = "Backdrop"
-	tr.texture = gt
-	tr.stretch_mode = TextureRect.STRETCH_SCALE
-	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	return tr
 
 
 ## `v02 / r34450`-style stamp. Reads the project version so it cannot drift from

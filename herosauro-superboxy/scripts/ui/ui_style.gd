@@ -121,6 +121,32 @@ const DEFEAT := Color("ef6157")
 const PANEL_BG := SURFACE
 
 
+# --- Parchment: the menu's own palette ---------------------------------------
+#
+# The menu is dark-ink-on-paper; the HUD stays light-on-dark. That is not an
+# inconsistency, it is what each one sits on. The HUD floats over a live
+# golden-hour 3D scene and has to hold against it. The title screen sits on a
+# navigator's chart of the Douro and has to read as one.
+#
+# Porto is a port city and Adamastor is the Cape of Storms giant out of Camões,
+# so portolan charts, rhumb lines and compass roses are this game's own
+# iconography rather than a borrowed one.
+
+const PAPER := Color("e6d9bd")            # the sheet, at its lightest
+const PAPER_EDGE := Color("c2a97f")       # aged toward the edges
+const PAPER_INK := Color("3d2418")        # headings, focused rows
+const PAPER_INK_SOFT := Color("6b4a35")   # idle rows, body
+const PAPER_INK_FAINT := Color("8a6b52")  # captions, the build stamp
+## Cartography drawn on the sheet — grid, rhumb lines, the compass rose. Kept
+## barely there on purpose: it is texture, and the moment it competes with the
+## menu it has stopped being a backdrop.
+const CHART_LINE := Color(0.42, 0.28, 0.18, 0.13)
+const CHART_LINE_STRONG := Color(0.42, 0.28, 0.18, 0.22)
+## The crimson wash under the cast, straight off the reference. It is what stops
+## the art sitting on the paper like a sticker.
+const CHART_SPLASH := Color("9c2f28")
+
+
 # --- Spacing and radius ------------------------------------------------------
 
 const SPACE_XS := 4
@@ -470,29 +496,48 @@ static func chip(color: Color, diameter: float = 14.0) -> Panel:
 
 
 ## A keyboard key badge, for control hints that should read as keys not prose.
-static func key_cap(key: String) -> PanelContainer:
+##
+## `paper` flips it for the parchment menu. Everything else in this file assumes
+## light type on a dark ground, which is right for the HUD and exactly wrong on
+## a chart — a 10%-white wash and cream lettering are both invisible there.
+static func key_cap(key: String, paper: bool = false) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(1.0, 0.95, 0.88, 0.10)
+	sb.bg_color = Color(0.30, 0.19, 0.12, 0.10) if paper else Color(1.0, 0.95, 0.88, 0.10)
 	sb.set_corner_radius_all(RADIUS_SM)
 	sb.corner_detail = 8
 	sb.set_border_width_all(1)
-	sb.border_color = HAIRLINE_STRONG
+	sb.border_color = Color(PAPER_INK, 0.30) if paper else HAIRLINE_STRONG
 	sb.content_margin_left = SPACE_SM
 	sb.content_margin_right = SPACE_SM
 	sb.content_margin_top = 3
 	sb.content_margin_bottom = 3
 	p.add_theme_stylebox_override("panel", sb)
-	var l := text(key.to_upper(), Scale.MICRO, TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_CENTER)
+	var l := text(key.to_upper(), Scale.MICRO, PAPER_INK if paper else TEXT_PRIMARY,
+			HORIZONTAL_ALIGNMENT_CENTER)
+	if paper:
+		flatten(l)
 	l.custom_minimum_size = Vector2(18, 0)
 	p.add_child(l)
 	return p
 
 
+## Strip the outline and drop shadow a label carries by default.
+##
+## _legible() gives every piece of text both, because the HUD floats over a live
+## 3D scene and needs them. On the parchment menu they are actively wrong: a dark
+## outline around dark type on light paper thickens the strokes into a smudge,
+## and the shadow greys the paper behind every glyph.
+static func flatten(l: Label) -> void:
+	l.add_theme_constant_override("outline_size", 0)
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0))
+	l.add_theme_constant_override("shadow_offset_y", 0)
+
+
 ## `entries` is an Array of ["KEY", "Action"] pairs; renders them as key badges
 ## with their action beside them, evenly spaced.
-static func hint_row(entries: Array, gap: int = SPACE_LG) -> HBoxContainer:
+static func hint_row(entries: Array, gap: int = SPACE_LG, paper: bool = false) -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", gap)
@@ -501,8 +546,12 @@ static func hint_row(entries: Array, gap: int = SPACE_LG) -> HBoxContainer:
 		var pair := HBoxContainer.new()
 		pair.add_theme_constant_override("separation", SPACE_SM)
 		pair.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		pair.add_child(key_cap(String(e[0])))
-		pair.add_child(text(String(e[1]), Scale.CAPTION, TEXT_SECONDARY))
+		pair.add_child(key_cap(String(e[0]), paper))
+		var cap := text(String(e[1]), Scale.CAPTION,
+				PAPER_INK_SOFT if paper else TEXT_SECONDARY)
+		if paper:
+			flatten(cap)
+		pair.add_child(cap)
 		row.add_child(pair)
 	return row
 
