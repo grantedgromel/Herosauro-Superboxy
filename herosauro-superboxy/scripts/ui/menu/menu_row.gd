@@ -7,7 +7,7 @@ extends Button
 ## controls, laid out by hand, so the focus state can move as one piece.
 ##
 ## NO ICON GLYPHS ANYWHERE. The obvious focus caret is a triangle, and neither
-## Bangers nor Fredoka carries one; a missing glyph on the web export is a
+## Bangers nor Chillax carries one; a missing glyph on the web export is a
 ## tofu box in the most visible spot on the screen. The focus marker is therefore
 ## a drawn gold bar, and the difficulty control is three pills rather than a pair
 ## of chevrons — which is clearer anyway, because it shows the whole scale

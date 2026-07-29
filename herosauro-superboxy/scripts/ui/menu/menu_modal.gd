@@ -296,7 +296,8 @@ static func build_credits() -> Control:
 			"Used, in modified form, as the distant city backdrop. "
 			+ "sketchfab.com/dusoethe · creativecommons.org/licenses/by/4.0/"))
 	column.add_child(_paragraph(
-			"Typefaces: Bangers and Fredoka, SIL Open Font License 1.1."))
+			"Typefaces: Chillax by Indian Type Foundry, Fontshare Free Font "
+			+ "License · fontshare.com. Bangers, SIL Open Font License 1.1."))
 
 	column.add_child(_section("BUILT WITH"))
 	column.add_child(_paragraph("Godot Engine 4 — MIT License."))

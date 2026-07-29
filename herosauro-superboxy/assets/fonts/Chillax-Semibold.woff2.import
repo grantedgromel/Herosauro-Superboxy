@@ -2,13 +2,13 @@
 
 importer="font_data_dynamic"
 type="FontFile"
-uid="uid://fagjepwpcivj"
-path="res://.godot/imported/Fredoka.woff2-7adcab531d09445cfbf41550348051fe.fontdata"
+uid="uid://og5t3kwgmf4f"
+path="res://.godot/imported/Chillax-Semibold.woff2-1c7853dbb625d0edcd46d5684b95f2aa.fontdata"
 
 [deps]
 
-source_file="res://assets/fonts/Fredoka.woff2"
-dest_files=["res://.godot/imported/Fredoka.woff2-7adcab531d09445cfbf41550348051fe.fontdata"]
+source_file="res://assets/fonts/Chillax-Semibold.woff2"
+dest_files=["res://.godot/imported/Chillax-Semibold.woff2-1c7853dbb625d0edcd46d5684b95f2aa.fontdata"]
 
 [params]
 
@@ -22,8 +22,8 @@ msdf_size=48
 allow_system_fallback=true
 force_autohinter=false
 modulate_color_glyphs=false
-hinting=1
-subpixel_positioning=1
+hinting=3
+subpixel_positioning=4
 keep_rounding_remainders=true
 oversampling=0.0
 Fallbacks=null

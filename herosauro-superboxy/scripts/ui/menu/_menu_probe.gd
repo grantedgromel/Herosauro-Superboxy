@@ -73,8 +73,8 @@ func _text_lines(node: Node, depth: int = 0) -> Array[String]:
 # --- Font coverage -----------------------------------------------------------
 
 func _probe_fonts() -> void:
-	for pair in [["Bangers", UIStyle.TITLE_FONT], ["Fredoka", UIStyle.UI_FONT],
-			["Fredoka-Bold", UIStyle.UI_BOLD]]:
+	for pair in [["Bangers", UIStyle.TITLE_FONT], ["Chillax-Medium", UIStyle.UI_FONT],
+			["Chillax-Bold", UIStyle.UI_BOLD]]:
 		var font: Font = pair[1]
 		var missing := ""
 		for i in GLYPH_CHECK.length():

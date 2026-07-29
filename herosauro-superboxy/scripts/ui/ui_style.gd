@@ -11,16 +11,30 @@ extends RefCounted
 ##   * Bangers (the comic face) is DISPLAY ONLY — titles, verdicts, the combo
 ##     splash. Its all-caps rhythm and hand-inked weight make it unreadable as
 ##     body copy and unscannable as a tabular readout, so score, timers, health
-##     and every sentence use Fredoka instead. It is chosen for impact, not text.
+##     and every sentence use Chillax instead. It is chosen for impact, not text.
 ##   * Every piece of text carries BOTH a dark outline and a soft drop shadow,
 ##     because the UI now sits over a live golden-hour sky that is brighter than
 ##     any of our text colours.
 
 # --- Fonts -------------------------------------------------------------------
 
+## Chillax (Indian Type Foundry, Fontshare) is the UI face. Its EULA permits app
+## embedding and commercial use; the .woff2 files here are the ones the package
+## ships, not conversions, because §02 forbids modifying the font software. The
+## licence is in docs/licenses/.
+##
+## Chillax MEDIUM, not Regular: Fredoka Regular — the face this replaces — is
+## weight 500, and Chillax Medium is the weight-500 cut. Its x-height matches
+## Fredoka's exactly at 490/1000, so the type scale below carries over unchanged.
+## Chillax Regular (400) would have quietly lightened every screen.
+const UI_FONT: Font = preload("res://assets/fonts/Chillax-Medium.woff2")
+const UI_BOLD: Font = preload("res://assets/fonts/Chillax-Bold.woff2")
+
+## Still Bangers, and living on borrowed time. Once the drawn logo lands, the
+## display face should be whatever matches it — a hand-inked comic face against a
+## geometric sans is a pairing that only works while the logo is set in the comic
+## face too. See docs/UI_ART_BRIEF.md §C.
 const TITLE_FONT: Font = preload("res://assets/fonts/Bangers.woff2")
-const UI_FONT: Font = preload("res://assets/fonts/Fredoka.woff2")
-const UI_BOLD: Font = preload("res://assets/fonts/Fredoka-Bold.woff2")
 
 
 # --- Type scale --------------------------------------------------------------
