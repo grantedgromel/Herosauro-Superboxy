@@ -10,14 +10,22 @@ extends Control
 ##
 ## Each figure is three stacked copies of the same texture:
 ##
-##   shadow  a dark displaced copy. Alpha-keyed line art dropped straight onto a
-##           photographic sunset reads as a sticker; a displaced dark copy is the
-##           cheapest thing that puts it in the scene, and it suits hand-drawn
-##           cartoon art in a way a soft blur would not.
-##   rim     a slightly enlarged copy in a warm tint, behind the body. The sun in
-##           this world is low and behind the Ribeira, so everything in the
-##           foreground is backlit and everything backlit has a hot edge.
+##   shadow  a sepia displaced copy. Alpha-keyed line art dropped straight onto
+##           the sheet reads as a sticker; a displaced dark copy is the cheapest
+##           thing that seats it, and it suits hand-drawn cartoon art in a way a
+##           soft blur would not.
+##   rim     a slightly enlarged copy behind the body, in ink — so it reads as
+##           the outline of a drawing rather than as a glow around a photo.
 ##   body    the art itself, tinted.
+##
+## THE PLATES WERE BUILT FOR A SUNSET AND ARE NOW ON PAPER. That inverts two of
+## them. The rim used to be a hot orange edge, because the sun in that world was
+## low and behind the Ribeira and everything in the foreground was backlit; on
+## parchment a warm halo is invisible at best and a muddy fringe at worst, and
+## what the figure actually needs is the dark contour every inked chart figure
+## has. The pocket of dusk beneath each figure was there to stop a dark cut-out
+## floating over a bright sky — the crimson wash in chart_backdrop.gd does that
+## job now, and a second grey pool on top of it only dirties the paper.
 ##
 ## Motion is deliberately tiny. Two things drive it: a slow breath per figure on
 ## its own period, and a parallax shear taken from the live camera's own azimuth
@@ -71,14 +79,19 @@ const RESAMPLE_STEP := 32
 
 # --- Treatment ---------------------------------------------------------------
 
-## Adamastor sits in the sun's shadow side and reads as cut stone. Knocking him
-## back in value is also what keeps the right half of the frame quiet enough for
-## the logo to hold the left.
-const ADAMASTOR_TINT := Color(0.50, 0.44, 0.60, 0.95)
-const ADAMASTOR_RIM := Color(1.00, 0.52, 0.22, 0.55)
+## Adamastor is warmed toward the sheet rather than knocked back into it. The old
+## value pushed him darker and cooler so the right half of the frame stayed quiet
+## against a bright sky; on paper "quiet" runs the other way, and pushing him
+## darker only made him the loudest thing on the page. Holding him near his own
+## value and pulling the purple out lets him read as an inked chart monster.
+const ADAMASTOR_TINT := Color(0.74, 0.68, 0.72, 0.96)
 const HERO_TINT := Color(1.0, 1.0, 1.0, 1.0)
-const HERO_RIM := Color(1.00, 0.80, 0.44, 0.60)
-const SHADOW_TINT := Color(0.05, 0.03, 0.08, 0.34)
+## Ink, not backlight. Same plate, opposite job — see the note at the top.
+const ADAMASTOR_RIM := Color(0.16, 0.09, 0.06, 0.72)
+const HERO_RIM := Color(0.16, 0.09, 0.06, 0.62)
+## Sepia rather than plum-black: a cool shadow on warm paper reads as a hole in
+## the sheet, a warm one reads as ink.
+const SHADOW_TINT := Color(0.28, 0.16, 0.09, 0.30)
 const SHADOW_OFFSET := Vector2(0.016, 0.010)   # in stage units, down and right
 ## The rim is a fixed width in screen pixels, not a percentage of the figure.
 ## Scaling it with the art would give Adamastor a fat halo and Super Boxy none,
@@ -172,10 +185,14 @@ func _plate(parent: Control, tint: Color) -> TextureRect:
 func _pocket_texture() -> GradientTexture2D:
 	var grad := Gradient.new()
 	grad.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+	# Kept as a node so the composition code below does not need a special case,
+	# but fully transparent: chart_backdrop.gd's crimson wash is what grounds the
+	# cast now, and a grey pool over it just dirties the paper. Restore these
+	# stops if the backdrop ever goes dark again.
 	grad.colors = PackedColorArray([
-		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, 0.40),
-		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, 0.17),
-		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, 0.0),
+		Color(UIStyle.CHART_SPLASH, 0.0),
+		Color(UIStyle.CHART_SPLASH, 0.0),
+		Color(UIStyle.CHART_SPLASH, 0.0),
 	])
 	var gt := GradientTexture2D.new()
 	gt.gradient = grad
