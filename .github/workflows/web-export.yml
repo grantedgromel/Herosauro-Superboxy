@@ -1,13 +1,25 @@
-name: Web export
+name: Build
 
-# Rebuilds the Godot HTML5 export from source and publishes it straight to the
-# gh-pages branch, so the live preview always matches the latest .gd/.tscn.
+# Every push builds the game. Where the build goes depends on the branch:
 #
-# The build is NOT committed back to the source branch. It used to be, and that
+#   main         -> the site root.        …github.io/Herosauro-Superboxy/
+#   claude/**    -> its own preview dir.  …github.io/Herosauro-Superboxy/preview/<branch>/
+#
+# That split is the point of this file. Both used to publish to the root, with
+# force_orphan wiping whatever was there, so the playable URL was whichever
+# branch had pushed most recently — main's build survived nine minutes before a
+# feature branch replaced it. Now main owns the stable link and every branch
+# still gets a playable one, so pushing a branch cannot disturb the game.
+#
+# The export is NOT committed back to the source branch. It used to be, and that
 # made every pull request conflict: main and the feature branch each regenerate
-# a 16 MB index.pck, and git cannot merge binaries. gh-pages is force_orphan'd
-# on each deploy, so the artifact lives in exactly one place and never enters
-# the history being merged.
+# a 16 MB index.pck, and git cannot merge binaries.
+#
+# gh-pages is still force_orphan'd, so the branch stays a single commit and the
+# wasm/pck never accumulate in history. Keeping several previews alive at once
+# is what the rebuild-the-whole-site step below is for: the deploy job checks
+# out what is already published, replaces only its own directory, and pushes the
+# result back as a fresh orphan commit.
 
 on:
   push:
@@ -19,64 +31,277 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: web-export-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
   GODOT_VERSION: "4.7.1"
   GODOT_RELEASE: "4.7.1-stable"
   PROJECT_DIR: herosauro-superboxy
-  EXPORT_PRESET: "Web"
 
 jobs:
-  export-web:
+  # --- Web: the preview tier -------------------------------------------------
+  #
+  # GL Compatibility / WebGL2, LDR framebuffer, no SSR/GI/volumetric fog/TAA,
+  # and the 38 MB photogrammetry backdrop excluded at export. This is the build
+  # you play in a browser; it is deliberately not the quality ceiling.
+  build-web:
+    name: Build web
     runs-on: ubuntu-latest
+    concurrency:
+      group: build-web-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Godot ${{ env.GODOT_VERSION }} (headless) + export templates
-        run: |
-          set -euo pipefail
-          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
-          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -O /tmp/godot.zip
-          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_export_templates.tpz" -O /tmp/templates.tpz
-
-          unzip -o /tmp/godot.zip -d /tmp/godot
-          sudo mv "/tmp/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
-          sudo chmod +x /usr/local/bin/godot
-
-          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
-          mkdir -p "$TEMPLATE_DIR"
-          unzip -o /tmp/templates.tpz -d /tmp/templates
-          mv /tmp/templates/templates/* "$TEMPLATE_DIR/"
-
-          godot --version
+      - uses: ./.github/actions/setup-godot
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          release: ${{ env.GODOT_RELEASE }}
 
       - name: Import project resources
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          # Headless import; can exit non-zero after importing, so don't fail the job here.
+          # Headless import can exit non-zero after a successful import, so this
+          # deliberately does not gate the job. The export below is the real gate.
           timeout 300 godot --headless --import . || true
 
-      - name: Export Web build
+      - name: Export web build
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -euo pipefail
           mkdir -p web
-          godot --headless --export-release "${EXPORT_PRESET}" web/index.html
+          godot --headless --export-release "Web" web/index.html
           test -f web/index.pck && test -f web/index.wasm
 
-      # Publish the build to gh-pages so the live GitHub Pages preview always
-      # reflects the latest source. force_orphan keeps gh-pages a single commit
-      # so the large wasm/pck don't bloat history. Pushing gh-pages does not
-      # retrigger this workflow (it only runs on main / claude/**).
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: ${{ env.PROJECT_DIR }}/web
+          # Off by default since v4.4, which would drop .nojekyll and .gdignore
+          # from the artifact without failing anything. The deploy job re-creates
+          # .nojekyll at the site root regardless, but losing it here silently is
+          # the kind of thing that surfaces as "Pages ate a directory" much later.
+          include-hidden-files: true
+          retention-days: 14
+
+  # --- Desktop: the quality tier ---------------------------------------------
+  #
+  # Forward+ — HDR, SDFGI, SSR, volumetric fog, TAA — and the full backdrop.
+  # This is what the game actually targets, so it needs to keep building even
+  # though nobody plays it from CI. Nothing built it before, which meant the
+  # Forward+ path could break and only the web tier would notice.
+  #
+  # Only on main: it doubles the runtime and the per-branch signal is the web
+  # build. Run it on a branch by hand with workflow_dispatch when a change is
+  # likely to affect Forward+ specifically.
+  build-desktop:
+    name: Build desktop (Forward+)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: build-desktop-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-godot
+        with:
+          version: ${{ env.GODOT_VERSION }}
+          release: ${{ env.GODOT_RELEASE }}
+
+      - name: Import project resources
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: timeout 300 godot --headless --import . || true
+
+      - name: Export Linux build
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/linux
+          godot --headless --export-release "Linux" build/linux/herosauro.x86_64
+          test -f build/linux/herosauro.x86_64 && test -f build/linux/herosauro.pck
+
+      # Frame counts and byte totals are hardware-independent; a frame time from
+      # a GPU-less runner is not. See docs/PERFORMANCE_BUDGET.md — confirming
+      # 60fps still needs one run on a real card, and this artifact is what you
+      # download to do it.
+      - name: Smoke-test the Forward+ build
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          # --headless swaps in the dummy display and audio drivers, so this
+          # proves every node reaches _ready() and survives 300 frames of
+          # _process without a script error. It renders nothing and therefore
+          # says nothing about frame time — see docs/PERFORMANCE_BUDGET.md.
+          timeout 300 godot --headless --quit-after 300 2>&1 | tee /tmp/run.log
+          if grep -qE 'SCRIPT ERROR|Parse Error|Invalid call|Nonexistent' /tmp/run.log; then
+            echo "::error::Runtime script error in the Forward+ build"
+            exit 1
+          fi
+
+      - name: Upload desktop build
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-forward-plus
+          path: ${{ env.PROJECT_DIR }}/build/linux
+          retention-days: 14
+
+  # --- Publish ---------------------------------------------------------------
+  #
+  # One global concurrency group, cancel-in-progress off, so deploys serialise.
+  # Two branches finishing at once would otherwise both check out gh-pages, and
+  # the second to push would drop the first one's directory.
+  deploy:
+    name: Publish to Pages
+    needs: build-web
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
+    steps:
+      # No checkout of the source branch: this job publishes the artifact the
+      # build produced, and needs nothing else from the repository.
+      #
+      # Whatever is already published. Absent on the very first deploy, which is
+      # why this is allowed to fail.
+      - name: Checkout the published site
+        id: existing
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: site
+          fetch-depth: 1
+
+      - name: Download web build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: incoming
+
+      - name: Assemble the site
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          # The checkout above brings its own git metadata; publishing it would
+          # nest a repository inside the published tree.
+          rm -rf site/.git
+
+          if [ "$REF_NAME" = "main" ]; then
+            # Clear the root but step over preview/ — those are other branches'
+            # builds, not stale copies of main's.
+            find site -mindepth 1 -maxdepth 1 ! -name preview -exec rm -rf {} +
+            cp -a incoming/. site/
+            echo "published main to the site root"
+          else
+            TARGET="site/preview/$REF_NAME"
+            rm -rf "$TARGET"
+            mkdir -p "$TARGET"
+            cp -a incoming/. "$TARGET/"
+            echo "published $REF_NAME to /preview/$REF_NAME/"
+          fi
+
+          # Pages serves the directory verbatim only with this present at root.
+          touch site/.nojekyll
+
+          # Drop previews whose branch is gone. Without this the site grows a
+          # directory per branch ever pushed, and Pages caps a published site at
+          # 1 GB — roughly eighteen builds at 55 MB each.
+          gh api "repos/$GITHUB_REPOSITORY/branches" --paginate --jq '.[].name' > /tmp/live.txt
+          if [ -d site/preview ]; then
+            while IFS= read -r d; do
+              [ -f "$d/index.html" ] || continue
+              branch="${d#site/preview/}"
+              if ! grep -qxF "$branch" /tmp/live.txt; then
+                echo "pruning preview for deleted branch: $branch"
+                rm -rf "$d"
+              fi
+            done < <(find site/preview -mindepth 1 -type d)
+            find site/preview -mindepth 1 -type d -empty -delete 2>/dev/null || true
+          fi
+
+      - name: Write the preview index
+        run: |
+          set -euo pipefail
+          mkdir -p site/preview
+          {
+            cat <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>Herosauro &amp; Super Boxy — branch previews</title>
+          <style>
+            :root { color-scheme: light dark; }
+            body { font: 16px/1.6 system-ui, sans-serif; max-width: 46rem;
+                   margin: 4rem auto; padding: 0 1.5rem; }
+            h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+            p.sub { margin-top: 0; opacity: .7; }
+            ul { list-style: none; padding: 0; }
+            li { padding: .6rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+            a { text-decoration: none; font-weight: 600; }
+            a:hover { text-decoration: underline; }
+            .none { opacity: .6; font-style: italic; }
+          </style>
+          <h1>Branch previews</h1>
+          <p class="sub">Work in progress. The playable game is at
+             <a href="../">the site root</a>.</p>
+          <ul>
+          HTML
+            found=0
+            while IFS= read -r d; do
+              [ -f "$d/index.html" ] || continue
+              branch="${d#site/preview/}"
+              printf '<li><a href="%s/">%s</a></li>\n' "$branch" "$branch"
+              found=1
+            done < <(find site/preview -mindepth 1 -type d | sort)
+            if [ "$found" = 0 ]; then
+              echo '<li class="none">No branch previews published.</li>'
+            fi
+            echo '</ul>'
+          } > site/preview/index.html
+
+      # Only reachable before main's first deploy; after that main's own
+      # index.html owns the root.
+      - name: Placeholder root if main has never deployed
+        run: |
+          set -euo pipefail
+          if [ ! -f site/index.html ]; then
+            printf '%s\n' \
+              '<!doctype html><meta charset="utf-8">' \
+              '<title>Herosauro &amp; Super Boxy</title>' \
+              '<p>No build from <code>main</code> yet.' \
+              '<a href="preview/">Browse branch previews</a>.</p>' \
+              > site/index.html
+          fi
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./${{ env.PROJECT_DIR }}/web
+          publish_dir: ./site
           publish_branch: gh-pages
           force_orphan: true
-          commit_message: "Deploy web build from ${{ github.sha }}"
+          commit_message: "Deploy ${{ github.ref_name }} from ${{ github.sha }}"
+
+      - name: Summary
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          BASE="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          {
+            if [ "$REF_NAME" = "main" ]; then
+              echo "### Published the game"
+              echo ""
+              echo "[$BASE/]($BASE/)"
+            else
+              echo "### Published a branch preview"
+              echo ""
+              echo "[$BASE/preview/$REF_NAME/]($BASE/preview/$REF_NAME/)"
+              echo ""
+              echo "The stable build from \`main\` is untouched at [$BASE/]($BASE/)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

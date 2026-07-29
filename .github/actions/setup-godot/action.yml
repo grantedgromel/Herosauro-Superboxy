@@ -1,0 +1,36 @@
+name: Set up Godot
+description: >
+  Installs the headless Godot binary and the matching export templates. Both the
+  web and the desktop build need exactly this, so it lives in one place rather
+  than being pasted into each job.
+
+inputs:
+  version:
+    description: 'Godot version without the channel suffix, e.g. 4.7.1'
+    required: true
+  release:
+    description: 'Godot release tag, e.g. 4.7.1-stable'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Godot ${{ inputs.version }} (headless) + export templates
+      shell: bash
+      run: |
+        set -euo pipefail
+        BASE="https://github.com/godotengine/godot/releases/download/${{ inputs.release }}"
+        wget -q "${BASE}/Godot_v${{ inputs.release }}_linux.x86_64.zip" -O /tmp/godot.zip
+        wget -q "${BASE}/Godot_v${{ inputs.release }}_export_templates.tpz" -O /tmp/templates.tpz
+
+        unzip -o /tmp/godot.zip -d /tmp/godot
+        sudo mv "/tmp/godot/Godot_v${{ inputs.release }}_linux.x86_64" /usr/local/bin/godot
+        sudo chmod +x /usr/local/bin/godot
+
+        # Godot looks for templates under <version>.stable, not under the tag.
+        TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/${{ inputs.version }}.stable"
+        mkdir -p "$TEMPLATE_DIR"
+        unzip -o /tmp/templates.tpz -d /tmp/templates
+        mv /tmp/templates/templates/* "$TEMPLATE_DIR/"
+
+        godot --version

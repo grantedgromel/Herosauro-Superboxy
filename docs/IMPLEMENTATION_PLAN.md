@@ -45,24 +45,41 @@ screen-shake requests, i-frames, a combo system, and a difficulty scalar. Boss r
 | E | No options menu, no input remapping, no settings persistence. | inputs baked in `project.godot`; no `user://` writes |
 | F | No automated tests / scene validation / CI quality gate. | no test dir; PRs are review-validated |
 | G | UI strings hardcoded; no localization (notable for a Porto-set game). | `scripts/ui/*` |
-| H | Renderer ceiling: GL Compatibility (needed for the web build) caps lighting/post. | `project.godot` `rendering_method="gl_compatibility"` |
+| H | ~~Renderer ceiling: GL Compatibility (needed for the web build) caps lighting/post.~~ **Closed.** The project renders Forward+ and the web export falls back per-platform. | `project.godot` `rendering_method.web="gl_compatibility"` |
 
 ---
 
 ## 2. Platform & testing decision
 
-**Decision: web-first for iteration; optional desktop (Forward+) build for fidelity checks. Not desktop-only.**
+**Decision: web-first for iteration; desktop (Forward+) as the quality target. Not desktop-only.**
 
 Rationale — this environment is headless with no Godot editor to "Play" in, so the **only friction-free
-playtest channel is the web build**, which CI already exports headlessly (Godot 4.3) and publishes to
-GitHub Pages on every push to `main` and `claude/**` (`.github/workflows/web-export.yml` +
-`deploy-pages.yml`). Open a URL, play. Desktop-only would force download-a-binary-per-OS testing
-(plus macOS Gatekeeper/signing) and the agent still couldn't run it for you.
+playtest channel is the web build**, which CI exports headlessly (Godot 4.7.1) and publishes to GitHub
+Pages on every push to `main` and `claude/**` (`.github/workflows/web-export.yml`). Open a URL, play.
+Desktop-only would force download-a-binary-per-OS testing (plus macOS Gatekeeper/signing) and the agent
+still couldn't run it for you.
 
-- **Keep** GL Compatibility as the iteration/preview renderer.
-- **Optionally add** a parallel Forward+ desktop export to CI that publishes a downloadable Release
-  artifact, *only* when you want to evaluate premium lighting/post. Most Level-1 polish (encounter
-  design, juice, audio, UI) lands fine in Compatibility; the renderer is not on the critical path.
+**This resolved as two tiers rather than one renderer**, which is what closes gap H above:
+
+| | Renderer | Where it comes from | What it is for |
+|---|---|---|---|
+| Web | GL Compatibility / WebGL2 | `rendering_method.web` override; `Web` preset excludes the 38 MB backdrop | The playable proxy. Frame-to-frame feel, encounter design, juice, audio, UI. |
+| Desktop | Forward+ | `rendering_method`; `Linux` / `Windows` presets, full assets | The quality target. HDR, SDFGI, SSR, volumetric fog, TAA. |
+
+So the browser build does **not** cap the game. Author against Forward+; the `.web` overrides in
+`project.godot` degrade it for the browser without a second code path. The one thing this costs is that
+fidelity work is invisible in the preview — check it by downloading the `linux-forward-plus` CI
+artifact and running it on a real GPU.
+
+### Where the builds land
+
+| Push | URL |
+|---|---|
+| `main` | `…github.io/Herosauro-Superboxy/` — the stable build, only moves on merge |
+| `claude/**` | `…github.io/Herosauro-Superboxy/preview/<branch>/`, indexed at `/preview/` |
+
+Both used to publish to the root, so the playable URL was whichever branch built last. Keeping them
+apart is what lets a branch be pushed freely without disturbing the game.
 
 ---
 
