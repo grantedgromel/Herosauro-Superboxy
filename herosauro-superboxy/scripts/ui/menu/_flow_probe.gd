@@ -121,15 +121,13 @@ func _advance(what: String) -> void:
 
 
 func _note(what: String) -> void:
-	var menu := root.find_child("MainMenu", true, false)
-	var world := menu.find_child("MenuWorld", false, false) if menu != null else null
 	var arena := root.find_child("BridgeArena", true, false)
 	var env := _live_environment(root)
-	# The menu duplicates the Environment so LightingRig's `ambient *= scale`
-	# tiering cannot compound across rebuilds. Different object ids between the
-	# menu row and the fight row is what proves it — see menu_world.gd.
-	_log.append("  %-22s menu_world=%s  arena_in_tree=%s  state=%d  envs=%d  cams=%d  env#%s amb=%s"
-			% [what, "yes" if world != null else "no",
+	# The menu is 2D now, so on a menu row every one of these should read zero /
+	# no. A live arena, WorldEnvironment or camera while the title screen is up
+	# means main.gd's teardown leaked one, which is the bug this row catches.
+	_log.append("  %-22s arena_in_tree=%s  state=%d  envs=%d  cams=%d  env#%s amb=%s"
+			% [what,
 			"yes" if arena != null else "no", int(_gm().get("state")),
 			_count(root, "WorldEnvironment"), _count_current_cameras(root),
 			str(env.get_instance_id() % 100000) if env != null else "-",

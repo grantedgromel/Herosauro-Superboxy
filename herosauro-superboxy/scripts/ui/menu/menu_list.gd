@@ -25,7 +25,13 @@ signal activated(id: StringName)
 signal difficulty_changed(index: int)
 
 const ROW_HEIGHT := 52.0
-const ROW_GAP := 6.0
+## Was 6. A five-item column at 58 px pitch reads as a dense list of settings;
+## the same five at 72 read as the five things this screen is for. The whole
+## column still clears the hint row at 720p, which is what caps it here.
+const ROW_GAP := 20.0
+## Floor for the negotiated gap. Below this the column stops reading as a spaced
+## list and starts reading as a table, which is the look this pass is undoing.
+const MIN_ROW_GAP := 8.0
 const ENTRY_SLIDE := 38.0
 const ENTRY_TIME := 0.42
 
@@ -33,6 +39,14 @@ var _rows: Array[MenuRow] = []
 var _difficulty_row: MenuRow
 var _locked: bool = false
 var _ui_scale: float = 1.0
+var _gap: float = ROW_GAP
+## The vertical budget the screen last gave us, remembered rather than passed
+## through every time. `resized` is wired straight to relayout(), so setting the
+## column's size from the screen re-enters with the default arguments — and an
+## unremembered budget meant that re-entry reset the gap to its full value and
+## overflowed the column back over the key legend, immediately after the screen
+## had just sized it to fit. -1.0 means "never been told", i.e. unbounded.
+var _available: float = -1.0
 
 
 func _ready() -> void:
@@ -85,22 +99,42 @@ func _wire_focus() -> void:
 
 # --- Layout ------------------------------------------------------------------
 
-func relayout(ui_scale: float = -1.0) -> void:
+## `available` is the vertical room the screen actually has for the column, in
+## pixels. Pass -1.0 for "as much as it wants".
+##
+## The gap is negotiated rather than fixed. ROW_GAP is what the design asks for;
+## if the logo and the hint row do not leave that much, it compresses toward
+## MIN_ROW_GAP instead of overflowing. Before this, widening the gap silently
+## pushed QUIT underneath the key legend at 720p — the column had no idea what
+## was above or below it.
+func relayout(ui_scale: float = -1.0, available: float = -1.0) -> void:
 	if ui_scale > 0.0:
 		_ui_scale = ui_scale
+	if available > 0.0:
+		_available = available
+	_gap = _fit_gap(_available)
 	var h := ROW_HEIGHT * _ui_scale
-	var gap := ROW_GAP * _ui_scale
 	var y := 0.0
 	for row in _rows:
 		row.rescale(_ui_scale)
 		row.position = Vector2(0.0, y)
 		row.size = Vector2(size.x, h)
-		y += h + gap
+		y += h + _gap
+
+
+func _fit_gap(available: float) -> float:
+	var want := ROW_GAP * _ui_scale
+	if available <= 0.0 or _rows.size() < 2:
+		return want
+	var rows_h := _rows.size() * ROW_HEIGHT * _ui_scale
+	var spare := (available - rows_h) / float(_rows.size() - 1)
+	return clampf(spare, MIN_ROW_GAP * _ui_scale, want)
 
 
 ## Total height the column needs, so the screen can stack things under it.
+## Reads the negotiated gap, so it agrees with what relayout actually laid out.
 func column_height() -> float:
-	return _rows.size() * (ROW_HEIGHT * _ui_scale + ROW_GAP * _ui_scale) - ROW_GAP * _ui_scale
+	return _rows.size() * ROW_HEIGHT * _ui_scale + (_rows.size() - 1) * _gap
 
 
 # --- Interaction -------------------------------------------------------------

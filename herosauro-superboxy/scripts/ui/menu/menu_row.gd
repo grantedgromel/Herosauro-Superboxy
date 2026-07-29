@@ -19,7 +19,12 @@ signal value_changed(index: int)
 
 # --- Metrics -----------------------------------------------------------------
 
+## Idle and focused sizes. The focused row growing is the clearest possible
+## "you are here" — it survives colourblindness, a bright backdrop and a photo of
+## the screen, none of which a colour change alone does. 25 -> 30 is a fifth
+## larger, which reads as deliberate rather than as a wobble.
 const TEXT_PX := 25
+const TEXT_PX_FOCUS := 30
 const PILL_PX := 13
 const MARKER_WIDTH := 5.0
 const MARKER_INSET := 4.0
@@ -31,7 +36,12 @@ const PAD_RIGHT := 18.0
 
 # --- Colour ------------------------------------------------------------------
 
-const IDLE_TEXT := Color(0.86, 0.82, 0.78, 0.82)
+## Pulled well down from the focused row. On the old backdrop every row had to
+## stay bright enough to survive the sunlit water behind it, which flattened the
+## whole column into one block of near-white. Against a flat dark field the idle
+## rows can recede properly, so the focused one is the only thing the eye lands
+## on — the single biggest reason a minimal menu reads as designed.
+const IDLE_TEXT := Color(0.78, 0.75, 0.73, 0.58)
 const HOT_FILL := Color(1.0, 0.86, 0.62, 0.11)
 const DOWN_FILL := Color(1.0, 0.86, 0.62, 0.18)
 
@@ -46,6 +56,9 @@ var _pills: Array[PanelContainer] = []
 var _pill_labels: Array[Label] = []
 var _pill_colors: Array[Color] = []
 var _shift: Tween
+## Held because _refresh has to resolve a font size and only the list knows the
+## scale. Defaults to 1.0 so a row focused before the first rescale still sizes.
+var _ui: float = 1.0
 
 
 ## Built through this rather than through _ready() so the caller can hand over
@@ -97,10 +110,20 @@ func setup(row_id: StringName, caption: String, row_kind: int = Kind.ACTION,
 ## rather than instead of it, so putting the same fill on both would make a
 ## moused row (which takes focus on hover) exactly twice as bright as a
 ## keyboarded one. Pressed still stacks, which is what a press should do.
+## The focused row carries NO fill. It used to have one, because on the old
+## sunlit backdrop a plate was the only thing that reliably held the text apart
+## from the water behind it. Against a flat field the plate is the thing that
+## looks unfinished — it reads as a button in a screen that has no other buttons,
+## and it boxes in a row whose whole job is to be a line of type. Focus is now
+## carried by three things that cost nothing: the gold bar, the slide right, and
+## the row growing a fifth larger.
+##
+## Pressed keeps its fill. A press is a moment, not a state, and a brief flash is
+## the confirmation a click has landed.
 func _style() -> void:
 	add_theme_stylebox_override("normal", StyleBoxEmpty.new())
 	add_theme_stylebox_override("hover", StyleBoxEmpty.new())
-	add_theme_stylebox_override("focus", _fill(HOT_FILL))
+	add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	add_theme_stylebox_override("pressed", _fill(DOWN_FILL))
 	add_theme_stylebox_override("disabled", StyleBoxEmpty.new())
 
@@ -229,6 +252,11 @@ func _refresh() -> void:
 	_shift.tween_property(_marker, "size:y", size.y * (0.62 if hot else 0.18), SHIFT_TIME)
 	_shift.tween_property(_marker, "position:y",
 			size.y * (0.19 if hot else 0.41), SHIFT_TIME)
+	# Font size is a theme override, not a property, so it needs tween_method.
+	# Tweened rather than snapped because the row also slides right at the same
+	# time, and a size that jumps while the position eases reads as two events.
+	_shift.tween_method(_set_text_px, float(_label.get_theme_font_size("font_size")),
+			_text_px(hot), SHIFT_TIME)
 
 
 func _relayout() -> void:
@@ -238,9 +266,18 @@ func _relayout() -> void:
 	_marker.size = Vector2(MARKER_WIDTH, size.y * (0.62 if has_focus() else 0.18))
 
 
+func _text_px(hot: bool) -> float:
+	return maxf(13.0, (TEXT_PX_FOCUS if hot else TEXT_PX) * _ui)
+
+
+func _set_text_px(px: float) -> void:
+	_label.add_theme_font_size_override("font_size", maxi(13, roundi(px)))
+
+
 ## Re-point the type at a new UI scale. Called by the list on resize.
 func rescale(ui_scale: float) -> void:
-	_label.add_theme_font_size_override("font_size", maxi(13, roundi(TEXT_PX * ui_scale)))
+	_ui = ui_scale
+	_set_text_px(_text_px(has_focus()))
 	for l in _pill_labels:
 		l.add_theme_font_size_override("font_size", maxi(9, roundi(PILL_PX * ui_scale)))
 		l.custom_minimum_size = Vector2(52.0 * ui_scale, 0)
