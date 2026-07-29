@@ -149,7 +149,7 @@ const PORTRAIT_ADAMASTOR: Texture2D = preload("res://assets/ui/portraits/adamast
 ## shows a face rather than a randomly centred slice of torso.
 const _HEAD_REGION := [
 	Rect2i(43, 0, 230, 230),     # Herosauro  (282 x 900)
-	Rect2i(19, 4, 190, 190),     # Super Boxy (209 x 900)
+	Rect2i(89, 0, 360, 360),     # Super Boxy (541 x 900)
 	Rect2i(136, 0, 360, 360),    # Adamastor  (631 x 900)
 ]
 

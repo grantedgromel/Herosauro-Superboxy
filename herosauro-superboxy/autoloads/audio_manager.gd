@@ -22,13 +22,16 @@ const MUSIC_BUS := "Music"
 const SFX_DIR := "res://assets/audio/sfx/"
 
 ## Logical name -> file. Loaded over the synthesised library, so a name missing
-## here (or whose file is absent) keeps its procedural fallback. `dino_fire` is
-## deliberately absent: its upload was a corrupt MP3 and it rides the synth.
+## here (or whose file is absent) keeps its procedural fallback.
 const SFX_FILES := {
 	"jump": "jump.wav",
 	"land": "land.wav",
 	"hurt": "hurt.wav",
 	"dash": "dash.wav",
+	# The only survivor of the .mp3 set: this upload was MP4/AAC behind an .mp3
+	# extension, which Godot's importer rejects outright, so it was transcoded to
+	# Vorbis. The other nine had a WAV conversion done later and use that.
+	"dino_fire": "dino_fire.ogg",
 	"dino_hit": "dino_hit.wav",
 	"boss_hit": "boss_hit.wav",
 	"boss_slam": "boss_slam.wav",
@@ -46,6 +49,9 @@ const SFX_GAIN_DB := {
 	"dino_hit": -4.0,
 	"jump": -3.0,
 	"land": -3.0,
+	# Not peak-normalised with the rest — it came through a different conversion
+	# and sits hotter than the WAV set it plays alongside.
+	"dino_fire": -5.0,
 }
 
 # --- Music -------------------------------------------------------------------
@@ -116,18 +122,25 @@ func _ready() -> void:
 # --- Public API ------------------------------------------------------------
 
 func play_jump() -> void: _play("jump")
+func play_land() -> void: _play("land")
 func play_dino_fire() -> void: _play("dino_fire")
 func play_dino_hit() -> void: _play("dino_hit")
 func play_dash() -> void: _play("dash")
 func play_boss_slam() -> void: _play("boss_slam")
 func play_boss_hit() -> void: _play("boss_hit")
+func play_super_boxy_hit() -> void: _play("super_boxy_hit")
+func play_rock_throw() -> void: _play("rock_throw")
+func play_rock_impact() -> void: _play("rock_impact")
 func play_victory() -> void: _play("victory")
 func play_defeat() -> void: _play("defeat")
 func play_hurt() -> void: _play("hurt")
-func play_land() -> void: _play("land")
-func play_rock_throw() -> void: _play("rock_throw")
-func play_rock_impact() -> void: _play("rock_impact")
-func play_super_boxy_hit() -> void: _play("super_boxy_hit")
+
+
+## Play a one-shot by name. Unknown names are ignored rather than fatal, so a
+## caller naming an effect that was never registered just gets silence. This is
+## what lets a hero carry its melee cue as data (`melee_hit_sfx`) instead of the
+## call site having to branch on which hero swung.
+func play_sfx(key: String) -> void: _play(key)
 
 
 func _play(key: String, volume_db: float = 0.0) -> void:
@@ -142,16 +155,6 @@ func _play(key: String, volume_db: float = 0.0) -> void:
 
 
 ## Overlay the shipped samples on top of the synthesised library.
-func _load_sfx_files() -> void:
-	for key in SFX_FILES:
-		var path: String = SFX_DIR + SFX_FILES[key]
-		if not ResourceLoader.exists(path):
-			continue
-		var s := load(path) as AudioStream
-		if s != null:
-			_streams[key] = s
-
-
 # --- Music API ---------------------------------------------------------------
 
 ## Start `track` (a key of MUSIC_TRACKS), crossfading from whatever is playing.
@@ -347,13 +350,20 @@ func _on_game_over(victory: bool) -> void:
 
 # --- Synthesis -------------------------------------------------------------
 
+## Synthesise the fallback bank first, then let the recordings replace whatever
+## they cover. Doing it in that order means a missing or unimportable file
+## silently leaves the synth in place instead of leaving a hole.
 func _build_library() -> void:
 	_streams["jump"] = _make(_sweep(200.0, 600.0, 0.15, 0.6))
+	_streams["land"] = _make(_thud(70.0, 0.16, 0.5))
 	_streams["dino_fire"] = _make(_pulse(440.0, 0.14, 0.5))
 	_streams["dino_hit"] = _make(_rumble(80.0, 0.22, 0.7))
 	_streams["dash"] = _make(_whoosh(0.26, 0.5))
 	_streams["boss_slam"] = _make(_thud(40.0, 0.32, 0.9))
 	_streams["boss_hit"] = _make(_thud(150.0, 0.13, 0.7))
+	_streams["super_boxy_hit"] = _make(_thud(190.0, 0.11, 0.7))
+	_streams["rock_throw"] = _make(_whoosh(0.34, 0.6))
+	_streams["rock_impact"] = _make(_rumble(60.0, 0.3, 0.8))
 	_streams["hurt"] = _make(_sweep(420.0, 160.0, 0.16, 0.5))
 	_streams["land"] = _make(_thud(90.0, 0.12, 0.5))
 	_streams["rock_throw"] = _make(_whoosh(0.2, 0.45))
@@ -361,6 +371,28 @@ func _build_library() -> void:
 	_streams["super_boxy_hit"] = _make(_thud(190.0, 0.12, 0.7))
 	_streams["victory"] = _make(_fanfare([523.25, 659.25, 783.99, 1046.5, 1318.5], 0.18, true))
 	_streams["defeat"] = _make(_fanfare([659.25, 523.25, 440.0], 0.36, false))
+
+	_load_sfx_files()
+
+
+func _load_sfx_files() -> void:
+	# `key`, not `name`: a loop variable called `name` shadows Node.name.
+	for key in SFX_FILES:
+		var path: String = SFX_DIR + SFX_FILES[key]
+		if not ResourceLoader.exists(path):
+			push_warning("AudioManager: sfx file missing, using synth: " + path)
+			continue
+		var stream := load(path) as AudioStream
+		if stream == null:
+			push_warning("AudioManager: sfx failed to load, using synth: " + path)
+			continue
+		# The pool reassigns `stream` on whichever player comes up next, and the
+		# same effect can be in flight on two players at once. Godot's loader
+		# hands back one shared cached resource per path, so take a copy per
+		# effect and make sure nothing loops — these are one-shots.
+		var own := stream.duplicate() as AudioStream
+		_set_stream_loop(own, false)
+		_streams[key] = own
 
 
 func _make(samples: PackedFloat32Array) -> AudioStreamWAV:

@@ -295,7 +295,8 @@ func _do_rock_throw() -> void:
 		_spawn(rock, boss.global_position + Vector3(0.0, 6.0, 0.0))
 		if rock.has_method("launch"):
 			rock.launch(t)
-	# One throw gesture, one sound - a phase-two double volley is still one heave.
+	# The throw is a heave, not a slam — the slam cue belongs to the melee arms.
+	# One throw gesture, one sound: a phase-two double volley is still one heave.
 	# Skipped on an empty volley (no target), so there is no heave without a rock.
 	if not volley.is_empty():
 		AudioManager.play_rock_throw()

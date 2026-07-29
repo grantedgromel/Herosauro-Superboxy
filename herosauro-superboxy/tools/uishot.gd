@@ -19,13 +19,26 @@ func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(_out)
 	add_child(MainScene.instantiate())
 	# label, frames to wait before the shot, action to run after it
+	#
+	# The frame counts are small on purpose. Everything that has to settle before
+	# a shot — entry tweens, the cinematic camera move, the HUD's reveal — is
+	# driven by wall-clock delta, and under lavapipe a frame is seconds, not
+	# milliseconds. Waiting 150 frames does not buy a later moment in the
+	# animation, it just costs 20 minutes; the tweens are long finished by frame
+	# ten. What the counts still buy is a couple of frames for the renderer's
+	# temporal passes to converge before the buffer is read back.
+	# The first wait is the long one. The menu's reveal is gated on the arena
+	# actually finishing its build, not on a timer, and that build is where all
+	# the terrain, facades and landmarks are generated — under a software
+	# rasteriser it is not done at frame twelve, and the shot came back as the
+	# logo over near-black.
 	_shots = [
-		["menu_a", 150, ""],
-		["menu_b", 130, ""],
-		["menu_c", 130, "start"],
-		["hud_a", 150, ""],
-		["hud_b", 130, "attack"],
-		["hud_c", 90, ""],
+		["menu_a", 26, ""],
+		["menu_b", 10, ""],
+		["menu_c", 10, "start"],
+		["hud_a", 14, ""],
+		["hud_b", 10, "attack"],
+		["hud_c", 8, ""],
 	]
 	_wait = _shots[0][1]
 	print("uishot: renderer=", RenderingServer.get_video_adapter_name())

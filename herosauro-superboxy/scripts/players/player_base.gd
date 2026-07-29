@@ -7,11 +7,21 @@ extends CharacterBody3D
 ## move. Everything else - camera-relative locomotion, jumping, i-frames,
 ## knockback, fall respawn, cooldowns and the AnimationTree - lives here.
 ##
-## Movement is third-person camera-relative: the pad vector from InputManager is
-## rotated through the active camera's yaw, so "forward" always means "away from
-## the camera" no matter where the orbit rig has been swung.
+## Movement is third-person camera-relative: the pad vector from this hero's
+## `input` is rotated through the active camera's yaw, so "forward" always means
+## "away from the camera" no matter where the orbit rig has been swung.
 
 @export var player_id: int = 1
+
+## Who is driving this hero. Defaults to a human on the unprefixed action set,
+## which is what a solo game wants and what the InputManager autoload used to
+## provide globally; main.gd overrides it per roster slot before _ready() runs.
+##
+## It lives on the hero rather than in an autoload so that two heroes in one
+## scene can be driven by different things — two humans, or a human and an
+## AgentInput some AI writes into. Every read below goes through here, so
+## nothing in this class knows or cares which it is.
+var input: InputSource = DeviceInput.new()
 @export var move_speed: float = 8.0
 @export var sprint_multiplier: float = 1.3
 @export var jump_velocity: float = 13.0
@@ -74,9 +84,25 @@ const BLEND_PARAM := "parameters/locomotion/blend_position"
 const ACTION_SPEED_PARAM := "parameters/action_speed/scale"
 const ACTION_REQUEST_PARAM := "parameters/action/request"
 
+## How fast we have to be falling for a touchdown to be worth a sound. Below
+## this, the hero is walking off a kerb or being nudged down a step, and a thud
+## every time would be constant.
+const LAND_SFX_SPEED := 6.0
+
 var spawn_position: Vector3 = Vector3.ZERO
 var facing_dir: Vector3 = Vector3(1, 0, 0)
 
+## The one-shot played when this hero's melee connects, or "" for no cue of its
+## own. Subclasses override it; AudioManager falls back to a synth thud for any
+## name it has no file for.
+##
+## The default is empty on purpose. Adamastor answers every damage event with its
+## own play_boss_hit(), so a hero whose cue is the same `boss_hit` sample put two
+## identical buffers on the bus in a single frame — that combs rather than hits.
+## A hero only names a cue here if it is a distinct sample.
+var melee_hit_sfx: String = ""
+
+var _airborne_speed: float = 0.0   # downward speed on the last airborne frame
 var _coyote: float = 0.0
 var _jump_buffer: float = 0.0
 var _was_on_floor: bool = true
@@ -125,6 +151,8 @@ func _ready() -> void:
 		_model_root.name = "Model"
 		add_child(_model_root)
 	_build_visuals()
+	_fix_model_shadow_bounds()
+	_build_contact_shadow()
 	_build_swing_box()
 	reset_state()
 
@@ -148,6 +176,9 @@ func _physics_process(delta: float) -> void:
 	_process_attack_hit()
 	_handle_fall()
 	_handle_flicker(delta)
+	# After move_and_slide, so the blob is placed against the height he actually
+	# ended the frame at rather than the one he started it at.
+	_update_contact_shadow()
 	_drive_anim(delta)
 
 
@@ -155,7 +186,7 @@ func _physics_process(delta: float) -> void:
 
 ## World-space move intent, built from the pad vector and the camera's yaw.
 func _wish_direction() -> Vector3:
-	var pad := InputManager.get_move_vector()
+	var pad := input.get_move_vector()
 	if pad.length_squared() < 0.0001:
 		return Vector3.ZERO
 	var fwd := _camera_forward()
@@ -183,7 +214,7 @@ func _camera_forward() -> Vector3:
 
 func _handle_movement(delta: float) -> void:
 	_wish_dir = _wish_direction()
-	var speed := move_speed * (sprint_multiplier if InputManager.is_sprinting() else 1.0)
+	var speed := move_speed * (sprint_multiplier if input.is_sprinting() else 1.0)
 	var target := _wish_dir * speed
 
 	# Accelerate only the *controlled* part of the velocity; knockback rides on
@@ -205,18 +236,24 @@ func _handle_gravity(delta: float) -> void:
 	if not is_on_floor():
 		var g := gravity
 		# Variable jump height: cut the rise short if jump is released early.
-		if velocity.y > 0.0 and not InputManager.is_jump_held():
+		if velocity.y > 0.0 and not input.is_jump_held():
 			g *= low_jump_gravity_mult
 		velocity.y -= g * delta
 
 
 func _handle_jump(delta: float) -> void:
 	if is_on_floor():
+		# Touchdown. _airborne_speed still holds the last airborne frame's fall
+		# speed, because is_on_floor() only flips after the move that landed us.
+		if _airborne_speed >= LAND_SFX_SPEED:
+			AudioManager.play_land()
+		_airborne_speed = 0.0
 		_coyote = coyote_time
 	else:
+		_airborne_speed = maxf(0.0, -velocity.y)
 		_coyote = max(0.0, _coyote - delta)
 
-	if InputManager.is_jump_just_pressed():
+	if input.is_jump_just_pressed():
 		_jump_buffer = jump_buffer_time
 	else:
 		_jump_buffer = max(0.0, _jump_buffer - delta)
@@ -343,7 +380,7 @@ func _start_iframes() -> void:
 func _handle_ability() -> void:
 	if _ability_timer > 0.0:
 		return
-	if InputManager.is_ability_just_pressed():
+	if input.is_ability_just_pressed():
 		_ability_timer = ability_cooldown
 		_aim_at_camera(ABILITY_AIM_HOLD)
 		_perform_ability()
@@ -357,7 +394,7 @@ func _handle_ability() -> void:
 func _handle_attack() -> void:
 	if _attack_timer > 0.0 or _action_timer > 0.0:
 		return   # gated by its own cooldown and by any in-progress action anim (incl. specials/dash)
-	if InputManager.is_attack_just_pressed():
+	if input.is_attack_just_pressed():
 		_attack_timer = attack_cooldown
 		_attack_swing = 0.14
 		_aim_at_camera(attack_hold)
@@ -406,13 +443,10 @@ func _build_swing_box() -> void:
 
 func _on_swing_landed(target: Node3D) -> void:
 	if target.is_in_group("boss"):
-		# Adamastor answers every damage event with its own play_boss_hit() (see its
-		# boss_damaged handler), and the shipped boss_hit sample is the same file, so
-		# playing one here too put two identical buffers on the bus in a single frame
-		# and combed instead of hitting. Only Boxy adds a sound, and his gloves get
-		# their own sample.
-		if player_id == 2:
-			AudioManager.play_super_boxy_hit()
+		# Empty means "the boss's own boss_damaged handler already sounds this
+		# hit" — see melee_hit_sfx. Only a hero with a distinct sample adds one.
+		if melee_hit_sfx != "":
+			AudioManager.play_sfx(melee_hit_sfx)
 		GameManager.hit_stop(0.03)
 		if target.has_method("nudge"):
 			target.nudge(facing_dir, 0.4)
@@ -745,6 +779,197 @@ func _idle_weight(k: int) -> float:
 
 func _build_visuals() -> void:
 	pass
+
+
+## Hygiene for a skinned mesh, NOT the reason the hero looked unshadowed.
+##
+## His glTF is a single skinned MeshInstance3D carrying the AABB of its REST
+## pose (0.69 x 1.70 x 0.44) with a cull margin of zero and no custom AABB, and
+## a skinned mesh does not grow that box as the skeleton moves it. A pose that
+## reaches outside it — a swing, a jump, a cape — leaves the renderer culling
+## against a stale volume. Widening the margin is the documented remedy and
+## costs nothing per frame, so it stays.
+##
+## But it is not why he read as unshadowed in captured frames. tools/shadowshot
+## renders the same frame with him visible and hidden and subtracts: standing on
+## the deck he throws a full-length streak along the sun, exactly where the
+## geometry says it should be. It is invisible in play for two compounding
+## reasons that have nothing to do with culling — the gameplay camera looks
+## almost straight down the sun's own axis, which foreshortens the streak to
+## nearly nothing, and what is left lands on the near-black tramway strip.
+## _build_contact_shadow() is what actually fixes the read.
+func _fix_model_shadow_bounds(margin: float = 1.2) -> void:
+	for mi in _model_meshes(_model_root):
+		mi.extra_cull_margin = maxf(mi.extra_cull_margin, margin)
+		# Belt and braces: an imported glTF can carry SHADOW_CASTING_SETTING_OFF
+		# from the DCC tool it came out of, and nothing else here checks.
+		if mi.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+
+
+## The contact shadow: a soft dark blob projected straight down under the hero.
+##
+## Not a substitute for the sun's shadow — that one is real and still there.
+## This is the one that says "his feet are ON that". A raking 11.5 degree sun
+## throws its shadow sideways and far, so it never touches the point of contact,
+## and a third-person character with nothing under his feet reads as pasted onto
+## the deck however good the lighting is. Every game with a low sun and a
+## close camera carries one of these.
+##
+## This was a Decal first, which is the tidier tool — it conforms to whatever is
+## under him with no z-fighting and no need for the surface normal. It is not
+## the one that ships. A probe over the running fight showed the decal correct
+## in every respect (visible, 1.9 x 1.0 x 1.9, ground at y=2.000 sitting inside
+## a box spanning 1.350..2.350) and two A/B renders of the same gameplay frame
+## still came back pixel-identical: nothing was drawing it. GL Compatibility
+## does not render decals at all, so the web tier could never have had one
+## either.
+##
+## So: a quad laid on the ground. It draws on every renderer, costs one triangle
+## pair, and — unlike the decal — measurably shows up in a capture from here. It
+## does not conform to uneven ground, which is why it is aligned to the surface
+## normal the ray already returns; the deck is flat where he walks anyway.
+##
+## HOW MUCH IT BUYS, measured. A/B of the same gameplay frame: -6.0 of 255 under
+## the shoes, -3.3 just below the feet, against -0.3/-0.5 to either side of him
+## and +0.1 on far deck. Localised and real, but small in absolute terms, and
+## that is the honest limit of it — he spawns on the tram bed, whose albedo is
+## 0.235 by deliberate choice (see bridge_arena.gd: an up-facing plane much over
+## 0.6 clips to cream through AgX at 2.4 sun energy). Darkening something that
+## is already near-black cannot read, whatever draws it. The blob earns its keep
+## on the pale kerb and flagstones, and on the tram bed the hero is separated
+## from the ground by his own value instead. Lightening the tram bed is the only
+## thing that would change that, and it is an art call, not a bug fix.
+## Half the collision capsule's height (2.0 in herosauro.tscn / superboxy.tscn),
+## i.e. how far the feet sit below the body origin. The same 1.0 the subclasses'
+## MODEL_Y uses to drop the art onto the bottom of the capsule.
+const FEET_BELOW_ORIGIN := 1.0
+
+const CONTACT_FOOTPRINT := 1.9      ## blob diameter at the feet, metres
+const CONTACT_STRENGTH := 0.55      ## how far towards black directly under him
+## How far above the contact point the quad floats. Enough to clear z-fighting
+## against the deck at this depth range, small enough to still read as contact.
+const CONTACT_LIFT := 0.02
+## Airborne, the blob widens and fades — the standard read for "further from the
+## ground". Past this height it is gone entirely.
+const CONTACT_FADE_HEIGHT := 3.0
+const CONTACT_AIR_SPREAD := 1.7
+
+var _contact: MeshInstance3D
+var _contact_mat: StandardMaterial3D
+
+
+func _build_contact_shadow() -> void:
+	var quad := QuadMesh.new()
+	quad.size = Vector2.ONE          # scaled per frame, so authored at unit size
+	quad.orientation = PlaneMesh.FACE_Y
+
+	_contact_mat = StandardMaterial3D.new()
+	_contact_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_contact_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# Plain alpha over black. Multiply blend would scale the light already there,
+	# which is the more physical read, but its alpha handling differs per
+	# backend and this whole detour started with something that silently drew
+	# nothing. Predictable beats clever here.
+	_contact_mat.albedo_color = Color(0.0, 0.0, 0.0, 1.0)
+	_contact_mat.albedo_texture = _contact_texture()
+	# Lying flat and hugging the ground, it must not write depth or it fights
+	# the deck; and it must never be a shadow caster itself.
+	_contact_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	_contact_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	quad.material = _contact_mat
+
+	_contact = MeshInstance3D.new()
+	_contact.name = "ContactShadow"
+	_contact.mesh = quad
+	_contact.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# It is drawn where the ground is, not where the body is, so it must not
+	# inherit his yaw — otherwise the blob spins as he turns.
+	_contact.top_level = true
+	add_child(_contact)
+	_update_contact_shadow()
+
+
+## Opaque at the centre, gone at the rim. A hard-edged disc reads as a sticker,
+## which is the thing this is here to avoid.
+func _contact_texture() -> GradientTexture2D:
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 0.5, 1.0])
+	grad.colors = PackedColorArray([
+		Color(0.0, 0.0, 0.0, CONTACT_STRENGTH),
+		Color(0.0, 0.0, 0.0, CONTACT_STRENGTH * 0.6),
+		Color(0.0, 0.0, 0.0, 0.0),
+	])
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 128
+	gt.height = 128
+	gt.fill = GradientTexture2D.FILL_RADIAL
+	gt.fill_from = Vector2(0.5, 0.5)
+	gt.fill_to = Vector2(1.0, 0.5)
+	return gt
+
+
+## Sized and faded against the drop to the ground, so a jump lifts the blob off
+## rather than dragging a hard disc through the air with him.
+func _update_contact_shadow() -> void:
+	if _contact == null:
+		return
+	var ground := _ground_hit()
+	if ground.is_empty():
+		_contact.visible = false
+		return
+
+	var point: Vector3 = ground["position"]
+	var normal: Vector3 = ground["normal"]
+	var feet := global_position.y - FEET_BELOW_ORIGIN
+	var drop: float = maxf(0.0, feet - point.y)
+	var t: float = clampf(drop / CONTACT_FADE_HEIGHT, 0.0, 1.0)
+
+	_contact.visible = true
+	# top_level, so this is a world transform: sit on the ground point, lie along
+	# the surface, and scale to the faded footprint.
+	var basis := _basis_from_up(normal)
+	var width := CONTACT_FOOTPRINT * lerpf(1.0, CONTACT_AIR_SPREAD, t)
+	_contact.global_transform = Transform3D(basis.scaled(Vector3(width, 1.0, width)),
+			point + normal * CONTACT_LIFT)
+	# Fades out with height, so a jump lifts the blob off rather than dragging a
+	# hard disc across the deck under him.
+	_contact_mat.albedo_color = Color(0.0, 0.0, 0.0, 1.0 - t)
+
+
+## Any orthonormal basis whose +Y is `up`. Which way it faces about that axis is
+## unobservable — the blob is radially symmetric.
+func _basis_from_up(up: Vector3) -> Basis:
+	var n := up.normalized()
+	var ref := Vector3.FORWARD if absf(n.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT
+	var x := ref.cross(n).normalized()
+	var z := n.cross(x)
+	return Basis(x, n, z)
+
+
+## The ground under the hero: position and normal, or empty if nothing is within
+## reach. Always raycasts — is_on_floor() alone gives no contact point, and the
+## blob has to sit somewhere.
+func _ground_hit() -> Dictionary:
+	var space := get_world_3d().direct_space_state
+	var from := global_position + Vector3(0.0, -FEET_BELOW_ORIGIN + 0.2, 0.0)
+	var to := from + Vector3(0.0, -(CONTACT_FADE_HEIGHT + 0.7), 0.0)
+	var query := PhysicsRayQueryParameters3D.create(from, to, PhysicsLayers.WORLD)
+	query.exclude = [get_rid()]
+	return space.intersect_ray(query)
+
+
+func _model_meshes(node: Node) -> Array[MeshInstance3D]:
+	var out: Array[MeshInstance3D] = []
+	if node == null:
+		return out
+	var mi := node as MeshInstance3D
+	if mi != null:
+		out.append(mi)
+	for c in node.get_children():
+		out.append_array(_model_meshes(c))
+	return out
 
 
 func _perform_ability() -> void:

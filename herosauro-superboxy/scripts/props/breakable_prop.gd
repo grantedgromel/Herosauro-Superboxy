@@ -84,7 +84,8 @@ func shatter(push: Vector3 = Vector3.ZERO) -> void:
 			DebrisPiece.spawn(root, global_position + dir * extent * 0.6, vel, size,
 				mat, piece_lifetime, spin)
 
-	AudioManager.play_boss_hit()
+	# Masonry and crates coming apart, not a body blow.
+	AudioManager.play_rock_impact()
 	queue_free()
 
 

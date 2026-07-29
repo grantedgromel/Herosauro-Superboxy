@@ -50,7 +50,7 @@ func _perform_ability() -> void:
 
 	var energy := DinoEnergyScene.instantiate()
 	energy.direction = facing_dir
-	energy.source_player = 1
+	energy.source_player = player_id
 	var root := get_tree().get_first_node_in_group("spawn_root")
 	if root == null:
 		root = get_tree().current_scene

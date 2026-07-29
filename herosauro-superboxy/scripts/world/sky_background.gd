@@ -199,8 +199,11 @@ func _spec_from_plot(plot: Dictionary, rng: RandomNumberGenerator) -> FacadeBuil
 		spec.laundry = false
 
 	spec.detail = FacadeBuilder.Detail.FULL if int(plot["detail"]) >= 2 else FacadeBuilder.Detail.MEDIUM
-	spec.chimneys = 1 + (1 if rng.randf() < 0.35 else 0)
-	spec.lit_fraction = rng.randf_range(0.10, 0.28)
+	# NB: chimneys and lit_fraction are set per branch above and must NOT be
+	# reassigned here. They were, and it silently undid the lodge branch: every
+	# whitewashed shed on the Gaia waterfront came out with one or two housing
+	# chimneys and a quarter of its windows lit, which is exactly the "second
+	# Ribeira" read the branch exists to prevent.
 	return spec
 
 

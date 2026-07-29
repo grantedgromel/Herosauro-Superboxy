@@ -167,8 +167,10 @@ func _on_game_over(victory: bool) -> void:
 	_fill_rows(victory, accent, beat)
 	_badge.visible = beat
 
-	# The win/lose music is started by AudioManager off GameManager.game_over.
-	# The old synth fanfare played on top of that real track, so it is gone.
+	# No sting here. AudioManager crossfades the victory/defeat track off the
+	# same game_over signal, and the synth fanfare used to land on top of it.
+	# The procedural version stays in the SFX bank as the fallback if a music
+	# file ever fails to load.
 
 	_reveal()
 
