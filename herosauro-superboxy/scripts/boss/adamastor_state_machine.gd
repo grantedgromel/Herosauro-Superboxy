@@ -338,6 +338,13 @@ func update(delta: float) -> void:
 
 ## The stat half of phase two. Split out from the roar so the ceremony and the
 ## numbers can never disagree about whether he is escalated.
+##
+## Phase two DOES shorten the retreat, where the roster deliberately does not,
+## and the two are not in tension. The roster taking that window would be a
+## silent tax for having a friend; phase two taking it is the escalation the
+## whole half of the fight is built on, it is announced by a roar, and it lands
+## on solo and co-op alike. 0.55 * 0.76 = 0.42 s, which is exactly the number
+## this file used to carry as a hand-tuned RETREAT_TIME_P2.
 func _apply_escalation() -> void:
 	_decide_interval = maxf(DECIDE_MIN, _decide_interval * PHASE2_CADENCE)
 	_decide_timer = minf(_decide_timer, _decide_interval)

@@ -204,12 +204,44 @@ func _recipes() -> Array[Dictionary]:
 			],
 		},
 		# Limewash: very low frequency, almost flat, just enough to kill the plastic.
+		#
+		# It gained an albedo map in Round 2, after the world stream gave the Ribeira
+		# facades real depth — reveals, sills, shutters, downpipes, azulejo panels —
+		# and reported that they STILL read as flat-coloured cards at 60-120 m. That is
+		# the correct report and it is a material problem rather than a geometry one:
+		# at a hundred metres the fine layer is long gone (0.28 m tiles go sub-pixel by
+		# about four), so a wall was one authored colour with a whisper of bump on it,
+		# and one flat colour is one flat colour whether or not it has a window in it.
+		#
+		# The frequency is the whole design here and it is much lower than the other
+		# three: 0.006 against a 2.0 m tile is roughly 1.3 m blotches, which is a
+		# STOREY-scale mark. At 100 m that subtends about 13 px, which is what it takes
+		# to still be visible; the 0.011-0.03 the other recipes use would be sub-pixel
+		# there and would buy nothing at the distance the finding is about. Four octaves
+		# so it streaks vertically-ish rather than reading as even mottling — the shape
+		# damp actually makes running down a limewashed wall.
+		#
+		# The range is deliberately the tightest of the four (linear 0.80 -> 1.00
+		# against cobble's 0.64 -> 1.00). Two reasons, and the second is the important
+		# one: uneven limewash is a subtle mark and not a mosaic, and plaster carries
+		# the brightest authored colours in the game (PLASTER_CREAM 0.88, the Ribeira
+		# walls up to 0.80). Those already sit against ALBEDO_CEILING after
+		# DETAIL_ALBEDO_GAIN, so a large gain here would be eaten by the clamp rather
+		# than applied. As authored, the brightest wall's rendered PEAK is unchanged at
+		# the 0.90 ceiling and its MEAN comes down about 9%, which is a real change to
+		# another stream's palette and is called out in this pass's report.
 		{
 			"name": "plaster",
 			"noise": _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.020, 3, 0.50, 2.0, 4517),
 			"bump": 1.6,
 			"rough": Vector2(0.80, 1.00),
 			"ao": Vector2(0.90, 1.00),
+			"albedo_noise": _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.006, 4, 0.55, 2.3, 4523),
+			"albedo_ramp": [
+				[0.00, Color(0.905, 0.900, 0.890)],
+				[0.38, Color(0.955, 0.952, 0.945)],
+				[1.00, Color(1.000, 0.998, 0.992)],
+			],
 		},
 		# Barrel roof tiles: rounded cells with a gritty clay surface. Rain-polished
 		# on the crowns, gritty and lichenous in the pan between them.

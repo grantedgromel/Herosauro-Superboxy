@@ -409,7 +409,7 @@ func _check_materials() -> void:
 	# 3. The fine layer is greyscale and gone by four metres, so neither could be fixed
 	# there.
 	for pair in [["stone", granite], ["cobblestone", ToonFactory.cobblestone()],
-			["iron", painted]]:
+			["iron", painted], ["plaster", ToonFactory.plaster()]]:
 		var m: StandardMaterial3D = pair[1]
 		if m.albedo_texture == null:
 			_fail("%s() has no surface-scale albedo map; its colour is one flat value"
@@ -422,7 +422,8 @@ func _check_materials() -> void:
 	# no longer reasoning about. Both have already happened once each this round --
 	# see the note above _albedo_map_gain in toon_factory.gd.
 	for entry in [[ToonFactory.Surface.GRANITE, "granite"],
-			[ToonFactory.Surface.COBBLE, "cobble"], [ToonFactory.Surface.IRON, "iron"]]:
+			[ToonFactory.Surface.COBBLE, "cobble"], [ToonFactory.Surface.IRON, "iron"],
+			[ToonFactory.Surface.PLASTER, "plaster"]]:
 		var surface: int = entry[0]
 		var label: String = entry[1]
 		var gain := ToonFactory._albedo_map_gain(surface)

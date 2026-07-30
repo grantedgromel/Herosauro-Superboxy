@@ -91,8 +91,9 @@ const _MASK_MAPS := {
 }
 
 ## Surface-scale COLOUR variation, riding albedo_texture on uv1 at the material's own
-## tile size. Only three surfaces have one, and the argument for each is next to its
-## recipe in generate_detail_maps.gd.
+## tile size. Four of the seven surfaces have one, and the argument for each is next
+## to its recipe in generate_detail_maps.gd. Terracotta and wood have none: three more
+## triplanar taps is a real cost and nothing measured has asked for them there.
 ##
 ## This is the map that answers Round 1's two material findings directly. The fine
 ## layer below is greyscale and tiles at 0.28 m, so it delivers grit and damp patches
@@ -108,6 +109,7 @@ const _ALBEDO_MAPS := {
 	Surface.GRANITE: preload("res://assets/textures/detail_granite_albedo.tres"),
 	Surface.IRON: preload("res://assets/textures/detail_iron_albedo.tres"),
 	Surface.COBBLE: preload("res://assets/textures/detail_cobble_albedo.tres"),
+	Surface.PLASTER: preload("res://assets/textures/detail_plaster_albedo.tres"),
 }
 
 ## The shared close-range layer, one pair for every surface. See rule (a) above and
@@ -291,9 +293,17 @@ static func iron(color: Color = IRON_GREY, tile_meters: float = 1.6,
 
 
 ## Limewashed render — Ribeira facades, lodge walls, chapel body. Sun-faded and
-## chalky: roughness 0.94 with the plaster mask's 0.80-1.00 on top, and now with the
-## fine albedo layer blotching it, which on a pale wall reads as exactly the uneven
-## weathering every limewashed facade in the Ribeira has.
+## chalky: roughness 0.94 with the plaster mask's 0.80-1.00 on top, and the fine albedo
+## layer blotching it, which on a pale wall reads as exactly the uneven weathering
+## every limewashed facade in the Ribeira has.
+##
+## It now also carries a surface-scale albedo map, at a much lower frequency than the
+## other three (~1.3 m blotches). That is aimed at one report: the world stream gave
+## these facades real reveals, sills, shutters and downpipes and they still read as
+## flat-coloured cards at 60-120 m — which they would, because at that range the fine
+## layer has gone sub-pixel and a wall was one authored colour again. See the recipe
+## for why the range is the tightest of the four and what it costs the brightest
+## authored plaster colours.
 static func plaster(color: Color = PLASTER_CREAM, tile_meters: float = 2.0) -> StandardMaterial3D:
 	return build(color, Surface.PLASTER, 0.94, 0.0, tile_meters, 0.85, 0.30)
 

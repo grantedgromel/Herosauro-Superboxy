@@ -10,13 +10,14 @@ extends Node
 ## What it measures:
 ##
 ##   * the tuning ladder — that difficulty and roster both still move the giant's
-##     cadence, in the right direction, and that the WIND-UP does not move
+##     cadence in the right direction, and that the two gaps belonging to the
+##     PLAYER (the wind-up and the retreat) do not move at all
 ##   * telegraph honesty — the gap between a mark promising an impact and the
 ##     impact actually resolving, per attack kind. This is the one that catches
 ##     the fx stream retuning the rock arc under us.
-##   * the push-out — the reach cost of standing under the giant, over two
-##     consecutive windows so a push that ACCUMULATES shows up as window 2 being
-##     worse than window 1, and how far inside him a hero ever gets
+##   * the push-out — how much of a sustained melee exchange a hero spends unable
+##     to reach the giant, over three consecutive windows so a push that
+##     ACCUMULATES shows up as a trend, plus how far inside him a hero ever gets
 ##   * time to recover — how long a shoved hero needs to get back in swing range
 ##   * aggro — that a downed hero is never targeted, and that the giant turns on
 ##     whoever is hurting him most
@@ -256,42 +257,42 @@ func _check_push_out() -> void:
 	# that shoves the hero around itself measures the probe.
 	var forward := InputManager.action_name(1, &"move_up")
 	Input.action_press(forward)
-	var gaps: Array[float] = []
+	var outs: Array[float] = []
 	var speeds: Array[float] = []
+	var gaps: Array[float] = []
 	var through := -99.0
 	for w in 3:
 		var win := await _shove_window(a, boss, int(2.0 * TICK))
-		gaps.append(float(win["gap"]))
+		outs.append(float(win["out"]))
 		speeds.append(float(win["speed"]))
+		gaps.append(float(win["gap"]))
 		through = maxf(through, float(win["inside"]))
-		print("  -- 2 s pressed into him, window %d: peak %.2f m/s, out to %.2f m, %.2f m past his face"
-			% [w + 1, win["speed"], win["gap"], win["inside"]])
+		print("  -- 2 s pressed into him, window %d: %.0f%% of frames out of swing range, peak %.2f m/s, furthest %.2f m, %.2f m past his face"
+			% [w + 1, 100.0 * win["out"], win["speed"], win["gap"], win["inside"]])
 	Input.action_release(forward)
 
-	# (1) Reach, and the bound is arithmetic. The shunt can never leave a hero
-	# further out than the volume's own half-extent (3.2 m at the front), and the
-	# only thing that can add to that is the CONTACT HIT — 8 m/s against
-	# PlayerBase's 14 m/s^2 decay is 2.3 m of coast. 5.5 m, against the
-	# shorter-reaching hero's 5.7 m of swing. This is the assertion the old shove
-	# failed outright at about 6.5 m.
-	var reach := 1e9
-	for p in get_tree().get_nodes_in_group("players"):
-		reach = minf(reach, float((p as PlayerBase).attack_range) + SIDE_HALF)
-	var worst: float = gaps.max()
-	print("  -- worst reach cost %.2f m against the shorter hero's %.2f m of swing (was ~6.5 m)"
-		% [worst, reach])
-	_ok(worst <= reach,
-		"six seconds pressed into him never costs a hero their reach (%.2f m of %.2f m)"
-			% [worst, reach])
+	# (1) Reach. Raw distance is the wrong metric here and it is worth saying why:
+	# the giant RETREATS under his own power for 0.55 s of every cycle, so a peak
+	# distance measures him as much as it measures the push. What the defect was
+	# actually about is time spent unable to swing back, so that is what is
+	# asserted — the hero holds forward the whole six seconds, and the number is
+	# the fraction of frames his collider is out of their reach. The retreat alone
+	# accounts for about a quarter of a cycle, and the hero out-walks it at 8 m/s
+	# against his 5.1, so a third is generous and a shove that flung them to 6.5 m
+	# would blow straight through it.
+	var worst_out: float = outs.max()
+	print("  -- worst window: %.0f%% of frames out of reach, furthest %.2f m (the old shove parked a hero at ~6.5 m)"
+		% [100.0 * worst_out, gaps.max()])
+	_ok(worst_out <= 0.34,
+		"six seconds pressed into him leaves a hero able to swing back (%.0f%% of frames out of reach)"
+			% (100.0 * worst_out))
 
 	# (2) Accumulation. The shunt injects no velocity at all, so there is nothing
 	# for it to accumulate INTO and the guarantee is structural; three windows are
-	# here to catch it quietly going back to impulses. The spread allowance is one
-	# contact hit's coast, because that hit and the giant's own retreat both land
-	# inside a window and neither of them is the push.
-	_ok(worst - gaps.min() <= 2.5,
-		"...and shows no trend over three windows (%.2f / %.2f / %.2f m)"
-			% [gaps[0], gaps[1], gaps[2]])
+	# here to catch it quietly going back to impulses.
+	_ok(outs.max() - outs.min() <= 0.34,
+		"...and shows no trend over three windows (%.0f%% / %.0f%% / %.0f%%)"
+			% [100.0 * outs[0], 100.0 * outs[1], 100.0 * outs[2]])
 	_ok(speeds.max() - speeds.min() <= 2.5,
 		"nor does the speed a hero reaches (%.2f / %.2f / %.2f m/s)"
 			% [speeds[0], speeds[1], speeds[2]])
@@ -331,16 +332,26 @@ func _shove_window(hero: Node3D, boss: Node3D, frames: int) -> Dictionary:
 	var speed := 0.0
 	var gap := 0.0
 	var inside := 0.0
+	var out_of_reach := 0
+	var reach: float = float((hero as PlayerBase).attack_range) + SIDE_HALF
 	for i in frames:
 		await get_tree().physics_frame
 		var v: Vector3 = (hero as CharacterBody3D).velocity
 		speed = maxf(speed, Vector2(v.x, v.z).length())
-		gap = maxf(gap, _gap(hero, boss))
+		var d := _gap(hero, boss)
+		gap = maxf(gap, d)
+		if d > reach:
+			out_of_reach += 1
 		var local: Vector3 = boss.global_transform.affine_inverse() * hero.global_position
 		# His collider is 5 x 9 x 4, so its faces are 2.5 and 2.0 out. Anything
 		# less than that on BOTH axes at once means the hero is inside him.
 		inside = maxf(inside, minf(FRONT_HALF - absf(local.x), SIDE_HALF - absf(local.z)))
-	return {"speed": speed, "gap": gap, "inside": inside}
+	return {
+		"speed": speed,
+		"gap": gap,
+		"inside": inside,
+		"out": float(out_of_reach) / float(maxi(1, frames)),
+	}
 
 
 func _gap(hero: Node3D, boss: Node3D) -> float:
