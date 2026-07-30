@@ -1,0 +1,186 @@
+name: Quality gate
+
+# Enforces the contract in ARCHITECTURE.md on every push, because a contract
+# nobody checks is a suggestion.
+#
+# Three tiers, cheapest first, so a typo fails in 90 seconds rather than after a
+# 20-minute render:
+#
+#   1. static   — grep-level rules that need no engine at all
+#   2. probes   — headless GDScript self-tests, no rendering
+#   3. render   — a real Forward+ frame under software Vulkan
+#
+# GitHub's runners have no GPU either, so tier 3 uses the same Mesa lavapipe path
+# the development container does. It is slow but it is the real pipeline.
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.1"
+  GODOT_RELEASE: "4.7.1-stable"
+  PROJECT_DIR: herosauro-superboxy
+
+jobs:
+  static:
+    name: Static contract rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # These three rules are what make the per-pixel capture gate possible.
+      # See ARCHITECTURE.md, "Why the determinism rules exist". They are checked
+      # by grep because they are absolute: there is no legitimate exception in
+      # gameplay or world-building code, only in the probes and tools that are
+      # allowed to measure real time.
+      # `^[^#]*` skips comment lines — the rule is explained in prose right above
+      # the code it governs, and a checker that trips on its own documentation is
+      # a checker people delete.
+      - name: No wall-clock animation
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -uo pipefail
+          hits=$(grep -rnE "^[^#]*Time\.get_ticks_" --include=*.gd scripts autoloads \
+                 | grep -v "/_.*probe\.gd:" || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Time.get_ticks_* in gameplay code makes captures irreproducible."
+            echo "Accumulate delta into a member instead. Offenders:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "ok: no wall-clock animation"
+
+      - name: No unseeded randomness
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -uo pipefail
+          hits=$(grep -rnE "^[^#]*randomize\(\)" --include=*.gd scripts autoloads || true)
+          if [ -n "$hits" ]; then
+            echo "::error::randomize() defeats reproducible capture."
+            echo "$hits"
+            exit 1
+          fi
+          echo "ok: no randomize()"
+
+      - name: No raw physics bitmasks
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -uo pipefail
+          # `= 0` is exempt: "collide with nothing" is unambiguous and naming it
+          # through the constants table would be less clear, not more.
+          hits=$(grep -rnE "^[^#]*collision_(layer|mask) *= *[1-9(]" \
+                 --include=*.gd scripts | grep -v "PhysicsLayers" || true)
+          if [ -n "$hits" ]; then
+            echo "::warning::Raw collision bitmask — use the PhysicsLayers constants."
+            echo "$hits"
+          fi
+          echo "ok: checked"
+
+  probes:
+    name: Headless probes
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -O /tmp/godot.zip
+          unzip -o -q /tmp/godot.zip -d /tmp/godot
+          sudo mv "/tmp/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          godot --version
+
+      - name: Import project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: timeout 600 godot --headless --import . 2>&1 | tee /tmp/import.log || true
+
+      # An import that "succeeds" while printing SCRIPT ERROR is the usual way a
+      # broken build reaches main, because Godot's exit code does not reflect it.
+      - name: Import must be error-free
+        run: |
+          set -uo pipefail
+          if grep -qE "SCRIPT ERROR|Parse Error|ERROR: Failed" /tmp/import.log; then
+            echo "::error::Import reported script errors:"
+            grep -E "SCRIPT ERROR|Parse Error|ERROR: Failed" /tmp/import.log | head -40
+            exit 1
+          fi
+          echo "ok: import clean"
+
+      - name: Run every stream's probe
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -uo pipefail
+          fail=0
+          for probe in $(find scripts -name '_*probe.gd' | sort); do
+            echo "--- $probe"
+            if ! timeout 300 godot --headless --path . --script "$probe"; then
+              echo "::error::probe failed: $probe"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  render:
+    name: Renders a real frame
+    runs-on: ubuntu-latest
+    needs: probes
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot and software Vulkan
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q mesa-vulkan-drivers xvfb
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          wget -q "${BASE}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip" -O /tmp/godot.zip
+          unzip -o -q /tmp/godot.zip -d /tmp/godot
+          sudo mv "/tmp/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+
+      - name: Import project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: timeout 900 godot --headless --import . || true
+
+      # The point is not the picture, it is that the world still assembles and
+      # the renderer still reaches a frame. Boot breakage blocks every other
+      # agent, so it is worth three minutes of CI to catch it here.
+      - name: Boot and render one frame
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python3 tools/harness.py check --timeout 900
+
+      - name: Scripted playthrough
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -uo pipefail
+          VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+          timeout 900 xvfb-run -a -s "-screen 0 640x360x24" \
+            godot --path . tools/playtest.tscn --rendering-driver vulkan \
+            --fixed-fps 60 -- --out=/tmp/playtest 2>&1 | tee /tmp/playtest.log || true
+          if grep -q "playtest: WARNING" /tmp/playtest.log; then
+            echo "::error::The scripted fight did not function:"
+            grep "playtest: WARNING" /tmp/playtest.log
+            exit 1
+          fi
+          grep -E "playtest: (boss health|hero health|travelled|DONE)" /tmp/playtest.log || true
+
+      - name: Upload frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frames
+          path: |
+            /tmp/hs-harness/check/*.png
+            /tmp/playtest/*.png
+          if-no-files-found: ignore
+          retention-days: 7
