@@ -29,6 +29,7 @@ extends Node3D
 
 const IronworkScript := preload("res://scripts/world/bridge_ironwork.gd")
 const DeckKit := preload("res://scripts/world/bridge/deck_kit.gd")
+const WireSwayScript := preload("res://scripts/world/bridge/wire_sway.gd")
 
 # --- Deck cross-section ------------------------------------------------------
 # Every Z is a half-width from the bridge centreline, every Y is absolute.
@@ -90,6 +91,59 @@ const CATENARY_XS := [-36.0, -12.0, 12.0, 36.0]
 ## the fighting corridor and never fouls the kerb the hero steps up.
 const MAST_Z := WALKWAY_OUTER - 0.30
 const MAST_BASE_Y := WALKWAY_TOP
+
+# --- The wrecked span --------------------------------------------------------
+## THE CATENARY OVER THE FIGHTING SPAN IS BUILT ALREADY DOWN, and that is a fix,
+## not a flourish. Adamastor's model stands 8.6 m out of a deck at 2.0, so the top
+## of him is at 10.6; the contact wire hangs at 7.0, its messenger at 7.72 and the
+## gantry cross-spans at 7.84. All three pass straight through his chest and neck
+## for the whole fight.
+##
+## The two obvious fixes are both wrong. Lowering an overhead line to clear a
+## nine-metre giant puts it at head height on a tram deck and looks wrong from
+## every angle; deleting the catenary costs the corridor the converging verticals
+## that are the one thing round 1's critics said it lacked. The third option costs
+## nothing and pays: he has been rampaging on this bridge — that is the premise of
+## the game — so over the span he fights in, the line is already torn out. A
+## snapped wire has no span left for him to walk through, the run keeps its true
+## height everywhere it is actually visible, and the eye reads the intact run
+## first, then the break, and knows what happened here without a word of dialogue.
+##
+## MIRRORED, NOT IMPORTED. Reaching into another stream's script is banned
+## (ARCHITECTURE.md rule 2), so these repeat adamastor.gd the way ROADWAY_HALF
+## above already repeats its ARENA_Z. If the giant's arena moves, move these.
+const BOSS_ARENA_X := Vector2(-14.0, 24.0)     # adamastor.gd ARENA_X_MIN / ARENA_X_MAX
+## adamastor.gd's CORPSE_SIZE, which that file's own header calls "closer to what
+## the model actually occupies" than the generous 5 x 9 x 4 gameplay box: 2.8 m
+## across and 8.6 m tall. Half of 2.8 either side of the position clamp is how far
+## the giant's shoulders really reach along the deck.
+const GIANT_HALF_WIDTH := 1.4
+const GIANT_TOP := DECK_TOP + 8.6
+## What has to be clear of overhead line. A stomp or a kick throws an arm well
+## past the torso, so the giant's own footprint is not enough on its own; 3 m of
+## slack at each end covers the animation overhang. Comes out at -18.4 .. 28.4.
+const WRECK_REACH := Vector2(
+		BOSS_ARENA_X.x - GIANT_HALF_WIDTH - 3.0,
+		BOSS_ARENA_X.y + GIANT_HALF_WIDTH + 3.0)
+## WHERE THE LINE PARTS, AND WHY IT IS A GANTRY RATHER THAN MID-SPAN. Everything
+## a hero can stand on tops out at |z| = 6.55, and a hero jumping off the raised
+## footway reaches 6.95 with the crown of his capsule — five centimetres under the
+## contact wire. So over this deck there is no room beneath an overhead line to
+## hang anything at all: the only place a loose end can droop is outboard of the
+## parapet, and the only place the run gets out there on its own is a mast
+## bracket. CATENARY_XS[0] and [3] are the first brackets outside WRECK_REACH, so
+## the line is made off there and everything between them has come down.
+## _line_is_up() and _gantry_is_wrecked() are the two tests that follow from it.
+##
+## 20 cm outboard of the deck's own face, which clears the parapet (7.0) and the
+## fascia girder behind it (6.85 centreline). Nothing on this bridge reaches it.
+const WRECK_HANG_Z := DECK_HALF_WIDTH + 0.20
+## Which parapet it went over. ONE side, not both: a cable dragged sideways ends
+## up on one side of what dragged it, and a matched pair either side would read as
+## decoration rather than as damage. +Z is the side shot 07_ribeira looks at.
+const WRECK_HANG_SIDE := 1.0
+## Where a torn gantry's hanging span-wire catches the dead run as it passes.
+const WRECK_CATCH_Y := 4.90
 
 # --- Course pitches ----------------------------------------------------------
 const BAY_PITCH := 2.5            # deck plates along the carriageway
@@ -523,7 +577,9 @@ func _lamp(parent: Node3D, castings: MeshBaker, x: float, z: float) -> void:
 ## FIVE MATERIALS, FIVE DRAW CALLS, one bake each. Every piece below is a handful
 ## of boxes and would have been a MeshInstance3D apiece under the old scheme; at
 ## roughly a hundred pieces that is a hundred draw calls, which is the whole
-## reason MeshBaker exists.
+## reason MeshBaker exists. The only exceptions are the two parted wire ends,
+## which move and therefore cannot be welded into a static surface — see
+## _build_fallen_line. Two draw calls, and they are the whole cost of the wreck.
 func _build_deck_dressing() -> void:
 	var dressing := Node3D.new()
 	dressing.name = "DeckDressing"
@@ -539,6 +595,7 @@ func _build_deck_dressing() -> void:
 	rng.seed = 18_86    # the year the bridge opened; seeded, see ARCHITECTURE.md
 
 	_build_catenary(iron)
+	_build_fallen_line(iron, dressing)
 	_build_furniture(iron, stone, rng)
 	_build_gratings(iron, dark)
 	_build_perched_gulls(feather, dark, rng)
@@ -559,7 +616,8 @@ func _build_deck_dressing() -> void:
 	dressing.add_child(scrap.commit(ToonFactory.cloth(LITTER_COLOR, 0.22), "DeckLitter", false))
 
 
-## Masts, span wires, messenger and contact wire, station by station.
+## Masts, span wires, messenger and contact wire, station by station — and, over
+## the fighting span, the same assembly built already torn out. See WRECK_REACH.
 ##
 ## The contact wire staggers either side of the centreline between stations, which
 ## is both what a real one does — so a pantograph carbon wears evenly instead of
@@ -567,26 +625,115 @@ func _build_deck_dressing() -> void:
 ## down the middle of the frame.
 func _build_catenary(iron: MeshBaker) -> void:
 	var span_y := MAST_BASE_Y + DeckKit.MAST_HEIGHT - DeckKit.SPAN_DROP
-	for i in CATENARY_XS.size():
-		var x: float = CATENARY_XS[i]
+	for x: float in CATENARY_XS:
+		# Every mast, its cap and its bracket lug stand on all four stations, torn
+		# gantry or not. They are the converging verticals the corridor is for, and
+		# at |z| = 6.25 against a giant who reaches 5.75 they are already clear.
 		for side in [-1.0, 1.0]:
 			DeckKit.catenary_mast(iron, x, side * MAST_Z, MAST_BASE_Y)
-		DeckKit.cross_span(iron, x, MAST_Z, span_y, 0.34,
-				DECK_TOP + DeckKit.WIRE_HEIGHT + DeckKit.MESSENGER_RISE)
-		if i == 0:
+		if _gantry_is_wrecked(x, span_y):
+			DeckKit.torn_cross_span(iron, x, MAST_Z, span_y, WRECK_HANG_Z,
+					WRECK_CATCH_Y - 0.35)
+		else:
+			DeckKit.cross_span(iron, x, MAST_Z, span_y, 0.34,
+					DECK_TOP + DeckKit.WIRE_HEIGHT + DeckKit.MESSENGER_RISE)
+
+	# The through-line, support to support. The ladder carries the two abutment
+	# anchors as well as the four masts, because a wire that stops dead over the
+	# last mast is the sort of thing that survives three review rounds because
+	# nobody looks up. Only the bays outside WRECK_REACH are still strung.
+	var ladder: Array[float] = [-ABUTMENT_INNER]
+	ladder.append_array(CATENARY_XS)
+	ladder.append(ABUTMENT_INNER)
+	for i in range(1, ladder.size()):
+		var x0: float = ladder[i - 1]
+		var x1: float = ladder[i]
+		if not _line_is_up(x0, x1):
 			continue
-		var x0: float = CATENARY_XS[i - 1]
-		# Alternating stagger, so each span leans the opposite way to the last.
-		var z0 := DeckKit.WIRE_STAGGER * (1.0 if i % 2 == 1 else -1.0)
-		DeckKit.catenary_run(iron, x0, x, DECK_TOP, z0, -z0, 0.09)
-	# Run the wire out to the abutments rather than stopping it dead at the last
-	# mast: an overhead line that ends in mid-air over a bridge deck is the sort
-	# of thing that survives three review rounds because nobody looks up.
-	var ends: Array[float] = [CATENARY_XS[0], CATENARY_XS[CATENARY_XS.size() - 1]]
+		# The end bays are anchored, not registered, so they carry less sag than a
+		# mast-to-mast span. Same two numbers this had before the break existed.
+		var sag := 0.05 if (i == 1 or i == ladder.size() - 1) else 0.09
+		DeckKit.catenary_run(iron, x0, x1, DECK_TOP,
+				_wire_stagger(i - 1, ladder.size()), _wire_stagger(i, ladder.size()), sag)
+
+
+## Is the through-line still up over this bay? Only the two end bays are: the run
+## is made off at the outer gantries and everything between them has come down.
+func _line_is_up(x0: float, x1: float) -> bool:
+	return maxf(x0, x1) <= CATENARY_XS[0] \
+			or minf(x0, x1) >= CATENARY_XS[CATENARY_XS.size() - 1]
+
+
+## Has this gantry lost its span wire? Only the ones the giant can reach, and only
+## while their cross-span hangs below the top of him — raise the masts past 10.6
+## and this correctly stops claiming damage that no longer needs doing.
+func _gantry_is_wrecked(x: float, span_y: float) -> bool:
+	return x > WRECK_REACH.x and x < WRECK_REACH.y and span_y - 0.34 < GIANT_TOP
+
+
+## Contact-wire stagger at support `i` of the ladder: it zig-zags mast to mast and
+## comes back to the centreline where it is anchored at the abutments.
+func _wire_stagger(i: int, count: int) -> float:
+	if i == 0 or i == count - 1:
+		return 0.0
+	return DeckKit.WIRE_STAGGER * (1.0 if i % 2 == 1 else -1.0)
+
+
+## What came down. The messenger is still made off at both outer brackets, so the
+## dead run hangs in swags along the OUTSIDE of the parapet, caught over the two
+## torn gantries on its way; the contact wire it used to carry has parted near
+## each end, and those two free tails are the only moving thing on this deck.
+##
+## Nothing here is inboard of WRECK_HANG_Z except the two short jogs from the
+## brackets, which are still 7.9 m up where they cross the footway edge. The
+## clearance argument is in the WRECK_REACH block and it is checked for real by
+## scripts/world/bridge/_wreck_probe.gd.
+func _build_fallen_line(iron: MeshBaker, dressing: Node3D) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2_002    # the year the Metro reached the upper deck; seeded, see ARCHITECTURE.md
+	var span_y := MAST_BASE_Y + DeckKit.MAST_HEIGHT - DeckKit.SPAN_DROP
+	var sz := WRECK_HANG_SIDE
+	var outer := CATENARY_XS[CATENARY_XS.size() - 1] as float
+	var catch_z := sz * WRECK_HANG_Z
+
+	# Bracket, a jog out over the rail, the two torn gantries, jog, bracket.
+	var path: Array[Vector3] = [
+		Vector3(-outer, span_y, sz * (MAST_Z - 0.10)),
+		Vector3(-outer + 1.2, span_y - 0.73, catch_z),
+		Vector3(CATENARY_XS[1], WRECK_CATCH_Y, catch_z),
+		Vector3(CATENARY_XS[2], WRECK_CATCH_Y, catch_z),
+		Vector3(outer - 1.2, span_y - 0.73, catch_z),
+		Vector3(outer, span_y, sz * (MAST_Z - 0.10)),
+	]
+	# Sag per swag. It deepens toward the middle because that is where the slack
+	# of seventy metres of cable ends up, and because the centre swag dropping
+	# below the handrail line is what makes the run read as fallen rather than
+	# as a second, lower catenary someone strung on purpose.
+	var sags: Array[float] = [0.0, 1.55, 2.55, 1.55, 0.0]
+	for i in range(1, path.size()):
+		DeckKit.fallen_line(iron, path[i - 1], path[i], sags[i - 1], rng)
+
+	# The two parted ends of the contact wire, hung off the outer swags where the
+	# messenger still holds them. Separate nodes because they move: one draw call
+	# each, and the only two in this whole rebuild.
 	for i in 2:
-		var to := -ABUTMENT_INNER if i == 0 else ABUTMENT_INNER
-		DeckKit.catenary_run(iron, ends[i], to, DECK_TOP,
-				DeckKit.WIRE_STAGGER * (1.0 if i == 0 else -1.0), 0.0, 0.05)
+		var from: Vector3 = path[1] if i == 0 else path[3]
+		var to: Vector3 = path[2] if i == 0 else path[4]
+		var at := DeckKit.swag_point(from, to, sags[1 if i == 0 else 3],
+				0.21 if i == 0 else 0.79)
+		var tail := WireSwayScript.new() as MeshInstance3D
+		tail.name = "TornContactWire%d" % (i + 1)
+		tail.mesh = DeckKit.torn_tail(2.9 - float(i) * 0.5, 0.32, 7 + i * 5)
+		tail.position = at
+		# The cached DeckIron material, so a parted end is visibly the same cable
+		# as the run it fell off.
+		tail.material_override = ToonFactory.iron(LAMP_IRON_COLOR, 0.8, 0.0, 0.5)
+		# A 30 mm cable hanging over the river casts onto water fifteen metres
+		# below and onto nothing else, and a moving shadow caster is the one kind
+		# the shadow atlas cannot cache.
+		tail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		tail.set("phase", 0.9 + float(i) * 2.4)
+		dressing.add_child(tail)
 
 
 ## Bollards guarding the footway ends, and a granite bench under every other

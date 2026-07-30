@@ -21,6 +21,37 @@ extends RefCounted
 ##
 ## Positions are baked in the transform you pass, so build in a convenient local
 ## space and let the caller place the finished MeshInstance3D.
+##
+## --- THE WINDING CONTRACT ----------------------------------------------------
+##
+## **Wind a face so the RIGHT-HAND cross product of its vertex order points the
+## way the surface faces.** A ground quad's `(b - a) x (c - a)` is +Y; a wall
+## quad's points out of the wall; a box's front face points at the street. That
+## is the rule every emitter here and every caller in `scripts/world/` states in
+## its own doc comment, and `_tri_uv` is the single place that reconciles it with
+## the engine.
+##
+## Godot's convention is the mirror image: its rasteriser keeps the triangle
+## whose right-hand normal points AWAY from the camera, and its own BoxMesh,
+## SphereMesh and CylinderMesh all store `-RH(a, b, c)` as the outward normal —
+## as does `SurfaceTool.generate_normals()`. `scripts/world/landmarks/_winding_probe.gd`
+## measures all four references and gates on them.
+##
+## So `_tri_uv` emits each triangle's vertices REVERSED and keeps `+RH` as the
+## shading normal. Two bugs used to live in the gap:
+##
+##   * vertices were emitted in the caller's order, so every surface authored to
+##     the contract above was back-facing — the terrace ground sheets, the
+##     punched facade skins, the tram rail, the landmark roofs. They were not
+##     dim, they were absent, visible only from the side they do not face. The
+##     "full-width polygon that receives no light" in round 1 was a hole.
+##   * `add_box` / `add_cylinder` wound the other way round and so escaped the
+##     culling, but stored an inward normal — the black-cutout ironwork, and
+##     every surface that "floated on ambient". Their tables are corrected below
+##     rather than special-cased, so one rule now covers the file.
+##
+## Get this wrong in a new primitive and nothing errors: the mesh is silently
+## culled, or silently lit inside out. Add it to the probe.
 
 var _st: SurfaceTool
 var _tri_count: int = 0
@@ -52,16 +83,23 @@ func add_box(size: Vector3, xform: Transform3D, uv_scale: float = 1.0) -> void:
 		Vector3(-h.x, h.y, -h.z), Vector3(h.x, h.y, -h.z),
 		Vector3(h.x, h.y, h.z), Vector3(-h.x, h.y, h.z),
 	]
-	# face = 4 corner indices (CCW seen from outside) + the face's extent, so UVs
-	# can be scaled in world units and stay consistent across differently-sized
-	# boxes (a 6 m wall and a 0.4 m sill get the same texel density).
+	# face = 4 corner indices + the face's extent, so UVs can be scaled in world
+	# units and stay consistent across differently-sized boxes (a 6 m wall and a
+	# 0.4 m sill get the same texel density).
+	#
+	# Each quadruple is wound so its right-hand normal points OUT of the box, per
+	# the contract in the header. All six used to be listed in the reverse order:
+	# the old comment claimed "CCW seen from outside", but the order it described
+	# gives a right-hand normal pointing INTO the solid, so every box in the game
+	# was shaded as though the light were inside it. That is the flat, ambient-only
+	# ironwork and masonry the critics have been measuring since round 1.
 	var faces := [
-		[3, 2, 1, 0, Vector2(size.x, size.z)],  # -Y
-		[4, 5, 6, 7, Vector2(size.x, size.z)],  # +Y
-		[0, 1, 5, 4, Vector2(size.x, size.y)],  # -Z
-		[2, 3, 7, 6, Vector2(size.x, size.y)],  # +Z
-		[1, 2, 6, 5, Vector2(size.z, size.y)],  # +X
-		[3, 0, 4, 7, Vector2(size.z, size.y)],  # -X
+		[0, 1, 2, 3, Vector2(size.x, size.z)],  # -Y
+		[7, 6, 5, 4, Vector2(size.x, size.z)],  # +Y
+		[4, 5, 1, 0, Vector2(size.x, size.y)],  # -Z
+		[6, 7, 3, 2, Vector2(size.x, size.y)],  # +Z
+		[5, 6, 2, 1, Vector2(size.z, size.y)],  # +X
+		[7, 4, 0, 3, Vector2(size.z, size.y)],  # -X
 	]
 	for f in faces:
 		var a: Vector3 = xform * c[f[0]]
@@ -72,12 +110,23 @@ func add_box(size: Vector3, xform: Transform3D, uv_scale: float = 1.0) -> void:
 		_quad(a, b, d, e, ext)
 
 
-## A quad from four corners wound a->b->c->d.
+## A quad from four corners wound a->b->c->d, facing `(b - a) x (c - a)`.
+##
+## That cross product is the whole interface: it is the direction the quad will
+## be seen and lit from, and a quad handed over the other way round is silently
+## invisible from the side the caller meant. Passing `d == c` degenerates the
+## second triangle, which `_tri_uv` drops — the cheap way to emit one triangle.
 func add_quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, uv_extent: Vector2 = Vector2.ONE) -> void:
 	_quad(a, b, c, d, uv_extent)
 
 
 ## A triangular prism: the classic pitched roof. Ridge runs along local X.
+##
+## Every face here already wound to the contract — both pitches, the underside
+## and the two gable ends have right-hand normals pointing out — which is why it
+## needs no change now the emitter is fixed, and why until then it was the one
+## primitive whose shading was right and whose geometry was culled: landmark
+## roofs existed only when seen from below.
 func add_roof_prism(width: float, height: float, depth: float, xform: Transform3D,
 		uv_scale: float = 1.0) -> void:
 	var hw := width * 0.5
@@ -104,6 +153,12 @@ func add_roof_prism(width: float, height: float, depth: float, xform: Transform3
 
 
 ## A cylinder along local Y — columns, balusters, poles, barrel roof tiles.
+##
+## The ring runs anticlockwise seen from +Y, so walking a side quad up-then-round
+## turns its right-hand normal inward and walking it round-then-down turns it
+## outward. All three windings here (side, top cap, bottom cap) used to take the
+## first of those, which is why balusters, columns and lamp posts were lit as
+## though the sun were inside the pole.
 func add_cylinder(radius: float, height: float, xform: Transform3D, segments: int = 8,
 		capped: bool = true) -> void:
 	var hy := height * 0.5
@@ -113,11 +168,11 @@ func add_cylinder(radius: float, height: float, xform: Transform3D, segments: in
 		var ang := TAU * float(i) / float(segments)
 		var cur := Vector3(cos(ang) * radius, -hy, sin(ang) * radius)
 		var cur_t := Vector3(cos(ang) * radius, hy, sin(ang) * radius)
-		_quad(xform * prev, xform * cur, xform * cur_t, xform * prev_t,
+		_quad(xform * prev_t, xform * cur_t, xform * cur, xform * prev,
 			Vector2(TAU * radius / float(segments), height))
 		if capped:
-			_tri(xform * Vector3(0, hy, 0), xform * prev_t, xform * cur_t, Vector2(radius, radius))
-			_tri(xform * Vector3(0, -hy, 0), xform * cur, xform * prev, Vector2(radius, radius))
+			_tri(xform * Vector3(0, hy, 0), xform * cur_t, xform * prev_t, Vector2(radius, radius))
+			_tri(xform * Vector3(0, -hy, 0), xform * prev, xform * cur, Vector2(radius, radius))
 		prev = cur
 		prev_t = cur_t
 
@@ -149,6 +204,15 @@ func _tri(a: Vector3, b: Vector3, c: Vector3, ext: Vector2) -> void:
 	_tri_uv(a, b, c, Vector2(0, 0), Vector2(ext.x, 0), Vector2(ext.x, ext.y))
 
 
+## The one place the file's winding contract meets the engine's.
+##
+## `a, b, c` arrive wound so their right-hand cross product is the direction the
+## face should be seen from. That vector is the shading normal, unchanged. The
+## vertices then go into the surface as `a, c, b`, because Godot's front face is
+## the one whose right-hand normal points away from the viewer — so the reversal
+## is what makes the triangle render from the side its normal already claims.
+##
+## Each vertex keeps its own UV across the swap; only the order moves.
 func _tri_uv(a: Vector3, b: Vector3, c: Vector3, ua: Vector2, ub: Vector2, uc: Vector2) -> void:
 	var n := (b - a).cross(c - a)
 	if n.length_squared() < 1e-12:
@@ -158,11 +222,11 @@ func _tri_uv(a: Vector3, b: Vector3, c: Vector3, ua: Vector2, ub: Vector2, uc: V
 	_st.set_uv(ua)
 	_st.add_vertex(a)
 	_st.set_normal(n)
-	_st.set_uv(ub)
-	_st.add_vertex(b)
-	_st.set_normal(n)
 	_st.set_uv(uc)
 	_st.add_vertex(c)
+	_st.set_normal(n)
+	_st.set_uv(ub)
+	_st.add_vertex(b)
 	_tri_count += 1
 
 

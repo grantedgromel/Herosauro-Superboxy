@@ -313,6 +313,11 @@ static func cross_span(b: MeshBaker, x: float, z_mast: float, y: float, sag: flo
 
 ## Contact wire, messenger and droppers along one span, between two masts.
 ##
+## Only built where the line is still UP — see bridge_arena.gd's WRECK_REACH and
+## the wrecked-span section at the bottom of this file. Over the fighting span
+## the same wire is built already down, because a 5 m contact wire and a 10.6 m
+## giant cannot both be right.
+##
 ## Wound as straight runs rather than as a curve: a 20 m messenger sags about
 ## 60 mm under its own weight, which is a third of a pixel at the far end of the
 ## deck, and the contact wire under it is held level on purpose — that is the
@@ -332,6 +337,142 @@ static func catenary_run(b: MeshBaker, x0: float, x1: float, base_y: float,
 		if i < steps:
 			b.add_beam(here, Vector3(here.x, wire_y, here.z), 0.015)
 		prev = here
+
+
+# --- The wrecked span --------------------------------------------------------
+# Over the fighting span this overhead line is built ALREADY DOWN. The reasoning
+# for that — and for where the break lands — is in bridge_arena.gd's WRECK_REACH
+# block, because it is a decision about the arena and not about cable. What lives
+# here is the geometry of a broken line: a gantry whose span wire has been torn
+# out, the dead run festooned along the outside of the parapet, and the free ends
+# of the contact wire hanging off it.
+#
+# EVERY PIECE BELOW IS EITHER OUTBOARD OF THE BRIDGE OR ABOVE THE CONTACT WIRE'S
+# OWN HEIGHT, NEVER BETWEEN THE TWO. That is not composition, it is arithmetic:
+# a hero's capsule is 2.0 m, jump_velocity 13 against gravity 30 buys 2.82 m of
+# rise, and the raised footway starts at 2.13 — so a jumping hero's crown reaches
+# 6.95 m and the wire being replaced hangs at 7.00. There is no gap under an
+# overhead line on this deck to hang anything in. The only place a loose end has
+# room to droop is past the parapet, over the water, and the only place the run
+# gets out there on its own is a mast bracket.
+
+## Frayed strands at a parted end. A snapped steel cable unwinds into its lay,
+## and that is the one detail that says "parted" rather than "modelled to here
+## and then stopped".
+const FRAY_COUNT := 3
+const FRAY_LENGTH := 0.22
+## Cable gauges, matching catenary_run's so a fallen wire is the same wire.
+const MESSENGER_GAUGE := 0.024
+const CONTACT_GAUGE := 0.030
+const DROPPER_GAUGE := 0.015
+
+
+## Where a swag hangs at parameter `t`. A cable between two supports is a
+## catenary, but over a span this short the difference from the parabola is under
+## a centimetre, and the parabola is one line instead of a cosh solve.
+static func swag_point(from: Vector3, to: Vector3, sag: float, t: float) -> Vector3:
+	return from.lerp(to, t) - Vector3.UP * (sag * 4.0 * t * (1.0 - t))
+
+
+## A gantry whose span wire the giant has taken out: both halves have swung back
+## to their own mast and now hang from its bracket, over the parapet and down the
+## outside. The mast, its cap and its bracket lug are untouched, so the gantry
+## still stands and the corridor keeps the converging vertical it was built for.
+##
+## THE PATH GOES OUT BEFORE IT GOES DOWN, and that ordering is the whole safety
+## argument (see the section header). By the time a half crosses the footway's
+## outer edge at |z| = 6.55 it is still ~7.9 m up; only past the parapet does it
+## fall to `tip_y`.
+static func torn_cross_span(b: MeshBaker, x: float, z_mast: float, y: float,
+		hang_z: float, tip_y: float) -> void:
+	for sz: float in [-1.0, 1.0]:
+		var lug := Vector3(x, y, sz * (z_mast - 0.10))
+		var over := Vector3(x + sz * 0.06, y - 0.70, sz * hang_z)
+		var tip := Vector3(x - 0.14, tip_y, sz * (hang_z + 0.02))
+		b.add_beam(lug, over, 0.028)
+		b.add_beam(over, tip, 0.028)
+		# The section insulator that used to sit a third of the way across, now
+		# swinging on the dead end of its own half. Same porcelain barrel as
+		# cross_span's, drawn as a fat length of the wire it interrupts so it
+		# stays aligned with a member that is no longer horizontal.
+		b.add_beam(over.lerp(tip, 0.34), over.lerp(tip, 0.50), 0.088)
+		_fray(b, tip, (tip - over).normalized(), x)
+
+
+## One swag of the dead run, hanging outboard between two things it is caught on:
+## the messenger, the contact wire lying against it, and the droppers that used
+## to hold the two apart now hanging off the messenger with nothing on the end.
+##
+## `rng` must be seeded by the caller — ARCHITECTURE.md rule 4. It only decides
+## how the two cables wander around each other, which is the difference between
+## a fallen line and two parallel curves drawn 20 cm apart.
+static func fallen_line(b: MeshBaker, from: Vector3, to: Vector3, sag: float,
+		rng: RandomNumberGenerator) -> void:
+	var steps := maxi(2, int(round(from.distance_to(to) / 2.6)))
+	var prev_m := from
+	var prev_c := from
+	for i in range(1, steps + 1):
+		var t := float(i) / float(steps)
+		var m := swag_point(from, to, sag, t)
+		# The contact wire hangs under the messenger and a little further out, and
+		# wanders as it goes: two cables that came down together do not lie
+		# parallel, and parallel is exactly what would give this away.
+		var c := m + Vector3(0.0, -0.16 - rng.randf_range(0.0, 0.22),
+				signf(m.z) * rng.randf_range(0.02, 0.13))
+		if i == steps:
+			c = to     # both cables are caught on the same thing at the far end
+		b.add_beam(prev_m, m, MESSENGER_GAUGE)
+		b.add_beam(prev_c, c, CONTACT_GAUGE)
+		# A free dropper every third station. Length varies because a dropper is
+		# cut to the system height it was installed at, and this run is no longer
+		# anywhere near that height.
+		if i % 3 == 1:
+			b.add_beam(m, m + Vector3(rng.randf_range(-0.06, 0.06),
+					-rng.randf_range(0.35, 0.85), rng.randf_range(-0.05, 0.05)),
+					DROPPER_GAUGE)
+		prev_m = m
+		prev_c = c
+
+
+## A parted free end of contact wire, built hanging from the LOCAL ORIGIN so the
+## caller can swing the whole thing about its own hang point — see wire_sway.gd.
+##
+## It curls as it descends. The top of a hanging cable is pulled straight by
+## what is under it and the bottom is where whatever bend it took is still in it,
+## so a dead-straight tail reads as a stick.
+static func torn_tail(length: float, drift: float, seed_i: int) -> Mesh:
+	var b := MeshBaker.new()
+	var prev := Vector3.ZERO
+	for i in range(1, 5):
+		var t := float(i) * 0.25
+		var lean := t * t     # all of the curl in the bottom half
+		var here := Vector3(sin(t * 2.1 + float(seed_i)) * drift * lean,
+				-length * t, cos(t * 1.7 + float(seed_i)) * drift * lean * 0.6)
+		b.add_beam(prev, here, CONTACT_GAUGE)
+		prev = here
+	_fray(b, prev, Vector3.DOWN, float(seed_i))
+	# commit() hands back a MeshInstance3D and this caller wants the mesh alone;
+	# a Node is not refcounted, so the wrapper has to be freed by hand or it sits
+	# in ObjectDB for the life of the process.
+	var holder := b.commit(null, "TornTail", false)
+	var mesh: Mesh = holder.mesh
+	holder.free()
+	return mesh
+
+
+## The unwound strands at a parted end, splayed around `dir`. Deterministic: the
+## splay angle is keyed off the end's own position, so it never needs an RNG and
+## never moves between runs.
+static func _fray(b: MeshBaker, at: Vector3, dir: Vector3, key: float) -> void:
+	var side := dir.cross(Vector3.UP)
+	if side.length_squared() < 1e-4:
+		side = dir.cross(Vector3.RIGHT)
+	side = side.normalized()
+	var up := side.cross(dir).normalized()
+	for i in FRAY_COUNT:
+		var ang := TAU * float(i) / float(FRAY_COUNT) + key * 0.31
+		var out := (side * cos(ang) + up * sin(ang)) * 0.055
+		b.add_beam(at, at + dir * FRAY_LENGTH + out, 0.009)
 
 
 # --- Street furniture --------------------------------------------------------
