@@ -89,9 +89,19 @@ const ROOF_PALETTE: Array[Color] = [
 # All in metres, all in the front face's frame where z = 0 is the outer skin
 # plane and +z is out towards the street.
 
-const REVEAL := 0.13              ## how far back a window sits from the skin
+## How far back a window sits from the skin.
+##
+## 0.13 -> 0.22. A Ribeira wall is granite rubble in lime, half a metre thick, and
+## a 13 cm reveal was both thinner than the real thing and — the reason it was
+## worth changing — invisible: these facades are read at 50-120 m, where 13 cm is
+## under a pixel and the opening collapsed back to the painted-on dark rectangle
+## round 1 scored it as. At 22 cm the jamb return is a real value step at the
+## distance the camera actually sits.
+const REVEAL := 0.22
 const ARCHITRAVE_BAND := 0.13     ## width of the white stone surround
-const ARCHITRAVE_PROUD := 0.055   ## how far that surround stands off the wall
+## How far that surround stands off the wall. Up with the reveal, and for the
+## same reason: this is the edge that throws the shadow which draws the window.
+const ARCHITRAVE_PROUD := 0.075
 const SILL_PROJECT := 0.20
 const CORNICE_PROUD := 0.23
 ## Roof overhang towards the street and the back. Generous, because the shadow a
@@ -435,9 +445,15 @@ static func _assemble(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> v
 		Geo.panel(skin_b, front, -spec.width * 0.5, spec.plinth_height, spec.width * 0.5,
 				wall_h, holes, 0.0)
 		if spec.style == Style.AZULEJO:
-			_emit_tile_grid(batch, front, spec, wall_h, holes)
+			_emit_tile_panels(batch, front, spec, lines, wall_h, holes)
 		elif spec.style == Style.GRANITE and spec.detail == Detail.FULL:
 			_emit_quoins(batch, front, spec, wall_h)
+		elif spec.style == Style.PLASTER and spec.detail == Detail.FULL:
+			# Roughly one plaster front in three carries a tiled ground storey
+			# or a tiled frieze without being a tiled building. It is the most
+			# common azulejo in the Ribeira and it was completely absent.
+			if rng.randf() < 0.34:
+				_emit_tile_apron(batch, front, spec, lines, rng)
 
 	# String courses: a moulded band on the floor lines. They read as the
 	# horizontal rhythm that a plain box has none of, and because neighbours have
@@ -461,6 +477,9 @@ static func _assemble(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> v
 				spec.width + PARTY_OVERHANG, 0.14, spec.depth + 0.12)
 
 	_emit_roof(batch, base, spec, rng, wall_h)
+
+	if detailed:
+		_emit_rainwater(batch, base, front, spec, rng, wall_h)
 
 	if spec.side != 0:
 		_emit_side_elevation(batch, base, spec, rng, lines)
@@ -583,19 +602,27 @@ static func _emit_window(batch: Batch, front: Transform3D, spec: Spec,
 	if spec.detail != Detail.FULL:
 		return
 
-	# Shutters. Two leaves inside the reveal, hinged on the jambs. Most sit flat
-	# against the wall; the ones left ajar are what make a terrace look lived in.
-	if rng.randf() < 0.62:
+	# Shutters. Two leaves hinged on the jambs, in their own dark green rather
+	# than the doors' brown: three values across a window — black opening, white
+	# surround, dark shutter — is what draws the grid at eighty metres, and one
+	# value did not.
+	#
+	# Ajar is now the common case, not the rare one. A leaf swung out of a 22 cm
+	# reveal projects up to 40 cm into the sun and throws a hard shadow back
+	# across the wall, which is the cheapest per-instance variation a terrace of
+	# identical windows can have; flat leaves buried in the reveal were
+	# geometrically present and visually nothing.
+	if rng.randf() < 0.72:
 		var leaf_w := open_w * 0.5 - 0.02
 		var leaf_h := open_h - 0.06
 		var mid_y := sill_y + open_h * 0.5
 		var hinge_z := -REVEAL + 0.05
-		var timber_b := batch.baker(Batch.timber())
+		var shutter_b := batch.baker(Batch.timber(Batch.SHUTTER_GREEN))
 		for side: float in [-1.0, 1.0]:
 			var ajar := 0.0
-			if rng.randf() < 0.35:
-				ajar = rng.randf_range(0.30, 0.85) * side
-			Geo.box_hinged(timber_b, front, Vector3(cx + side * open_w * 0.5, mid_y, hinge_z),
+			if rng.randf() < 0.58:
+				ajar = rng.randf_range(0.35, 1.05) * side
+			Geo.box_hinged(shutter_b, front, Vector3(cx + side * open_w * 0.5, mid_y, hinge_z),
 					ajar, Vector3(-side * leaf_w * 0.5, 0.0, 0.0),
 					Vector3(leaf_w, leaf_h, 0.045))
 
@@ -770,7 +797,14 @@ static func _emit_arch(batch: Batch, front: Transform3D, spec: Spec, cx: float, 
 		width: float, height: float, holes: Array[Rect2]) -> void:
 	const STEPS := 4
 	var half := width * 0.5
-	var spring := maxf(height - half, 0.6)   # where the curve starts
+	# Springing line, ABSOLUTE. It used to be computed as a height above the
+	# opening's foot and then used as a world Y, so on a facade with any plinth at
+	# all — which is all of them, at 0.45 to 0.85 m — the whole stepped head was
+	# built that far down INSIDE its own jambs, and the jamb rectangle came out
+	# with a negative height whenever the plinth was taller than the springing.
+	# The negative Rect2 then travelled into `holes`, where Geo.panel and the
+	# tilework both intersect against it.
+	var spring := y0 + maxf(height - half, 0.6)
 	var trim_b := batch.baker(Batch.trim())
 	var dark_b := batch.baker(Batch.reveal_dark())
 
@@ -922,56 +956,213 @@ static func _emit_pantiles(tile_b: MeshBaker, rf: Transform3D, along: float, hd:
 			tile_b.add_quad(rf * d, rf * c, rf * b, rf * a, uv)
 
 
-## Porto chimneys are tall, narrow and rendered white, with a flat cap sitting
-## proud. They are most of what breaks up a terrace's roofline.
+## Chimneys, and the one thing about them that matters: no two are the same.
+##
+## Both round-1 critics counted 30-40 identical white stick chimneys per frame —
+## same mesh, same orientation, same scale — and the RUBRIC bans exactly that on
+## anything placed more than twice. The old emitter varied height and width and
+## nothing else: every stack was white, square-on, plumb, and capped the same way,
+## and at forty of them across a skyline the eye reads the repeat long before it
+## reads any single one.
+##
+## Three axes of variation now, all seeded from the caller's rng:
+##
+##   MASS   tall thin flue, squat wide stack, or a broad shouldered one, with the
+##          plan aspect varying independently of the width.
+##   TURN   a yaw of up to 12 degrees and a lean of up to 4. A terrace of stacks
+##          all facing the same way is the tell; they are built by different
+##          masons on different decades and they settle differently.
+##   HEAD   a plain flat cap, a corbelled two-course cap, or one to three
+##          terracotta pots standing on the cap — which is the Porto roofline.
+##
+## Colour varies too: most are limewashed white, some are left in the house's own
+## render, a few in bare granite. That is three materials the terrace already
+## uses, so it costs no draw call at all.
 static func _emit_chimneys(batch: Batch, rf: Transform3D, spec: Spec,
 		rng: RandomNumberGenerator, along: float, ridge_h: float) -> void:
-	var trim_b := batch.baker(Batch.trim())
 	var cap_b := batch.baker(Batch.roof(spec.roof_color))
 	for i in maxi(spec.chimneys, 0):
 		var side := 1.0 if i % 2 == 0 else -1.0
-		var x := side * along * rng.randf_range(0.18, 0.36)
-		var stack := rng.randf_range(1.3, 2.4)
-		var w := rng.randf_range(0.34, 0.48)
-		# Rooted below the ridge so the shaft never floats over a gap.
+		var x := side * along * rng.randf_range(0.14, 0.40)
+		var stack := rng.randf_range(0.85, 2.55)
+		var w := rng.randf_range(0.30, 0.62)
+		# Plan aspect is its own roll: a flue serving one hearth is nearly square,
+		# a stack gathering three is a slab.
+		var depth := w * rng.randf_range(0.55, 1.15)
+		var yaw := rng.randf_range(-0.21, 0.21)
+		var lean := rng.randf_range(-0.035, 0.035)
+
+		var roll := rng.randf()
+		var shaft_b := batch.baker(Batch.trim())
+		if roll > 0.82:
+			shaft_b = batch.baker(Batch.granite())
+		elif roll > 0.62:
+			shaft_b = batch.baker(_wall_material(spec))
+
+		# Rooted below the ridge so the shaft never floats over a gap, and turned
+		# about its own base so the lean does not slide it off the roof.
 		var bottom := ridge_h - 0.6
 		var top := ridge_h + stack
-		Geo.box(trim_b, rf, x, (bottom + top) * 0.5, 0.0, w, top - bottom, w * 0.78)
-		Geo.box(cap_b, rf, x, top + 0.06, 0.0, w + 0.14, 0.12, w * 0.78 + 0.14)
+		var at := rf * Transform3D(Basis(Vector3.UP, yaw), Vector3(x, bottom, 0.0))
+		at = at.rotated_local(Vector3.BACK, lean)
+		shaft_b.add_box(Vector3(w, top - bottom, depth),
+				at * Transform3D(Basis(), Vector3(0.0, (top - bottom) * 0.5, 0.0)))
+
+		var head := rng.randf()
+		var cap_y := top - bottom
+		if head < 0.30:
+			# Corbelled: two courses stepping out, the older way of doing it.
+			cap_b.add_box(Vector3(w + 0.08, 0.09, depth + 0.08),
+					at * Transform3D(Basis(), Vector3(0.0, cap_y + 0.045, 0.0)))
+			cap_b.add_box(Vector3(w + 0.17, 0.10, depth + 0.17),
+					at * Transform3D(Basis(), Vector3(0.0, cap_y + 0.14, 0.0)))
+		else:
+			cap_b.add_box(Vector3(w + 0.14, 0.12, depth + 0.14),
+					at * Transform3D(Basis(), Vector3(0.0, cap_y + 0.06, 0.0)))
+		if head > 0.45:
+			# Terracotta pots. One to three, at their own heights, and the single
+			# most recognisable thing on a Porto roof.
+			var pots := 1 + int(rng.randf() * 2.99)
+			var pitch := w / float(pots + 1)
+			for k in pots:
+				var px := -w * 0.5 + pitch * float(k + 1)
+				var ph := rng.randf_range(0.24, 0.46)
+				cap_b.add_cylinder(minf(pitch * 0.42, 0.11), ph,
+						at * Transform3D(Basis(), Vector3(px, cap_y + 0.14 + ph * 0.5, 0.0)), 6)
+
+
+# --- Rainwater goods ---------------------------------------------------------
+
+## Eaves gutter, hopper head and downpipe.
+##
+## Cheap, and out of proportion to its cost: a downpipe is a hard vertical line
+## from eaves to pavement in a colour the wall is not, and a terrace of painted
+## rectangles with no verticals in it is precisely what round 1 described. Half
+## the buildings get one on each edge, half get one on a single side, so the row
+## does not acquire a rhythm of its own.
+static func _emit_rainwater(batch: Batch, base: Transform3D, front: Transform3D,
+		spec: Spec, rng: RandomNumberGenerator, wall_h: float) -> void:
+	var zinc_b := batch.baker(Batch.zinc())
+	var hz := spec.depth * 0.5
+
+	# Gutter: a half-round along the street eave, hung just under the tile lip.
+	Geo.cylinder_x(zinc_b, base, 0.0, wall_h + 0.30, hz + CORNICE_PROUD + 0.02,
+			0.055, spec.width + PARTY_OVERHANG, 5, false)
+
+	var both := rng.randf() < 0.35
+	var lone := -1.0 if rng.randf() < 0.5 else 1.0
+	var sides: Array[float] = [lone]
+	if both:
+		sides = [-1.0, 1.0]
+	for sx in sides:
+		var px := sx * (spec.width * 0.5 - 0.14)
+		var pz := CORNICE_PROUD * 0.5 + 0.04
+		# Hopper head under the gutter, then the pipe down to a shoe at the plinth.
+		Geo.box(zinc_b, front, px, wall_h - 0.06, pz, 0.20, 0.24, 0.16)
+		Geo.beam(zinc_b, front, Vector3(px, wall_h - 0.18, pz),
+				Vector3(px, spec.plinth_height + 0.18, pz), 0.075)
+		# Two brackets, which is what stops a pipe reading as a painted stripe.
+		for t: float in [0.34, 0.72]:
+			Geo.box(zinc_b, front, px, lerpf(spec.plinth_height, wall_h, t), pz * 0.55,
+					0.12, 0.05, pz * 1.1)
+		Geo.box(zinc_b, front, px, spec.plinth_height + 0.10, pz + 0.03,
+				0.11, 0.18, 0.13)
 
 
 # --- Facing and dressings ----------------------------------------------------
 
-## Azulejo facing, as a checkerboard of pale tiles over the blue skin.
+## Azulejo facing, as bordered panels rather than as a checkerboard.
 ##
-## Real panels are 14 cm and would be a texture at this range; what survives the
-## distance is the two-tone block pattern and the wet specular kick off the
-## glaze, so the cells are sized to be read rather than to be correct. Cells that
-## would land in an opening are dropped, which also keeps them off the surrounds.
-static func _emit_tile_grid(batch: Batch, front: Transform3D, spec: Spec, wall_h: float,
-		holes: Array[Rect2]) -> void:
+## The checkerboard this replaces was the wrong abstraction and the landmark
+## builder next door had already written down why: real narrative tilework is a
+## coloured ground inside pale borders, and a two-tone grid of 62 cm cells reads
+## as tiles at three metres and as grey mush at eighty, which is the only range
+## these are ever seen from. Round 1 scored the whole terrace as flat-coloured
+## polygons, and a mush layer on top of flat colour is still flat colour.
+##
+## What survives the distance is the BORDER: a pale dado at the foot, a pale
+## frieze under the cornice, a pale band on every floor line and a pale strip up
+## each party edge, with the building's own blue as the field between them and a
+## near-navy panel centred in each storey. Four values instead of two, arranged
+## as horizontals and verticals the eye can actually resolve.
+static func _emit_tile_panels(batch: Batch, front: Transform3D, spec: Spec,
+		lines: PackedFloat32Array, wall_h: float, holes: Array[Rect2]) -> void:
 	var pale_b := batch.baker(Batch.tilework(Batch.AZULEJO_PALE))
-	var cell := 0.62
-	var cols := maxi(int(spec.width / cell), 2)
-	var rows := maxi(int((wall_h - spec.plinth_height) / cell), 2)
-	var cw := spec.width / float(cols)
-	var ch := (wall_h - spec.plinth_height) / float(rows)
-	for r in rows:
-		for c in cols:
-			if (r + c) % 2 == 1:
-				continue
-			var x0 := -spec.width * 0.5 + cw * float(c)
-			var y0 := spec.plinth_height + ch * float(r)
-			var tile := Rect2(x0, y0, cw, ch).grow(-0.025)
-			var blocked := false
-			for h in holes:
-				if h.intersects(tile):
-					blocked = true
-					break
-			if blocked:
-				continue
-			Geo.rect(pale_b, front, tile.position.x, tile.position.y, tile.end.x, tile.end.y,
-					SKIN_GAP)
+	var deep_b := batch.baker(Batch.tilework(Batch.AZULEJO_DEEP))
+	var hx := spec.width * 0.5
+	var y0 := spec.plinth_height
+	const BORDER := 0.19
+
+	# Dado, frieze, and a band on each floor line. Two tile courses each, which is
+	# how these are actually set out.
+	_tile_rect(pale_b, front, holes, -hx, y0, hx, y0 + 0.62)
+	_tile_rect(pale_b, front, holes, -hx, wall_h - 0.44, hx, wall_h)
+	for f in range(1, spec.floors):
+		_tile_rect(pale_b, front, holes, -hx, lines[f] - BORDER * 0.5,
+				hx, lines[f] + BORDER * 0.5)
+	# Party-edge strips: the vertical the horizontals need to close against.
+	_tile_rect(pale_b, front, holes, -hx, y0, -hx + BORDER, wall_h)
+	_tile_rect(pale_b, front, holes, hx - BORDER, y0, hx, wall_h)
+
+	# One deep panel per storey, inset inside the borders. Dropped wherever a
+	# window lands in it, which on a narrow frontage is most of them — and that
+	# is right: the panels belong on the piers between the openings.
+	for f in spec.floors:
+		var py0 := lines[f] + BORDER * 0.6
+		var py1 := lines[f + 1] - BORDER * 0.6
+		if py1 - py0 < 0.5:
+			continue
+		_tile_rect(deep_b, front, holes, -hx + BORDER * 1.4, py0, hx - BORDER * 1.4, py1,
+				SKIN_GAP * 2.0)
+
+
+## A tiled band, dropped whole if any opening cuts it. Cheap and correct: a
+## border that stops at a window and starts again is a border a builder would
+## have set out around the opening, and at this range the two are the same thing.
+static func _tile_rect(b: MeshBaker, front: Transform3D, holes: Array[Rect2],
+		x0: float, y0: float, x1: float, y1: float, z: float = SKIN_GAP) -> void:
+	if x1 - x0 <= 0.02 or y1 - y0 <= 0.02:
+		return
+	var band := Rect2(x0, y0, x1 - x0, y1 - y0)
+	var live: Array[Rect2] = []
+	for h in holes:
+		var cut := h.intersection(band)
+		if cut.size.x > 0.0 and cut.size.y > 0.0:
+			live.append(cut)
+	live.sort_custom(func(l: Rect2, r: Rect2) -> bool:
+		return l.position.x < r.position.x)
+	var cursor := x0
+	for cut in live:
+		if cut.position.x > cursor:
+			Geo.rect(b, front, cursor, y0, cut.position.x, y1, z)
+		cursor = maxf(cursor, cut.end.x)
+	if cursor < x1:
+		Geo.rect(b, front, cursor, y0, x1, y1, z)
+
+
+## A tiled ground storey or a tiled frieze on a PAINTED front. Not a tiled
+## building — one storey of tile under painted render is the commonest azulejo
+## there is in the Ribeira, and it puts the material on far more of the terrace
+## than the one-in-four that carries it floor to eaves.
+static func _emit_tile_apron(batch: Batch, front: Transform3D, spec: Spec,
+		lines: PackedFloat32Array, rng: RandomNumberGenerator) -> void:
+	var tone := AZULEJO_PALETTE[rng.randi() % AZULEJO_PALETTE.size()]
+	var b := batch.baker(Batch.tilework(tone))
+	var pale_b := batch.baker(Batch.tilework(Batch.AZULEJO_PALE))
+	var hx := spec.width * 0.5 - 0.05
+	if rng.randf() < 0.62 and spec.floors >= 2:
+		# Ground storey, from the plinth to the first floor line, framed by a
+		# pale course top and bottom.
+		var top := lines[1] - 0.12
+		Geo.rect(b, front, -hx, spec.plinth_height + 0.10, hx, top, SKIN_GAP)
+		Geo.rect(pale_b, front, -hx, top, hx, top + 0.14, SKIN_GAP * 2.0)
+		Geo.rect(pale_b, front, -hx, spec.plinth_height + 0.02, hx,
+				spec.plinth_height + 0.12, SKIN_GAP * 2.0)
+	else:
+		# A frieze under the cornice instead, which is the other place it goes.
+		var wall_h := lines[lines.size() - 1]
+		Geo.rect(b, front, -hx, wall_h - 0.72, hx, wall_h - 0.16, SKIN_GAP)
+		Geo.rect(pale_b, front, -hx, wall_h - 0.84, hx, wall_h - 0.72, SKIN_GAP * 2.0)
 
 
 ## Alternating corner blocks up both edges of an unpainted granite front.

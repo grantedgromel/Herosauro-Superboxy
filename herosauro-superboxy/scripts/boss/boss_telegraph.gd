@@ -124,9 +124,7 @@ func _ready() -> void:
 	torus.rings = 6
 	torus.ring_segments = 48
 	_ring.mesh = torus
-	_ring.material_override = _ring_mat
-	_ring.position.y = LIFT
-	add_child(_ring)
+	_mount(_ring, _ring_mat, LIFT, self)
 
 	if kind == Kind.AOE:
 		# Unit disc, scaled on X/Z by the fill radius each frame.
@@ -139,10 +137,8 @@ func _ready() -> void:
 		disc.radial_segments = 48
 		disc.rings = 0
 		_fill.mesh = disc
-		_fill.material_override = _fill_mat
-		_fill.position.y = LIFT * 0.6
 		_fill.scale = Vector3(0.001, 1.0, 0.001)
-		add_child(_fill)
+		_mount(_fill, _fill_mat, LIFT * 0.6, self)
 	else:
 		# A fixed cross under the closing ring, so the exact impact point is
 		# readable even at the moment the ring is still wide open.
@@ -157,9 +153,7 @@ func _ready() -> void:
 				0.03,
 				wall if axis.x > 0.0 else radius * 1.8)
 			bar.mesh = box
-			bar.material_override = _ring_mat
-			bar.position.y = LIFT
-			_cross.add_child(bar)
+			_mount(bar, _ring_mat, LIFT, _cross)
 		_ring.scale = Vector3(MARKER_OPEN, 1.0, MARKER_OPEN)
 
 	set_process(true)
@@ -180,8 +174,18 @@ func _decal_material(colour: Color, alpha: float) -> StandardMaterial3D:
 	mat.emission = colour
 	mat.emission_energy_multiplier = 1.2
 	mat.disable_receive_shadows = true
-	mat.shadow_casting_setting = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	return mat
+
+
+## Shadow casting is a property of the INSTANCE, not of the material — setting it
+## on a StandardMaterial3D silently falls through Godot's 3.x compatibility remap
+## and warns once per decal per frame, which buried the probe output. Every mesh a
+## telegraph builds goes through here.
+func _mount(mi: MeshInstance3D, mat: StandardMaterial3D, y: float, parent: Node3D) -> void:
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position.y = y
+	parent.add_child(mi)
 
 
 # --- Animation --------------------------------------------------------------

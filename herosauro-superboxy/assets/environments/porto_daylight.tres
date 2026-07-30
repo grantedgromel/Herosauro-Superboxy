@@ -3,10 +3,14 @@
 [ext_resource type="Shader" path="res://assets/environments/porto_sky.gdshader" id="1_porto_sky"]
 
 ; Was porto_golden_hour.tres. The golden hour is gone: SunLight in bridge_arena.tscn
-; now stands 51 degrees up at 5400 K, which is Porto on a clear morning, and every
-; number below has been re-derived against that rather than dimmed toward it. The
-; reasoning that used to live here about low sun on stone, warm clipping and glare
-; down the gorge described a picture this resource no longer makes.
+; now stands 34 degrees up at 5100 K, 66 degrees east of +x, which is Porto at about
+; 08:40 on a clear April morning. Round 2 re-keyed it down from 51 degrees and round
+; the compass, because 51 degrees is technically-correct midday light and midday light
+; is the flattest light there is: a 1.2 m parapet threw 0.97 m of shadow straight down
+; at its own feet, where a deck-level camera never sees it. Every number below is
+; re-derived against the new key rather than dimmed toward it, and the three that moved
+; furthest are the aerial perspective, the ambient floor and the screen-space indirect
+; — see each block.
 ;
 ; WARNING, unchanged and still the most important line in the file: the text resource
 ; format keeps `;` comments on load, but Godot's inspector does NOT round-trip them.
@@ -55,8 +59,10 @@ radiance_size = 3
 ;
 ; The previous curve deliberately split-toned — warm highlights, cool shadows —
 ; because golden hour never clips neutral. Midday does. The job of this curve is now
-; tonal SHAPE rather than colour separation. Saturation is left to
-; adjustment_saturation, which does it without dragging hue.
+; tonal SHAPE rather than colour separation, plus one deliberate piece of colour: a
+; blue toe, because a shadow under a clear sky IS blue and that is the true colour of
+; a shadow rather than a look. Saturation is left to adjustment_saturation, which does
+; it without dragging hue.
 ;
 ; The shape is measured, not guessed. A first render of the daylight rig came back
 ; with this luminance distribution over shots 02, 03 and 07:
@@ -71,24 +77,40 @@ radiance_size = 3
 ; top fifth up toward white.
 ;
 ; Read the stops as (input -> R, G, B), with slopes in the margin:
-;   0.000  (0, 0.002, 0.008)  — a hair of lift, and the only stop with real channel
-;          separation left in it. Shadows under a 51-degree sun are lit almost
-;          entirely by a blue sky, so a faintly blue toe is the true colour of a
-;          shadow rather than a look.
-;   0.080  0.032.  slope 0.40 — the toe. This is where the frame gets its blacks.
-;   0.220  0.150.  slope 0.84
-;   0.450  0.450.  slope 1.30 — the pivot, dead on identity.
-;   0.720  0.792.  slope 1.27 — the lift. The sunlit deck, the kerbs and the lit
-;          facades land in this stretch and this is what makes them read as sunlit
-;          rather than merely lit.
-;   0.900  0.975.  slope 1.02 — the shoulder starts.
-;   1.000  (1, 1, 1). slope 0.25. Clean neutral white. A midday sun clips white; the
+;   0.000  (0, 0.005, 0.018)  — the only stop with real channel separation in it, and
+;          it is DEEPER than it was (0.002/0.008 -> 0.005/0.018). Round 1 measured the
+;          deck's shadows going redder than its lit stone, which is backwards under a
+;          sky at (66, 151, 211). Most of that fix is in the lighting rig; this is the
+;          part of it that belongs in the grade, and it costs nothing anywhere else
+;          because it is applied at input 0 and has decayed to nothing by 0.08.
+;   0.080  0.026.  slope 0.33 — the toe. This is where the frame gets its blacks, and
+;          it is steeper than before because the shadows themselves are deeper now:
+;          the directionless fill terms (ambient, SSIL) were nearly halved.
+;   0.250  0.170.  slope 0.85
+;   0.450  0.478.  slope 1.54 — the expansion band, and it is aimed. The bridge deck
+;          measures 0.35-0.45 on the input side across 01, 02 and 07, so this is the
+;          stretch the playable corridor actually occupies and the steepest slope in
+;          the curve is spent on it. Separating two stones on the deck is worth more
+;          than separating two roofs at a hundred metres.
+;   0.620  0.630.  slope 0.89 — and the compression band, aimed the same way. The
+;          Ribeira facades measure 0.55-0.65 on the input side. The RUBRIC wants the
+;          background to sit back; giving it under-unity slope is the grade's share of
+;          that, worth about six levels on its own.
+;   0.760  0.800.  slope 1.21 — and released again, deliberately and immediately. The
+;          first version of this curve held the compression all the way to 0.80, and a
+;          render showed what that costs: the SKY's blue channel sits at input 0.75, so
+;          it was being compressed along with the facades and came back at 190 against
+;          the 211 Round 1 named as the one thing in the frame that was working. The
+;          facades and the sky are separable — 0.55-0.65 against 0.75 — so the curve
+;          separates them, compressing one band and lifting the next.
+;   0.900  0.950.  slope 1.07.
+;   1.000  (1, 1, 1). slope 0.50. Clean neutral white. A midday sun clips white; the
 ;          warm clip the old curve carried was the single most golden-hour thing left
 ;          in the frame after the light itself.
 ;
-; Re-measured after it shipped, over the same three shots: p1 0.11 -> 0.03,
-; p5 0.23 -> 0.10, p50 0.65 -> 0.53, and 2.8% of the frame now below 0.06 against
-; 0.4% before. That is the toe working.
+; Measured after the previous version shipped, over shots 02, 03 and 07: p1 0.11 ->
+; 0.03, p5 0.23 -> 0.10, p50 0.65 -> 0.53, and 2.8% of the frame below 0.06 against
+; 0.4% before. That is the toe working, and it is kept.
 ;
 ; The shoulder is a more honest story. The 99th percentile moved 0.87 -> 0.82, i.e.
 ; DOWN, and no amount of curve puts it at white — because in a shot with no cloud, no
@@ -101,8 +123,8 @@ radiance_size = 3
 ; Every channel is monotonic, so no tonal inversion is possible whatever the input
 ; encoding turns out to be.
 [sub_resource type="Gradient" id="Grade_curve"]
-offsets = PackedFloat32Array(0, 0.08, 0.22, 0.45, 0.72, 0.9, 1)
-colors = PackedColorArray(0, 0.002, 0.008, 1, 0.032, 0.035, 0.042, 1, 0.15, 0.15, 0.152, 1, 0.45, 0.45, 0.45, 1, 0.792, 0.79, 0.788, 1, 0.975, 0.975, 0.975, 1, 1, 1, 1, 1)
+offsets = PackedFloat32Array(0, 0.08, 0.25, 0.45, 0.62, 0.76, 0.9, 1)
+colors = PackedColorArray(0, 0.005, 0.018, 1, 0.026, 0.031, 0.043, 1, 0.17, 0.173, 0.182, 1, 0.478, 0.478, 0.478, 1, 0.63, 0.63, 0.629, 1, 0.8, 0.8, 0.799, 1, 0.95, 0.95, 0.95, 1, 1, 1, 1, 1)
 
 [sub_resource type="GradientTexture1D" id="Grade_lut"]
 gradient = SubResource("Grade_curve")
@@ -112,20 +134,23 @@ background_mode = 2
 sky = SubResource("Sky_porto")
 
 ; --- Ambient ---
-; 0.55 -> 0.45 -> 0.32, and the frame STILL gets more ambient than it did at dusk,
-; because the sky this reads is a great deal brighter: sky_energy went 1.0 -> 1.15 on
-; top of a dome whose colours are a clear blue noon rather than a dark indigo dusk.
-; Cutting the multiplier while the source brightens is the point — ambient is a
-; constant term with no direction, so it is the one part of the fill that cannot shape
-; anything, and every unit of it that SDFGI and SSIL carry instead is a unit that
-; arrives occluded.
+; 0.55 -> 0.45 -> 0.32 -> 0.20. Ambient is the term with NO DIRECTION, which is the
+; only thing that has ever mattered about it: it cannot shape a surface, it can only
+; raise it, and every unit of it lands identically on a face pointing at the sky and a
+; face pointing at the deck. Every unit that SDFGI, SSIL or a directional fill carries
+; instead is a unit that arrives occluded and from somewhere.
 ;
-; The second cut, 0.45 -> 0.32, is measured: the first render of the daylight rig came
-; back with a 5th percentile of 0.21, i.e. the darkest twentieth of the frame was still
-; a light mid-grey. A floor that high is a second key light with no direction, and it
-; is what makes shadows stop reading as shadows. LightingRig scales it back up by
-; COMPAT_AMBIENT_SCALE on GL Compatibility, where neither SDFGI nor SSIL exists, and
-; again if use_sdfgi is switched off.
+; This round's cut, 0.32 -> 0.20, is Round 1's second measurement made actionable. It
+; found the deck cobble's normal-map relief present outside a shadow band (standard
+; deviation 8.5) and GONE inside it (2.4). Inside a shadow the only terms left are the
+; fills, this, and the screen-space indirect — and this one and the indirect are both
+; directionless, so between them they were most of the shadow's value and a normal map
+; has nothing to bite on. The 0.12 taken out here goes back as directional sky fill in
+; lighting_rig.gd (sky_fill_energy 0.32 -> 0.42 at a paler chroma), which is the same
+; quantity of light arriving from the direction it actually arrives from.
+;
+; LightingRig scales it back up by COMPAT_AMBIENT_SCALE on GL Compatibility, where
+; neither SDFGI nor SSIL exists, and again if use_sdfgi is switched off.
 ;
 ; The colour is the 8% slice that is NOT sky (sky_contribution 0.92). Still blue, and a
 ; touch paler: at midday that slice stands in for light bouncing off pale stone under a
@@ -133,14 +158,22 @@ sky = SubResource("Sky_porto")
 ambient_light_source = 3
 ambient_light_color = Color(0.647, 0.749, 0.925, 1)
 ambient_light_sky_contribution = 0.92
-ambient_light_energy = 0.32
+ambient_light_energy = 0.2
 reflected_light_source = 2
 
 ; --- Tonemap ---
-; This is where the daylight is actually made, not in any albedo. A horizontal deck saw
-; sin(11.5) = 0.20 of normal incidence under the old sun and sees sin(51) = 0.78 under
-; this one, so even with the key cut 2.4 -> 2.0 the deck arrives 3.2x brighter — +1.7
-; EV of real scene light that has to be spent deliberately rather than clawed back.
+; This is where the daylight is actually made, not in any albedo.
+;
+; UNCHANGED this round, and that is the point of how the key was re-derived. Dropping
+; the sun 51 -> 34 degrees costs a horizontal deck sin(34)/sin(51) = 0.72 of its
+; incidence, and SunLight's energy went 2.0 -> 2.8 to pay exactly that back:
+; 2.8 x 0.559 = 1.57 against 2.0 x 0.777 = 1.55, so the KEY TERM on the surface this
+; grade is built around lands within 1% of where it was. (Its total moves about +7%,
+; because sky_fill_energy went up at the same time; that arrives as fill, which is the
+; half of the frame Round 1 said had no shape in it.) The re-key buys direction, not exposure.
+; Vertical surfaces do move, and deliberately — the ironwork's broad faces gain 2.4x
+; and the Ribeira facades lose 38% of their incidence — but neither is what the tonemap
+; is anchored on.
 ;
 ; exposure 1.05 -> 1.00 -> 0.72 and agx_white 10.5 -> 7.5 -> 4.0. These two moved
 ; together and the pairing is the whole trick, so they have to be read together.
@@ -156,9 +189,13 @@ reflected_light_source = 2
 ; the definition of contrast and the thing the frame was missing.
 ;
 ; What that leaves, all quoted AFTER exposure so they can be compared with each other
-; and with the glow threshold below: sunlit deck granite 0.32, sunlit cream plaster
-; 0.59, a sunlit white kerb 0.88, the sun disk 32. Only the last clips, which is
-; correct — it is the one thing in a midday frame that has to.
+; and with the glow threshold below: sunlit deck granite 0.32, sunlit ochre plaster
+; 0.61, a sunlit white kerb 0.88, the sun disk 32. Only the last clips, which is
+; correct — it is the one thing in a bright frame that has to. (The plaster figure is
+; 0.72 -> 0.60 on the re-key: a Ribeira facade faces +x and its incidence went 0.545 ->
+; 0.337. That 18% cut on the background with the deck held flat is the largest single
+; contribution to fixing Round 1's inverted focal hierarchy, and it comes out of the
+; light vector rather than out of desaturating anybody's paint.)
 ; agx_contrast 1.42 -> 1.62 buys further punch inside the tonemapper's own S-curve,
 ; which is better behaved than doing it afterwards with adjustment_contrast because it
 ; happens before the display transform rather than on top of it.
@@ -188,42 +225,58 @@ ssr_depth_tolerance = 0.22
 ; radius 0.9 is tuned to the ~2-unit characters, not the 100-unit deck.
 ; power stays 1.2: every window reveal and lattice node has a real crease, and a
 ; sharper exponent turns each of them into a hard dark ring.
-; light_affect 0.15 -> 0.22. AO acting on direct light is not physical, and under a
-; raking sun it was not needed — the sun itself drew the creases. A 51-degree sun
-; reaches into most of them, and "contact is mandatory" in the RUBRIC is a statement
-; about direct light: this is what keeps a barrel from floating when the sun is hitting
-; both the barrel and the deck under it.
-; intensity 1.5 -> 1.85 and ssil_intensity 0.55 -> 0.60: a brighter sky means more
-; indirect to occlude and more indirect to gather, and both scale with it. The extra
-; on SSAO past that is paying for the ambient cut — with the constant term down to
-; 0.32 the creases are darker to begin with, and AO is the term that makes that read
-; as contact rather than as a dark object.
+;
+; light_affect 0.22 -> 0.15, back most of the way to where it started. It went up when
+; the sun did, on the argument that a 51-degree key reaches into creases a raking one
+; left in its own shadow, so the crease darkening had to be carried by AO instead. A
+; 34-degree key rakes again and draws them itself. AO acting on DIRECT light was never
+; physical either, and — like ambient — it has no direction, so it is one of the terms
+; flattening relief inside a shadow.
+; intensity 1.85 -> 1.60 for the same reason, plus this: the extra was paying for an
+; ambient cut, and ambient has now been cut again with a DIRECTIONAL fill absorbing it.
+; Occluding a term that already arrives from a direction is double-counting.
+;
+; ssil_intensity 0.60 -> 0.32 and ssil_radius 4.0 -> 2.4, and this is the third of the
+; three changes Round 1's shadow-chroma finding forced. SSIL gathers screen-space
+; indirect, i.e. light that has been through a bounce off whatever is nearby — and what
+; is nearby on the bridge deck is sunlit warm granite and warm cobble, so it comes back
+; WARMER than the sun itself. That is why the measured shadow went redder than the lit
+; stone even though both directional fills reaching an up-facing surface are decisively
+; blue: the cool light had direction and small energy, the warm light had no direction
+; and large energy, and the warm one won.
+; The radius matters as much as the intensity. At 4.0 units a point on flat paving
+; gathers from four metres of the same flat paving, which no real surface can see — a
+; plane has no view factor to itself. 2.4 keeps SSIL doing what it is good at (kerbs,
+; parapet plinths, the inside of the truss, anywhere geometry really does face other
+; geometry) and stops it inventing a warm floor across open deck.
 ssao_enabled = true
 ssao_radius = 0.9
-ssao_intensity = 1.85
+ssao_intensity = 1.6
 ssao_power = 1.2
 ssao_detail = 0.4
-ssao_light_affect = 0.22
+ssao_light_affect = 0.15
 ssil_enabled = true
-ssil_radius = 4.0
-ssil_intensity = 0.6
+ssil_radius = 2.4
+ssil_intensity = 0.32
 
 ; --- SDFGI ---
 ; 5 cascades off the default 0.2 min cell = a 12.8-unit cascade 0 and ~205 units total,
 ; enough for the bridge and the far bank. read_sky_light stays true (this is an
 ; exterior) and is stated explicitly because it is exactly why ambient_light_energy
-; could come down so far. energy 0.85 -> 0.95: SDFGI is the only thing in the frame
-; that carries bounce with the colour of what it bounced off *and* with occlusion, and
-; the RUBRIC asks for exactly that — green off the banks, terracotta off the roofs.
-; bounce_feedback stays 0.3: feedback is light amplification, and amplification is what
-; turns indirect into wash.
+; could come down so far. energy 0.95 -> 0.80 and bounce_feedback 0.3 -> 0.2: SDFGI is
+; still the only thing in the frame that carries bounce with the colour of what it
+; bounced off *and* with occlusion, which the RUBRIC asks for by name — green off the
+; banks, terracotta off the roofs — so it is trimmed rather than cut. But it sits on the
+; warm side of the same argument as SSIL above: what the deck is surrounded by is
+; sunlit warm stone, feedback is light amplification, and amplifying a warm bounce is
+; precisely how a shadow ends up redder than the surface casting it.
 sdfgi_enabled = true
 sdfgi_use_occlusion = true
 sdfgi_read_sky_light = true
-sdfgi_bounce_feedback = 0.3
+sdfgi_bounce_feedback = 0.2
 sdfgi_cascades = 5
 sdfgi_y_scale = 1
-sdfgi_energy = 0.95
+sdfgi_energy = 0.8
 sdfgi_normal_bias = 1.4
 sdfgi_probe_bias = 1.4
 
@@ -262,31 +315,59 @@ glow_hdr_luminance_cap = 8.0
 ; --- Depth fog: the aerial perspective ---
 ; Depth mode is amount = pow(smoothstep(begin, end, dist), curve) * density, so
 ; `density` is literally the blend at and beyond `end`. Density is not the milkiness
-; dial — RANGE is. Full density over a 640 m range with a 0.9 curve gives a gradient
-; rather than a veil, and a gradient is what reads as depth. Composited with the
+; dial — RANGE is. Full density over a 640 m range gives a gradient rather than a veil,
+; and a gradient is what reads as depth.
+;
+; --- What Round 1 forced here, and what it forbade -------------------------
+;
+; Two measurements, and they point the same way. The playable bridge deck came back at
+; roughly HALF the luminance and 40% of the saturation of the furthest thing in shot
+; (02_deck_eye: deck L=81 sat=0.14 against facades L=161 sat=0.35; 07_ribeira: deck
+; L=74 sat=0.16 against deep background L=146 sat=0.27). The RUBRIC requires the exact
+; opposite. And separately, the critics observed that what depth this scene HAS is
+; carried almost entirely by distance blur — which softens the arch, the one object in
+; the frame that identifies the location, while leaving the disposable background
+; sharp and shouting.
+;
+; So more blur is explicitly the wrong move and none was added. Depth belongs in value
+; compression and desaturation toward the sky, which is what this block is: with
+; aerial_perspective at 0.90, nine tenths of the veil is the actual sky BEHIND the
+; geometry, so distance literally takes the sky's own colour. That pulls a saturated
+; ochre facade toward a pale blue without touching the palette itself, and the Ribeira
+; chord — cobalt, vermilion, ochre, cream — is the right chord for Porto and is not
+; what is wrong.
+;
+; begin 40 -> 18 and curve 0.90 -> 0.62, which roughly doubles the veil right across
+; the mid-ground while leaving the playable corridor alone. Composited with the
 ; volumetric pass below, at the distances this scene actually has geometry:
 ;
-;     deck / hero      0-40 m    <4%    nothing playable is veiled
-;     bridge ends      50 m       6%
-;     arch, abutments  70 m       9%
-;     Ribeira terraces 100 m     12%
-;     Clerigos, Serra  130 m     16%
-;     scan, near edge  168 m     22%
-;     scan, far edge   340 m     57%
-;     horizon          640 m+   100%    the water reaches sky colour before its
-;                                       geometry runs out, so the river plane's far
-;                                       edge stops being visible at all
+;                             was     now
+;     deck / hero      0-40 m  <4%     <6%    nothing playable is veiled
+;     bridge ends      50 m     6%      9%
+;     arch, abutments  70 m     9%     14%
+;     Ribeira terraces 100 m   12%     20%    where the over-bright facades are
+;     Clerigos, Serra  130 m   16%     27%
+;     scan, near edge  168 m   22%     35%
+;     scan, far edge   340 m   57%     69%
+;     horizon          640 m+ 100%    100%    the water reaches sky colour before its
+;                                             geometry runs out, so the river plane's
+;                                             far edge stops being visible at all
 ;
-; The two numbers that changed are the two that were about the sunset:
+; The ramp is monotone at every sample, which is the whole depth cue — a dip anywhere
+; means near geometry hazier than something behind it. _atmosphere_probe.gd checks it.
+;
+; Two more numbers here changed earlier, when the sunset went:
 ;
 ; fog_light_color, warm haze amber -> pale sky blue. This is the 10% of the veil that
 ; is NOT the sky behind the geometry, and an amber tint in it was putting a gold cast
-; on every distant surface in a frame lit at 5400 K.
+; on every distant surface in a frame lit at 5100 K.
 ; fog_sun_scatter 0.42 -> 0.10. This adds the sun's own colour to the fog along
 ; sightlines near it. It existed because looking down the gorge was looking within 30
 ; degrees of an 11.5-degree sun, which is the glare that sells a low sun over water.
-; The sun is now 51 degrees up and no vantage in tools/shots.json looks anywhere near
-; it, so at 0.42 this would only ever be a warm cast applied for no reason.
+; The sun is now 34 degrees up and 66 degrees east of +x — which is to say behind the
+; shoulder of every vantage in tools/shots.json, all of which sit at +z looking toward
+; -z. None of them looks anywhere near it, so at 0.42 this would only ever be a warm
+; cast applied for no reason. It stays at 0.10 for the same reason it was cut.
 ; aerial_perspective 0.75 -> 0.90: the veil is 90% the actual sky behind the geometry,
 ; so distance takes on the sky's own blue. That is the whole mechanism of aerial
 ; perspective and it works far better with a blue sky than it did with an amber one.
@@ -298,23 +379,24 @@ fog_sun_scatter = 0.1
 fog_density = 1.0
 fog_aerial_perspective = 0.9
 fog_sky_affect = 0.0
-fog_depth_curve = 0.9
-fog_depth_begin = 40.0
+fog_depth_curve = 0.62
+fog_depth_begin = 18.0
 fog_depth_end = 640.0
 
 ; --- Volumetric fog: the light shafts ---
-; This existed for one shot: an 11.5 degree sun raking through the arch lattice. That
-; shot is gone, and a 51-degree sun through the same lattice makes short steep shafts
-; onto the deck instead of long horizontal ones down the gorge. They are worth keeping
-; — the RUBRIC wants motion and drifting dust in the light — but they are worth much
-; less than they were, and every unit of density is extinction, which is uniform in
-; every direction and is exactly the milkiness to avoid.
+; This existed for one shot: an 11.5 degree sun raking through the arch lattice. A
+; 34-degree sun rakes it again, at a shallower angle and 66 degrees round toward +z, so
+; the shafts run along the lattice rather than dropping through it — longer, shallower,
+; and more of each one inside the frame. They are worth keeping (the RUBRIC wants
+; motion and drifting dust in the light) but every unit of density is EXTINCTION, which
+; is uniform in every direction and is exactly the milkiness to avoid.
 ;
-; So density comes down again, 0.0016 -> 0.0011, and the sun's own
-; light_volumetric_fog_energy (LightingRig.SUN_FOG_ENERGY) comes down 2.4 -> 2.0 with
-; it. Shaft brightness goes as (fog energy * density) while the veil on the playable
-; deck goes as density alone, so the composite haze at 50 m — the far parapet from
-; mid-deck — drops from 7.8% to 5.5% for a shaft only a third dimmer.
+; density 0.0011 -> 0.0008, with the sun's own light_volumetric_fog_energy
+; (LightingRig.SUN_FOG_ENERGY) going 2.0 -> 2.6 to compensate. Shaft brightness goes as
+; (fog energy * density) so the shafts land at 0.94 of what they were, while the veil,
+; which goes as density alone, drops 27%. That trade is worth more this round than
+; last: the depth fog's own ramp above was pulled in to 18 m, so the two passes now
+; compete for the same near field and the near field is where the playable corridor is.
 ; albedo, warm cream -> cool white. Volumetric fog is airborne water and dust
 ; scattering *sky*, and under a blue dome that scatter is blue-white. Cream here was
 ; the sunset showing through the one channel that is pure additive light.
@@ -328,7 +410,7 @@ fog_depth_end = 640.0
 ; with no directional payoff; they stay low. sky_affect stays 0 or it fogs the sky.
 ; RiverLife adds a FogVolume of low mist over the water on top of this.
 volumetric_fog_enabled = true
-volumetric_fog_density = 0.0011
+volumetric_fog_density = 0.0008
 volumetric_fog_albedo = Color(0.94, 0.96, 1, 1)
 volumetric_fog_gi_inject = 0.5
 volumetric_fog_anisotropy = 0.7

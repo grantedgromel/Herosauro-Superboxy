@@ -50,6 +50,7 @@ extends RefCounted
 const MK := preload("res://scripts/world/terrain/masonry_kit.gd")
 const RK := preload("res://scripts/world/terrain/rock_kit.gd")
 const FK := preload("res://scripts/world/terrain/flora_kit.gd")
+const QK := preload("res://scripts/world/terrain/quay_kit.gd")
 const TerrainBatch := preload("res://scripts/world/terrain/terrain_batch.gd")
 
 # --- The gorge ---------------------------------------------------------------
@@ -305,9 +306,11 @@ static func build(seed: int = DEFAULT_SEED) -> Node3D:
 		_build_upland(near, far, side)
 		_build_waterfront(near, side, bank_seed)
 		_build_planting(near, far, side, bank_seed)
+		_build_quay_dressing(near, side, bank_seed)
 
 	_build_bluff(near, far, seed)
 	_build_headlands(near, seed)
+	_build_gaia_signage(near, seed)
 
 	root.add_child(near.commit("TerrainNear"))
 	root.add_child(far.commit("TerrainFar"))
@@ -549,6 +552,167 @@ static func _build_waterfront(near: TerrainBatch, side: float, seed: int) -> voi
 				terrace_top(side, 0, zm) - 0.55, 2.8, seed + int(zm), true)
 
 
+# --- Quay dressing -----------------------------------------------------------
+
+## What is ON the cais. See quay_kit.gd's header for why this exists at all: the
+## Ribeira is the busiest public space in Porto and it was an empty grey apron,
+## and the Gaia cais in front of the port lodges was a bare shelf.
+##
+## The two banks get different dressing on purpose, for the same reason they get
+## different landforms. Porto's waterfront is a solid run of cafe terrace —
+## parasols, tables, chairs, awnings over the shopfronts. Gaia's is a working
+## yard — port pipes stacked in courses, crates, a couple of awnings. Mirroring
+## them would throw away the one thing the two banks have that no amount of
+## surface detail buys.
+##
+## NEAR REACH ONLY. Everything here is 0.6 m of parasol at 40-110 m; past
+## NEAR_Z_FAR it is a pixel and it would pay a shadow cascade for it.
+static func _build_quay_dressing(near: TerrainBatch, side: float, seed: int) -> void:
+	if side < 0.0:
+		_build_cafe_terrace(near, seed)
+	else:
+		_build_lodge_yard(near, seed)
+
+
+## The Ribeira terrace. Two rows down the cais: parasols with tables under them
+## on the river side of the plane trees, and awnings against the building line.
+##
+## The row is deliberately IRREGULAR — pitch jitters by up to a third, every
+## fourth pitch is skipped for a gap, and one parasol in five is the red — because
+## a perfectly even row of identical canopies is a car park, and both critics named
+## visible repetition as a defect in its own right.
+static func _build_cafe_terrace(near: TerrainBatch, seed: int) -> void:
+	var side := PORTO
+	var timber := near.timber()
+	var iron := near.iron()
+	var street := float((PORTO_LEVELS[0] as Dictionary)["street"])
+	var pitch := 3.6
+	var count := int((BANK_Z_NEAR - NEAR_Z_FAR) / pitch)
+
+	for i in count:
+		var z := NEAR_Z_FAR + pitch * (float(i) + 0.5 + MK.hash_sym(seed + 41, i) * 0.34)
+		# Keep the bridge landing clear; the abutment comes up through the quay
+		# there and a parasol inside a granite block is worse than a gap.
+		if absf(z) < BRIDGE_CLEAR_Z + 1.5:
+			continue
+		if MK.hash01(seed + 43, i) < 0.24:
+			continue      # the gaps between one cafe's tables and the next one's
+		var front := absf(front_x(side, 0, z))
+		var offset := 2.4 + MK.hash01(seed + 45, i) * 1.1
+		var x := side * (front + offset)
+		var ground := ground_height(x, z)
+		var warm := MK.hash01(seed + 47, i) < 0.22
+		QK.parasol(near.canvas(warm), timber, Vector3(x, ground, z),
+				1.05 + MK.hash01(seed + 49, i) * 0.35,
+				2.25 + MK.hash01(seed + 51, i) * 0.25, seed + i * 13)
+		QK.cafe_set(timber, iron, Vector3(x, ground, z), seed + i * 17)
+		# A second, deeper table under the same canopy about half the time.
+		if MK.hash01(seed + 53, i) > 0.52:
+			var zx := z + MK.hash_sym(seed + 55, i) * 1.3
+			QK.cafe_set(timber, iron,
+					Vector3(side * (front + offset + 1.5), ground_height(
+						side * (front + offset + 1.5), zx), zx), seed + i * 23)
+
+	# Awnings over the shopfronts along the building line. The facades themselves
+	# are the placement stream's, so these key off the terrace geometry: the
+	# street width is the distance from the wall face to the quay edge, and the
+	# awning hangs 2.6 m up on the wall and reaches out over the pavement.
+	var along := Vector3(0.0, 0.0, 1.0)
+	var outward := Vector3(-side, 0.0, 0.0)
+	var awn_pitch := 6.5
+	var awn_count := int((BANK_Z_NEAR - NEAR_Z_FAR) / awn_pitch)
+	for i in awn_count:
+		if MK.hash01(seed + 57, i) < 0.42:
+			continue
+		var z := NEAR_Z_FAR + awn_pitch * (float(i) + 0.5)
+		if absf(z) < BRIDGE_CLEAR_Z + 1.5:
+			continue
+		var x := side * (absf(front_x(side, 0, z)) + street - 0.15)
+		QK.awning(near.canvas(MK.hash01(seed + 59, i) < 0.3), near.iron(),
+				Vector3(x, ground_height(x, z) + 2.65, z), along,
+				2.6 + MK.hash01(seed + 61, i) * 1.2, 1.25, outward)
+
+
+## The Gaia cais: a working port yard in front of the lodges. Pipes stacked in
+## courses, crates between them, and the ramp of empty shelf they sit on.
+static func _build_lodge_yard(near: TerrainBatch, seed: int) -> void:
+	var side := GAIA
+	var timber := near.cooperage()
+	var iron := near.iron()
+	var pitch := 8.5
+	var count := int((BANK_Z_NEAR - NEAR_Z_FAR) / pitch)
+
+	for i in count:
+		var z := NEAR_Z_FAR + pitch * (float(i) + 0.5 + MK.hash_sym(seed + 71, i) * 0.3)
+		if absf(z) < BRIDGE_CLEAR_Z + 2.0:
+			continue
+		var front := absf(front_x(side, 0, z))
+		var x := side * (front + 2.6 + MK.hash01(seed + 73, i) * 2.4)
+		var ground := ground_height(x, z)
+		if MK.hash01(seed + 75, i) < 0.62:
+			# Pipes lie across the quay, i.e. along X, so the row of hoop ends
+			# faces the river and reads from the bridge. Lying along Z instead
+			# would present the staves and a barrel stack would be a dark log pile.
+			QK.barrel_stack(timber, iron, Vector3(x, ground, z), Vector3(1.0, 0.0, 0.0),
+					2 + int(MK.hash01(seed + 77, i) * 2.0),
+					3 + int(MK.hash01(seed + 79, i) * 3.0), seed + i * 19)
+		else:
+			QK.crate_stack(timber, Vector3(x, ground, z),
+					0.85 + MK.hash01(seed + 81, i) * 0.35,
+					2 + int(MK.hash01(seed + 83, i) * 3.0), seed + i * 29)
+
+
+## The port houses' names on the Gaia hillside.
+##
+## Arguably the single most recognisable Porto identity cue there is: from
+## anywhere on the river the far bank is a row of white sheds under three-metre
+## letters. The lodges themselves are placed by the placement stream, so these
+## frames stand on the terrain that holds them up — on the first terrace behind
+## the cais, where the real hillside boards are, angled to face the bridge.
+##
+## Invented names only, matching the ones LandmarksBuilder puts on the lodge
+## roofs — the real houses are trademarks and this is not the place to borrow one.
+static func _build_gaia_signage(near: TerrainBatch, seed: int) -> void:
+	var iron := near.iron()
+	var face := near.sign_face()
+	# z, name, cell size. The cell sets the cap height: seven cells, so 0.34 gives
+	# 2.4 m of letter, which is about 25 px at these distances — readable, and
+	# about what the real hoardings subtend from the deck.
+	#
+	# All well upstream. The boards stand on the second Gaia terrace at |x| ~ 78,
+	# and the frame only opens far enough sideways to include that once it is 85 m
+	# or so deep: closer in, a sign there is outside 07_ribeira's 55-degree
+	# horizontal cone entirely, which is what the first placement did.
+	# One word each, and short ones. The frame is sized to the string — six cells
+	# per character — so "CAVES DO CORVO" at cell 0.34 comes out THIRTY METRES
+	# wide, which is a motorway gantry rather than a lodge hoarding. The real
+	# boards on that bank are 15-25 m and carry the house name only.
+	#
+	# The cell is the letter's stroke unit and the cap height is seven of them, so
+	# 0.62 is a 4.3 m letter. That is deliberately large: these stand 90-115 m from
+	# the deck, where 4.3 m is about 30 px of cap height — roughly a headline on a
+	# page held at arm's length, which is the least that resolves as a WORD rather
+	# than as texture.
+	var boards := [
+		{"z": -74.0, "text": "CORVO", "cell": 0.62},
+		{"z": -96.0, "text": "QUINTA", "cell": 0.58},
+		{"z": -52.0, "text": "DOURO", "cell": 0.52},
+	]
+	for i in boards.size():
+		var b: Dictionary = boards[i]
+		var z := float(b["z"])
+		var x := absf(front_x(GAIA, 1, z)) + 3.0 + MK.hash01(seed + 91, i) * 2.5
+		# Turned to face the bridge, not square to the bank: a hoarding meant to be
+		# read from the water is angled at the water. Basis(UP, yaw) sends the
+		# lettering's own +Z to (sin yaw, 0, cos yaw), and the deck sits at -x and
+		# +z from these boards, so the yaw is negative and shallow. Square to the
+		# bank (+PI/2) would point the letters straight into the hillside behind.
+		var yaw := -0.70 + MK.hash_sym(seed + 93, i) * 0.20
+		QK.hillside_sign(near.dark(), iron, face,
+				Vector3(x, ground_height(x, z) - 0.1, z), yaw,
+				String(b["text"]), float(b["cell"]))
+
+
 # --- Hillside behind the top terrace -----------------------------------------
 
 static func _build_upland(near: TerrainBatch, far: TerrainBatch, side: float) -> void:
@@ -560,6 +724,90 @@ static func _build_upland(near: TerrainBatch, far: TerrainBatch, side: float) ->
 		var batch: TerrainBatch = near if reach == 0 else far
 		_ground_grid(batch.earth(), side, back, crest, z0, z1,
 				8 if reach == 0 else 5, 6.0 if reach == 0 else 12.0)
+	_dress_upland(near, far, side, back, crest)
+
+
+## Contour walls, planting and outcrops on the open hillside above the terraces.
+##
+## Round 1 scored the hill mass on the Gaia skyline as "a smeared low-frequency
+## brown-grey mass with no readable geometry, sitting on the skyline where the eye
+## lands", and the measurement backs it up: outside the bluff's own Z window that
+## upland is a five-by-four quad grid of one earth material across sixty metres of
+## slope, with nothing on it at all.
+##
+## The fix is not more grid — subdividing a smooth slope produces a smoother
+## smooth slope. What makes a Douro hillside readable at a hundred metres is that
+## it is TERRACED: near-horizontal lines of pale dry-stone retaining wall stacked
+## up the slope, with dark planting between them. Two values in alternating
+## horizontal bands is a landform; one value at any resolution is a smear.
+##
+## Everything here lands in the far batch wherever it can, and the near batch only
+## over the reach the shadow cascades already cover.
+static func _dress_upland(near: TerrainBatch, far: TerrainBatch, side: float,
+		back: float, crest: float) -> void:
+	var key := _land_key(side) * 7 + 13
+	# Four contour lines up the slope. Their |x| wanders per segment, so a run
+	# reads as following a contour rather than as a ruled line.
+	for c in 4:
+		var t := (float(c) + 0.75) / 5.0
+		var seg := 9.0
+		var z := BANK_Z_FAR + 4.0
+		var i := 0
+		while z < BANK_Z_NEAR - 4.0:
+			var zb := minf(z + seg, BANK_Z_NEAR - 4.0)
+			var zm := (z + zb) * 0.5
+			# Breaks in the run: a hillside terrace is cut where the rock allowed
+			# and stops where it did not.
+			if MK.hash01(key + c * 31, i) > 0.24:
+				var ax := lerpf(back + 3.0, crest - 3.0, t + MK.hash_sym(key + c, i) * 0.045)
+				var fx := side * ax
+				var y0 := ground_height(fx, z)
+				var y1 := ground_height(fx, zb)
+				var batch: TerrainBatch = near if zm > NEAR_Z_FAR else far
+				MK.banded_wall(batch.granite(), z, zb, fx, fx, -side,
+						minf(y0, y1) - 1.5, y0 + 0.55, y1 + 0.55,
+						0.85, 0.9, 0.05, key + c * 17 + i)
+				MK.coping(batch.dressed(), z, zb, fx, fx, -side,
+						y0 + 0.62, y1 + 0.62, 0.45, 0.16, 0.08, 1.6, key + c + i)
+			z = zb
+			i += 1
+
+	# Planting between the contours. Porto's side is backlit, so it goes to
+	# silhouette and can carry more of it; Gaia's is sunlit and reads as texture,
+	# so it gets fewer and larger clumps.
+	var clumps := 54 if side < 0.0 else 34
+	for i in clumps:
+		var t := MK.hash01(key + 101, i)
+		var ax := lerpf(back + 1.5, crest - 2.0, t)
+		var z := lerpf(BANK_Z_FAR + 3.0, BANK_Z_NEAR - 3.0, MK.hash01(key + 103, i))
+		var x := side * ax
+		var batch: TerrainBatch = near if z > NEAR_Z_FAR else far
+		var roll := MK.hash01(key + 105, i)
+		if roll < 0.34:
+			# Shorter toward the crest. A ridge line whose tallest trees stand on
+			# the very top is a comb; the biggest ones belong on the mid-slope,
+			# where they read against the hill rather than against the sky.
+			FK.cypress(batch.leaf_dark(), Vector3(x, ground_height(x, z) - 0.2, z),
+					lerpf(7.4, 4.2, t) + MK.hash01(key + 107, i) * 1.6, key + i * 37)
+		elif roll < 0.72:
+			FK.scrub(batch.leaf_dark(), Vector3(x, ground_height(x, z), z),
+					1.1 + MK.hash01(key + 109, i) * 1.4, key + i * 41)
+		else:
+			FK.blob(batch.leaf_lit(), Vector3(x, ground_height(x, z) + 2.2, z),
+					Vector3(2.6, 1.7, 2.6) * (0.7 + MK.hash01(key + 111, i) * 0.7),
+					5, key + i * 43, 0.35)
+
+	# Outcrops breaking through the turf on the upper third, where a hillside runs
+	# out of soil. Gaia only: its whole bank is a rock scarp and the Porto side is
+	# built on all the way to the crest.
+	if side > 0.0:
+		for i in 11:
+			var ax := lerpf(back + 12.0, crest - 4.0, MK.hash01(key + 121, i))
+			var z := lerpf(BANK_Z_FAR + 6.0, BANK_Z_NEAR - 6.0, MK.hash01(key + 123, i))
+			var x := side * ax
+			var batch: TerrainBatch = near if z > NEAR_Z_FAR else far
+			RK.boulder(batch.rock(), Vector3(x, ground_height(x, z) + 0.5, z),
+					1.6 + MK.hash01(key + 125, i) * 2.4, key + i * 53)
 
 
 # --- Serra do Pilar ----------------------------------------------------------

@@ -1,7 +1,12 @@
 extends SceneTree
-## Throwaway headless harness: builds the ironwork alone and measures it.
+## Throwaway headless harness: builds the ironwork alone and measures it, then
+## checks the tram rail's own geometry.
+
+const DeckKit := preload("res://scripts/world/bridge/deck_kit.gd")
+
 
 func _initialize() -> void:
+	_rail_winding()
 	var script := load("res://scripts/world/bridge_ironwork.gd")
 	if script == null:
 		print("!! bridge_ironwork.gd failed to load")
@@ -49,6 +54,41 @@ func _initialize() -> void:
 	print("Corridor violations (y>2 inside |x|<50,|z|<6): %d" % corridor)
 	_clearances()
 	quit()
+
+
+## The rail crown must face UP, on both rails.
+##
+## This check exists because it caught a real one. MeshBaker derives a flat normal
+## from each triangle's vertex order, so a crown wound the wrong way is not simply
+## back-facing — it is a polished metal shaded as though it were looking at the
+## riverbed, and it renders as a black line down a sunlit deck. That is exactly
+## what the first render of this rail produced, and no amount of material tuning
+## would have found it.
+##
+## Both rails are checked because the winding has to flip between them: the arc is
+## walked from the gauge face outward, which is +Z on one rail and -Z on the other.
+func _rail_winding() -> void:
+	print("--- tram rail ---")
+	for i in 2:
+		var s := -1.0 if i == 0 else 1.0
+		var steel := MeshBaker.new()
+		var rust := MeshBaker.new()
+		DeckKit.grooved_rail(steel, rust, -4.0, 4.0, s * 0.72, 2.004, 1.98, 4801)
+		var mi := steel.commit(null, "Crown", false)
+		var arrays: Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)
+		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+		var up := 0
+		var down := 0
+		for n in normals:
+			if n.y > 0.3:
+				up += 1
+			elif n.y < -0.3:
+				down += 1
+		print("  rail z=%+.2f  steel tris=%d  up-facing verts=%d  down-facing=%d  %s" % [
+			s * 0.72, steel.triangle_count(), up, down,
+			"ok" if down == 0 and up > 0 else "!! CROWN IS INVERTED"])
+		print("  rail z=%+.2f  furniture tris=%d" % [s * 0.72, rust.triangle_count()])
+		mi.free()
 
 
 ## Cheap swept-AABB overlap test between the arch's transverse cross-frames and

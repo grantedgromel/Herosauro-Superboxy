@@ -33,16 +33,18 @@
 //       Left warm, the far half of the Douro stays a sunset band under a blue sky —
 //       and it is the largest single surface in shots 06 and 09.
 //   glint_color     (1.0, 0.80, 0.55)    -> (1.0, 0.97, 0.90)
-//       The glitter path is specular sunlight, so it is the sun's colour: 5400 K
+//       The glitter path is specular sunlight, so it is the sun's colour: 5100 K
 //       warm white, not 3200 K amber.
-//   glint_sharpness 165                  -> 240
+//   glint_sharpness 165                  -> 240 -> 200
 //       A low sun spreads its glitter into a long soft path down the water because
-//       the reflected angle sweeps slowly; a 51-degree sun concentrates it into a
-//       hard patch. The wide lobe under a high sun reads as a smear.
-//   sun_direction   (-0.859785, 0.19995, -0.469882) -> (0.54501, 0.77715, 0.31466)
-//       SunLight's +Z basis column, which moved when the sun did. Left alone the
+//       the reflected angle sweeps slowly; a high one concentrates it into a hard
+//       patch. 240 was for the 51-degree key; the key is now 34 and the lobe widens
+//       back part of the way.
+//   sun_direction   (-0.859785, 0.19995, -0.469882) -> (0.337181, 0.559193, 0.757364)
+//       SunLight's +Z basis column, which moves whenever the sun does. Left alone the
 //       glitter sits on the wrong side of the river from every other highlight in
-//       the frame, which is the kind of tell a critic finds immediately.
+//       the frame, which is the kind of tell a critic finds immediately — and that is
+//       exactly what Mat_river in bridge_arena.tscn is still doing. See the uniform.
 // ============================================================================
 shader_type spatial;
 render_mode cull_disabled;
@@ -59,19 +61,30 @@ uniform float wave_speed = 0.5;
 uniform float wave_height = 0.35;      // metres, peak of the summed swell
 uniform float wave_scale = 0.18;       // base angular frequency (1 / metres)
 uniform float flow = 0.02;             // downstream drift of the whole wave field
-// Specular sunlight, so it is the sun's own colour at 5400 K.
+// Specular sunlight, so it is the sun's own colour at 5100 K.
 uniform vec4 glint_color : source_color = vec4(1.0, 0.97, 0.90, 1.0);
 uniform float glint_strength = 0.45;
 
 // --- Tuning -----------------------------------------------------------------
 
 // World-space direction *towards* the sun, i.e. SunLight's +Z basis column in
-// bridge_arena.tscn: 51 degrees up, 30 degrees east of +x. If that light moves,
+// bridge_arena.tscn: 34 degrees up, 66 degrees east of +x. If that light moves,
 // move this with it — and move Mat_river's copy of it, which is the one that counts.
-uniform vec3 sun_direction = vec3(0.54501, 0.77715, 0.31466);
-// 190 -> 240. Tighter, because a high sun's glitter path is a concentrated patch
-// rather than the long soft streak a low one lays down the water.
-uniform float glint_sharpness : hint_range(16.0, 512.0) = 240.0;
+//
+// STILL BROKEN AND STILL NOT MINE TO FIX. Mat_river in bridge_arena.tscn overrides
+// this uniform with vec3(-0.859785, 0.19995, -0.469882), which is the ORIGINAL sunset
+// sun from two rounds ago: it points into the -x/-z quadrant, 11.5 degrees up. Since
+// the world stream owns that scene's sub-resources, the only thing this file can do is
+// keep its own default honest and say so loudly. _atmosphere_probe.gd asserts this
+// default against the scene's real SunLight, so the two cannot drift; nothing checks
+// Mat_river, and the glitter path on the Douro is consequently ~120 degrees of azimuth
+// away from where the sun is. It is in this pass's report.
+uniform vec3 sun_direction = vec3(0.337181, 0.559193, 0.757364);
+// 240 -> 200. A 34-degree sun lays a longer, softer glitter path than a 51-degree one
+// — the reflected angle sweeps more slowly across the swell as it approaches the
+// horizon — so the lobe widens back out, though nowhere near the 165 a true low sun
+// over water wanted.
+uniform float glint_sharpness : hint_range(16.0, 512.0) = 200.0;
 uniform float chop_strength : hint_range(0.0, 3.0) = 1.0;
 uniform float water_roughness : hint_range(0.0, 0.4) = 0.07;
 // How fast the surface flips from deep to sky-mirror as the view angle flattens.

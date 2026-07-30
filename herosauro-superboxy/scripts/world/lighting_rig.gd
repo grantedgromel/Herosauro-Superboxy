@@ -21,9 +21,17 @@ extends Node3D
 ##      the key misses off the floor is also bright enough to flatten the ones it
 ##      hits, which is the trade an early render pass caught as "deck blowing out
 ##      while parapets crush". The answer is not more ambient, it is DIRECTIONAL
-##      fill. Which faces the key misses changed completely when the sun went from
-##      11.5 to 51 degrees, so all three are derived below from scratch rather than
-##      re-aimed. None casts a shadow map.
+##      fill. Which faces the key misses changes with the sun, so all three are
+##      re-derived below whenever it moves rather than re-aimed. None casts a
+##      shadow map.
+##
+##      Round 1 turned that argument from a preference into a measurement. On the
+##      deck cobble it read normalised lit = (1.00, 0.877, 0.949) against normalised
+##      shadow = (1.00, 0.818, 0.892): under a sky measuring (66, 151, 211) the
+##      shadow was going REDDER, and inside the band the cobble's normal-map relief
+##      disappeared entirely, standard deviation falling 8.5 -> 2.4. Both symptoms
+##      have the same cause and it is the balance below -- see the block above
+##      sky_fill_energy.
 ##
 ##   2. The sun's light_volumetric_fog_energy. That is a fog-only multiplier — it
 ##      cannot touch surface lighting — and it is the right lever for light shafts,
@@ -31,7 +39,7 @@ extends Node3D
 ##      uniform in every direction and is exactly the milkiness to avoid.
 ##
 ##   3. OmniLight3Ds on the lamppost globes — off by default now that the arena is
-##      lit at 10:50 in the morning. See spawn_lamp_lights.
+##      lit at 08:40 in the morning. See spawn_lamp_lights.
 ##
 ## The key light itself is not here: SunLight lives in bridge_arena.tscn, and this
 ## only reads it. The sky shader reads it too, through LIGHT0_*, so moving or
@@ -47,35 +55,49 @@ extends Node3D
 ## Shaft brightness goes as (this * volumetric_fog_density), but extinction — the
 ## part that veils the playable deck — goes as density alone, so buying the shafts
 ## here instead of there is strictly the better trade.
-## 2.4 -> 2.0 alongside volumetric_fog_density 0.0016 -> 0.0011. A 51-degree sun
-## through the lattice throws short steep shafts onto the deck rather than long
-## horizontal ones down the gorge: they are worth having, they are not worth what
-## the old pair cost in haze on the playable surface.
-const SUN_FOG_ENERGY := 2.0
+##
+## 2.0 -> 2.6 alongside volumetric_fog_density 0.0011 -> 0.0008. That pairing holds
+## the shafts at 0.94 of their previous brightness while the near haze they cost
+## drops by 27%, and the near haze is the expensive half now: the depth fog's ramp
+## was pulled all the way in to 18 m this pass to carry the aerial perspective, so
+## the volumetric pass has to stop competing for the same 0-80 m the playable deck
+## lives in. A 34-degree sun also rakes the lattice along its length instead of
+## dropping through it, which makes the shafts longer and shallower — more of each
+## one is in frame, so it needs less density to read.
+const SUN_FOG_ENERGY := 2.6
 
 # --- Fill lights -------------------------------------------------------------
 #
 # Directions are the direction light comes FROM, unit length. The sun's is the +Z
-# column of SunLight's basis in bridge_arena.tscn, (0.545, 0.777, 0.315): 51 degrees
-# up, 30 degrees east of +x. In this arena's compass +x is Gaia (south), -x is Porto
+# column of SunLight's basis in bridge_arena.tscn, (0.337, 0.559, 0.757): 34 degrees
+# up, 66 degrees east of +x. In this arena's compass +x is Gaia (south), -x is Porto
 # (north) and -z is downstream toward the Atlantic (west).
 #
-# Raising the sun from 11.5 to 51 degrees moved the problem, it did not shrink it.
-# At 11.5 the key missed almost everything: only surfaces facing -x/-z saw it at all,
-# and the deck itself was at 0.20 of normal incidence. At 51 the deck, the parapet
-# copings, the roofs and the whole sunward side of the city are properly lit, and
-# what the key now misses is a much smaller, much more specific set:
+# The sun came down 51 -> 34 degrees and swung 30 -> 66 degrees east of +x, so what
+# the key misses changed shape again and all three fills are re-derived rather than
+# re-aimed. What it misses now:
 #
 #   * everything facing DOWN — the deck soffit, the inside of the arch truss, the
-#     underside of every handrail, cornice, balcony and eave. A high sun makes more
-#     of these and makes them darker, because nothing about the key reaches them.
-#   * the -x half of every vertical surface: the north faces of the piers, the shaded
-#     side of every baluster, the whole Gaia waterfront, which faces -x.
+#     underside of every handrail, cornice, balcony and eave. Nothing about the key
+#     reaches these at any elevation.
+#   * the -z half of every vertical surface, which is the big change: the key now
+#     arrives 66 degrees round toward +z, so the inboard face of the far parapet, the
+#     -z flank of every pier and the back of every lamp casting are the shaded ones.
+#   * the -x half of every vertical surface: the Gaia waterfront, which faces -x, and
+#     the shaded side of every baluster.
 #   * the deep interior of every crease the SSAO radius is too small to have found.
 #
 # Three lights, and the split between them is the RUBRIC's, not an arbitrary one:
 # "bounce that carries the colour of what it bounced off". A single grey fill from
 # nowhere is exactly the failure mode it names.
+#
+# The three directions are also deliberately close to ORTHOGONAL in elevation — one
+# from 60 degrees up, one from 70 degrees down, one exactly level — so that every
+# surface in the arena is dominated by one of them rather than by an average of all
+# three. An up-facing deck is lit by the sky and by nothing else; a soffit by the
+# quay and by nothing else; a wall facing Porto by the terraces. That separation is
+# what makes each one readable as a direction instead of as more ambient, and it is
+# what Round 1's shadow-chroma measurement says was missing.
 
 ## The open dome. Anti-solar in azimuth (so it lands where the key does not) and 60
 ## degrees up, which is roughly the centroid of the sky hemisphere as a vertical wall
@@ -85,13 +107,30 @@ const SUN_FOG_ENERGY := 2.0
 ## see the zenith, it sees the whole dome including the pale hem near the horizon,
 ## and that integral is much less saturated than any single sample of the sky. The
 ## sky-lit-shadow is the single most recognisable signature of real daylight, and
-## overshooting its chroma is how a scene ends up looking like night-for-day.
-const SKY_FILL_DIR := Vector3(-0.433, 0.866, -0.250)
-const SKY_FILL_COLOR := Color(0.55, 0.70, 1.00)
+## overshooting its chroma is how a scene ends up looking like night-for-day. Round 1
+## flagged the frame as looking deliberately tinted; the answer is more of this light,
+## not a more saturated one.
+##
+## (0.55, 0.70, 1.00) -> (0.72, 0.82, 1.00) and 0.46 -> 0.42, measured off a render
+## rather than reasoned. Raising this fill's ENERGY to fix the shadow term was right;
+## raising it at that chroma was not. The calcada on the deck footway came back at
+## normalised (1.00, 1.04, 1.18) with saturation 0.32 against 0.21 before — blue-and-
+## white broken mosaic rather than stone — because the cobble mask carries the deepest
+## relief of the six recipes (bump 14, normal_scale 1.35), so every sett is a little
+## dome presenting facets across the whole hemisphere, and each of those facets
+## samples this light at a different N.L. A saturated fill turns that relief into
+## chroma variation instead of value variation. Paling it keeps every guarantee the
+## block above sky_fill_energy makes — the probe still reads the shadow term at B/R
+## 1.61 against the key's 0.855, and 74% of it still has a direction — while taking
+## the tint out of the frame. The energy comes down with it only to hold the fill's
+## LUMINANCE where the retune put it; a paler colour at the same energy is a brighter
+## light.
+const SKY_FILL_DIR := Vector3(-0.203, 0.866, -0.457)
+const SKY_FILL_COLOR := Color(0.72, 0.82, 1.00)
 
 ## Up-bounce off the river and the quays. 70 degrees below horizontal — not straight
-## up, because it leans 30 degrees east of +x to follow the sun's own azimuth, which
-## is where the brightest water is.
+## up, because it leans along the sun's own azimuth, 66 degrees east of +x, which is
+## where the brightest water is.
 ##
 ## Green-grey, and both halves of that are measured: the deck granite is
 ## Color(0.312, 0.307, 0.298) and the quay setts Color(0.58, 0.56, 0.51), which is
@@ -99,23 +138,37 @@ const SKY_FILL_COLOR := Color(0.55, 0.70, 1.00)
 ## terraced banks are FOLIAGE_LIT Color(0.255, 0.315, 0.150). Weighted by how much of
 ## the lower hemisphere each occupies, the mixture leans green. This is what should
 ## be arriving under the deck, and it reads as somewhere rather than as ambient.
-const QUAY_BOUNCE_DIR := Vector3(0.296, -0.940, 0.171)
+##
+## It matters more this round than last: the deck's outer fascia was rendering as a
+## 100 m band of pure black (a detail-blend enum bug, see toon_bridge.tres) and is now
+## a real surface, so the whole underside of the bridge has to be lit rather than
+## merely not crash.
+const QUAY_BOUNCE_DIR := Vector3(0.139, -0.940, 0.312)
 const QUAY_BOUNCE_COLOR := Color(0.86, 0.90, 0.78)
 
 ## The Ribeira, bouncing back at the bridge. The Porto terraces stand at -x and face
-## the water, i.e. face +x, so the new sun hits them square: about 8000 square metres
-## of sunlit ochre plaster and terracotta roof, low and slightly upstream of the deck.
-## Ten degrees above horizontal, from -x/-z.
+## the water, i.e. face +x, so the key still hits them: about 8000 square metres of
+## sunlit ochre plaster and terracotta roof, low and slightly upstream of the deck.
+##
+## EXACTLY LEVEL now, elevation 0.000, where it used to sit 10 degrees up. That is the
+## single most important number in this file and it is Round 1's shadow-chroma finding
+## made structural rather than dialled down. A directional light at zero elevation
+## contributes N.L = 0 to every horizontal surface in the world, so this warm term can
+## no longer reach the deck at all — not weakly, not at 3%, not at all — while losing
+## nothing on the vertical faces it exists for. It is also the honest idealisation:
+## the light arriving at a bridge from a distant wall of sunlit plaster arrives
+## horizontally, and the 10-degree tilt it used to carry was the part with no physics
+## behind it.
 ##
 ## Warm, and warm on purpose in a frame that is otherwise being pushed away from
 ## warmth: this is not a leftover of the sunset, it is the one direction in this world
 ## from which coloured light genuinely arrives. Its colour is ROOF_TERRACOTTA
-## Color(0.60, 0.30, 0.21) and the ochre end of RIBEIRA_WALLS multiplied by a 5400 K
-## sun and renormalised. It lands on exactly the faces SKY_FILL misses — the -x side
-## of every baluster, pier and lamp casting — so the shaded side of the ironwork gets
-## a cool top and a warm bottom instead of one flat value, which is the whole reason
-## for spending a third light here.
-const RIBEIRA_BOUNCE_DIR := Vector3(-0.807, 0.174, -0.565)
+## Color(0.60, 0.30, 0.21) and the ochre end of RIBEIRA_WALLS multiplied by the sun and
+## renormalised. It lands on exactly the faces SKY_FILL misses — the -x side of every
+## baluster, pier and lamp casting — so the shaded side of the ironwork gets a cool top
+## and a warm flank instead of one flat value, which is the whole reason for spending a
+## third light here.
+const RIBEIRA_BOUNCE_DIR := Vector3(-0.871, 0.000, -0.491)
 const RIBEIRA_BOUNCE_COLOR := Color(1.00, 0.68, 0.42)
 
 ## Far enough out that the shadow-map framing (unused — none casts) and any
@@ -126,7 +179,7 @@ const FILL_DISTANCE := 90.0
 #
 # Kept whole and kept working, but no longer spawned by default: see
 # spawn_lamp_lights. The numbers below are the dusk numbers and are the right ones
-# for a dusk arena; nothing here is tuned for a sun 51 degrees up, because at 10:50
+# for a dusk arena; nothing here is tuned for a sun 34 degrees up, because at 08:40
 # in the morning a street lamp is switched off.
 
 const LAMP_COLOR := Color(1.0, 0.78, 0.47)
@@ -162,24 +215,22 @@ const FALLBACK_LAMP_SPOTS := [
 # and the naive answer — multiply fog_density — is wrong twice over. It only scales
 # the far end (density IS the blend at fog_depth_end), and the resource already runs
 # density 1.0, so there is nothing to scale. What the volumetric fog actually
-# contributes is a *near* term: an extinction floor of 1 - exp(-0.0011 * d) that
-# saturates at 8.4% by the end of the 80-unit froxel volume, and which therefore
-# dominates the composite from 0 to about 120 m and is flat beyond it.
+# contributes is a *near* term: an extinction floor of 1 - exp(-0.0008 * d) that
+# saturates at 6.2% by the end of the 80-unit froxel volume, and which therefore
+# dominates the composite over the first tens of metres and is flat beyond it.
 #
-# So the fallback reproduces the composite curve instead of the depth term. Both
-# constants were re-solved against the resource's current fog (begin 40, end 640,
-# curve 0.9, density 1.0) and the new volumetric density, by anchoring on 100 m —
-# where the Ribeira terraces are, and the distance the eye actually judges depth at —
-# and on 410 m, where the backdrop scan is. Pulling the ramp all the way to the
-# camera and flattening the exponent hard is what reproduces a curve that rises fast,
-# flattens, then rises again with a single smoothstep.
+# So the fallback reproduces the composite curve instead of the depth term. All three
+# constants were re-solved this round against the resource's new fog (begin 18, end
+# 640, curve 0.62, density 1.0) and the new volumetric density 0.0008, by brute force
+# over eleven sample distances from 10 m to 410 m rather than by anchoring on two.
 #
-# Worst error against the Forward+ composite is 3.7 points at 280 m; from 0 to 130 m
-# the two agree to within 1.8 points, which is the range everything playable is in.
-# _atmosphere_probe.gd prints both curves side by side.
-const COMPAT_FOG_BEGIN := 0.0
-const COMPAT_FOG_CURVE := 0.75
-const COMPAT_FOG_DENSITY := 0.94
+# Worst error against the Forward+ composite is now 0.6 points, anywhere from 10 m to
+# 410 m — against 3.7 points before, and the improvement is not cleverness, it is that
+# the Forward+ curve is a much easier shape to match since its own ramp was pulled in
+# to 18 m. _atmosphere_probe.gd prints both curves side by side and fails past 0.06.
+const COMPAT_FOG_BEGIN := 7.0
+const COMPAT_FOG_CURVE := 0.56
+const COMPAT_FOG_DENSITY := 0.98
 
 ## Compatibility extracts glow after tonemapping, so nothing ever exceeds ~1.0 and
 ## an HDR threshold above it would stop the sun and the water's glint blooming
@@ -191,16 +242,18 @@ const COMPAT_FOG_DENSITY := 0.94
 ## population Forward+ selects at its own (HDR, and therefore quite different) 1.00.
 const COMPAT_GLOW_THRESHOLD := 0.80
 
-## Buys back the indirect that SSIL and SDFGI were providing. 1.7 -> 1.8 because both
-## of those went up with the brighter sky (sdfgi_energy 0.85 -> 0.95, ssil_intensity
-## 0.55 -> 0.60), so Compatibility is now missing slightly more than it was.
-## 0.32 * 1.8 = 0.58, i.e. roughly where Forward+ sits with SDFGI and SSIL folded back
-## into a single directionless term.
-const COMPAT_AMBIENT_SCALE := 1.8
+## Buys back the indirect that SSIL and SDFGI were providing. 1.8 -> 1.6, and it went
+## DOWN while the resource's own ambient also went down (0.32 -> 0.20), which is
+## deliberate rather than a double cut. Forward+ deliberately spends less on the
+## directionless indirect this round — ssil_intensity 0.60 -> 0.32, sdfgi_energy
+## 0.95 -> 0.80 — because that is the term Round 1 measured killing the normal
+## response inside shadows, so there is less of it for Compatibility to replace.
+## 0.20 * 1.6 = 0.32, against the Forward+ 0.20 plus a thinner screen-space bounce.
+const COMPAT_AMBIENT_SCALE := 1.6
 
 ## Same argument, one tier up: Forward+ with SDFGI switched off keeps SSIL, so it
 ## needs less of the ambient back than Compatibility does.
-const NO_SDFGI_AMBIENT_SCALE := 1.35
+const NO_SDFGI_AMBIENT_SCALE := 1.30
 
 ## An upper clamp, not a downgrade — and it used to be a downgrade, from the
 ## resource's 256 to 128. That is the wrong saving here: the river is a near-mirror
@@ -218,14 +271,21 @@ const COMPAT_RADIANCE_SIZE := Sky.RADIANCE_SIZE_256
 ## geometry they get voxelised into the SDFGI cascades as drifting occluders, which
 ## smears light across the whole arena as the clouds pass over. (river_life.gd
 ## disables GI on its own movers as it builds them, so it is not listed here.)
-const MOVING_DECOR := ["Clouds", "Gulls", "Rabelos"]
+##
+## "Gulls" is gone from this list because the node is gone: sky_background.gd's five
+## bent-quad gulls were deleted this round in favour of river_life.gd's flocks, which
+## have a body, a mantle, dark primaries and a wingbeat. The clouds are transparent
+## and unshaded now, so they could not contribute to GI anyway, but they are kept
+## listed because the exclusion is about the SDFGI voxelisation rather than about
+## whether the material writes to the GI buffer.
+const MOVING_DECOR := ["Clouds", "Rabelos"]
 
 @export var world_environment: WorldEnvironment
 ## SDFGI is the one effect here with a real chance of hurting: the scene is thin
 ## procedural boxes under wide open sky, which is the leak-prone case. Single
 ## switch so it can be dropped without touching the resource.
 @export var use_sdfgi: bool = true
-## Off by default: the arena is lit at about 10:50 in the morning and a street lamp
+## Off by default: the arena is lit at about 08:40 in the morning and a street lamp
 ## that time of day is switched off. Warm pools on a sunlit deck are the RUBRIC's
 ## "anything lit from nowhere" defect, and eight of them would also be eight lights
 ## that Compatibility's per-mesh omni budget has to find room for. The whole lamp
@@ -237,23 +297,56 @@ const MOVING_DECOR := ["Clouds", "Gulls", "Rabelos"]
 ## Leave null to find the scene's shadow-casting DirectionalLight3D automatically.
 @export var sun: DirectionalLight3D
 ## Fill energies, exposed because they are the three numbers most likely to want a
-## nudge once someone has actually looked at a frame. As ratios to the key (2.0):
-## sky fill 16%, quay bounce 10%, Ribeira bounce 7%.
+## nudge once someone has actually looked at a frame. As ratios to the key (2.8):
+## sky fill 16%, quay bounce 7%, Ribeira bounce 4%.
 ##
-## The sky fill is by far the largest and that is not a stylistic choice — on a clear
-## day the illuminance a vertical surface receives from the open dome really is on the
-## order of a fifth of what it receives from the sun. The two bounces are sized as
-## bounces: albedo (0.3-0.5) times the fraction of the hemisphere the bouncing surface
-## covers, which lands both under a tenth.
+## --- What Round 1 measured, and what these three numbers now do about it ----
 ##
-## The sky fill came down 0.38 -> 0.32 after a render measured a 5th-percentile
-## luminance of 0.21 across three shots, i.e. a frame with no shadows in it. The
-## environment's flat ambient took the larger part of that cut (0.45 -> 0.32) because
-## it is the term with no direction; this one only lost the difference, since a fill
-## that shapes is worth keeping and a fill that fills is not.
-@export_range(0.0, 2.0, 0.01) var sky_fill_energy: float = 0.32
+## The deck cobble came back with normalised lit = (1.00, 0.877, 0.949) and normalised
+## shadow = (1.00, 0.818, 0.892). Under a sky measuring (66, 151, 211) a shadow has to
+## go COOLER; this one went redder. The relief went with it: the cobble's normal map
+## was visibly working outside the band (standard deviation 8.5) and gone inside it
+## (2.4).
+##
+## Both are the same defect and it is not the shadow map. Where the key is occluded,
+## an up-facing deck was seeing four terms, and they split into two kinds:
+##
+##   DIRECTIONAL, and therefore able to shade a normal map
+##     sky fill    0.32 x N.L 0.866 = 0.277, cool
+##     Ribeira     0.14 x N.L 0.174 = 0.024, warm
+##   DIRECTIONLESS, and therefore able only to flatten it
+##     ambient     0.32, weakly blue
+##     SSIL/SDFGI  gathered from the sunlit granite and cobble all around, i.e.
+##                 warm, because it has been through a bounce off a warm albedo
+##
+## Adding those up explains both symptoms at once. The directionless half was roughly
+## half the shadow's total value, which is why relief died inside the band; and its
+## screen-space part is warmer than the sun itself, which is why the chroma inverted
+## even though the two directional fills together are decisively blue.
+##
+## So the fix is a ratio, in three places, and only one of them is here:
+##   * sky fill 0.32 -> 0.42, at a paler chroma. The only cool DIRECTIONAL term on an
+##     up-facing surface, and its illuminance there is now 23% of the key's own
+##     (0.42 x 0.866 against 2.8 x 0.559), which is about what a clear sky really
+##     delivers at 34 degrees. Every unit of it restores relief inside the shadow as
+##     well as chroma. See SKY_FILL_COLOR for why the chroma came down when the
+##     energy went up.
+##   * ambient_light_energy 0.32 -> 0.20 and ssil_intensity 0.60 -> 0.32 in
+##     porto_daylight.tres — the two terms with no direction, cut nearly in half
+##     between them.
+##   * RIBEIRA_BOUNCE_DIR to exactly level, so the warm term contributes zero to any
+##     horizontal surface by construction rather than by being small.
+##
+## The sky fill being by far the largest is not a stylistic choice — on a clear day
+## the illuminance a surface receives from the open dome really is on the order of a
+## quarter of what it receives from the sun. The two bounces are sized as bounces:
+## albedo (0.3-0.5) times the fraction of the hemisphere the bouncing surface covers,
+## which lands both under a tenth. The Ribeira bounce came down 0.14 -> 0.11 with its
+## re-aim; the quay bounce is unchanged, and is now lighting a deck fascia and soffit
+## that were rendering black before this round.
+@export_range(0.0, 2.0, 0.01) var sky_fill_energy: float = 0.42
 @export_range(0.0, 2.0, 0.01) var bounce_energy: float = 0.20
-@export_range(0.0, 2.0, 0.01) var ribeira_bounce_energy: float = 0.14
+@export_range(0.0, 2.0, 0.01) var ribeira_bounce_energy: float = 0.11
 
 
 func _ready() -> void:

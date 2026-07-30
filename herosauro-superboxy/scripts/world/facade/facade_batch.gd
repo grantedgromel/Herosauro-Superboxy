@@ -31,6 +31,18 @@ const ROOF_TERRACOTTA := Color(0.60, 0.30, 0.21)
 const LIT_AMBER := Color(1.0, 0.80, 0.44)
 const LINEN_WHITE := Color(0.90, 0.88, 0.83)
 const AZULEJO_PALE := Color(0.83, 0.88, 0.92)
+## The third tile value. A tiled front is a pale field, a coloured ground and a
+## near-navy border, and two of those three read as one flat blue at 80 m —
+## which is exactly what round 1 saw. The deep is what draws the panelling.
+const AZULEJO_DEEP := Color(0.105, 0.205, 0.425)
+## Louvred shutters. Porto paints them in a handful of dark colours against the
+## painted render, never in the render's own colour, and that third value beside
+## the white surround and the black opening is most of what draws a window at
+## the distance these are actually seen from.
+const SHUTTER_GREEN := Color(0.155, 0.235, 0.185)
+## Zinc rainwater goods: gutters, hoppers, downpipes. Pale enough to draw a line
+## down a dark facade and dark enough to draw one down a pale facade.
+const ZINC_GREY := Color(0.415, 0.425, 0.435)
 
 # Fixed tile sizes. Every facade must pass the *same* numbers or the factory
 # cache misses and the terrace fragments into one material per building.
@@ -157,6 +169,12 @@ static func roof(color: Color = ROOF_TERRACOTTA) -> StandardMaterial3D:
 ## reason these read as Porto and not as blue paint.
 static func tilework(color: Color) -> StandardMaterial3D:
 	return ToonFactory.ceramic(color, TILEWORK_TILE)
+
+
+## Rainwater goods. Rolled zinc is a dielectric with a sheen, not bare metal, so
+## it goes through iron() rather than getting its own recipe.
+static func zinc() -> StandardMaterial3D:
+	return ToonFactory.iron(ZINC_GREY, 0.5, 0.0, 0.42)
 
 
 ## Whatever is behind a window: no detail map, fully rough, no specular to

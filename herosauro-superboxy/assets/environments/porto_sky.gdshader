@@ -16,7 +16,7 @@
 // This file used to carry two more layers — a Belt of Venus band and the cool wedge
 // of Earth's own shadow, both on the anti-solar half. Both are *evening* phenomena:
 // they are the planet's terminator painted on the haze, and they only exist while
-// the sun is within a few degrees of the horizon. Under a 51-degree sun there is no
+// the sun is within a few degrees of the horizon. Under a 34-degree sun there is no
 // terminator anywhere in the sky, so they are gone rather than dimmed. A rose band
 // and a grey-blue wedge at reduced energy would not read as subtlety, they would
 // read as dirt on the lens.
@@ -106,10 +106,14 @@ uniform float haze_broad_energy : hint_range(0.0, 1.0) = 0.26;
 // deck and the arch truss ever receive, and a black lower half reads as a hole.
 // (LightingRig also hangs two bounce lights for that job — this is the floor.)
 //
-// Lifted hard from the old near-black warm brown, and retinted. Under a 51-degree
+// Lifted hard from the old near-black warm brown, and retinted. Under a mid-morning
 // sun the lower hemisphere is not a dark river at dusk, it is sunlit water, granite
 // quays and green terraced banks all returning light upward, and the value it
-// returns is roughly the albedo of that mixture times sin(51). Olive-grey rather
+// returns is roughly the albedo of that mixture times sin(elevation). It is left
+// where the 51-degree key put it even though the key is now 34: sin(34)/sin(51) =
+// 0.72 would argue for dimming it, but the water it is mostly made of turns into a
+// far better mirror as the sun comes down, and the two effects very nearly cancel.
+// Olive-grey rather
 // than neutral because the banks are the biggest coloured mass in it — the RUBRIC's
 // "green off the river banks", delivered as image-based light rather than as a lamp.
 uniform vec4 ground_color : source_color = vec4(0.263, 0.275, 0.235, 1.0);
@@ -124,7 +128,7 @@ uniform float horizon_blend : hint_range(0.002, 0.3) = 0.045;
 // --- Sun scatter lobes -------------------------------------------------------
 
 // Near-white, with only the whisper of warmth 1.29 air masses actually removes from
-// a 5400 K sun. The old (1.0, 0.769, 0.478) was a 30-air-mass sunset and it was
+// a 5100 K sun. The old (1.0, 0.769, 0.478) was a 30-air-mass sunset and it was
 // painting a third of the dome amber.
 uniform vec4 halo_color : source_color = vec4(1.0, 0.976, 0.925, 1.0);
 // Tight lobe: the aureole hugging the disk. 130 -> 220, i.e. half the angular width.
@@ -198,9 +202,12 @@ void sky() {
 		// --- Sun-side scatter ---
 		// Scatter is still strongest along sightlines that graze the horizon, because
 		// they travel through the most air, so the wide lobe fades toward the zenith.
-		// The floor went 0.30 -> 0.55: with the sun 51 degrees up its own aureole sits
-		// 51 degrees up too, and a floor tuned for a horizon sun was cutting the lobe
-		// to a third exactly where it is supposed to be brightest.
+		// The floor went 0.30 -> 0.55 when the sun went up, because a sun's aureole
+		// sits wherever the sun does and a floor tuned for a horizon sun was cutting
+		// the lobe to a third exactly where it is supposed to be brightest. At 34
+		// degrees the aureole is lower again and the floor matters less than it did,
+		// but it is not put back: 0.30 was authored for an 11.5-degree sun sitting
+		// IN the grazing band, which is a different picture from either of these.
 		float grazing = mix(0.55, 1.0, pow(clamp(1.0 - abs(up), 0.0, 1.0), 2.0));
 		col += halo_color.rgb * halo_wide_energy * pow(toward, halo_wide_falloff) * grazing;
 		col += halo_color.rgb * halo_tight_energy * pow(toward, halo_tight_falloff);

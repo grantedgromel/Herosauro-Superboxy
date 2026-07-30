@@ -146,40 +146,78 @@ cast_shadow = 0
 mesh = SubResource("Mesh_river")
 surface_material_override/0 = SubResource("Mat_river")
 
-; --- SunLight: Porto at mid-morning, not the golden hour ---
+; --- SunLight: Porto at 08:40, not at 10:50 ---
 ; The twelve floats in a Transform3D literal are the basis ROWS, so the +Z axis --
 ; the direction light comes FROM, because a DirectionalLight3D shines down its own
-; -Z -- is the third element of each row: (0.54501, 0.77715, 0.31466).
+; -Z -- is the third element of each row: (0.337181, 0.559193, 0.757364).
 ;
-; asin(0.77715) = 51.0 degrees of elevation, and the horizontal part sits 30 degrees
-; east of +x. That is a real Porto sun: latitude 41.15 N, early April or early
-; September, about 10:50 solar time. In this arena's compass +x is Gaia (south, where
-; the midday sun actually is) and -z is downstream toward the Atlantic (west), so
-; south-by-southeast is where the sun belongs and the old -x/-z sun was lighting the
-; city from the north.
+; 51 degrees -> 34.0 degrees of elevation, and the horizontal part swings from 30 to
+; 66 degrees east of +x. Both numbers moved, and both had to.
 ;
-; The azimuth is not just physics, it is framing. The Porto terraces stand at -x and
-; face the water, i.e. face +x, so a sun from +x lights the facades square on -- shot
-; 07_ribeira, the "is this recognisably Porto" test, was previously lit from behind
-; them. Almost every vantage in tools/shots.json sits at +z looking toward -z, so the
-; +z component puts the key behind the camera's shoulder rather than in its face.
+; WHY IT CAME DOWN. Round 1's most expensive finding was that nothing in frame is
+; planted by a shadow the player can see, and the reason was arithmetic, not a
+; toggle: shadows were on and rendering, but at 51 degrees a 1.2 m parapet throws
+; 1.2/tan(51) = 0.97 m of shadow, straight down at its own feet, where a deck-level
+; camera cannot see it. Technically correct midday light is the flattest light there
+; is. At 34 degrees the same parapet throws 1.78 m, and a lamppost globe 4.33 m over
+; the footway throws 6.4 m -- right across the ten-metre corridor. Shape comes from
+; shadow; this is where the shape comes from.
 ;
-; energy 2.4 -> 2.0. At 11.5 degrees a horizontal deck saw sin(11.5) = 0.20 of normal
-; incidence; at 51 degrees it sees 0.78, which is 3.9x more light on the single
-; most-looked-at surface in the game. Dropping the key 17% still leaves the deck 3.2x
-; brighter than it was, and the tonemap in porto_daylight.tres is re-graded around
-; that -- the RUBRIC's "exposure-driven, not multiplier-driven".
+; WHY IT SWUNG EAST. The throw only helps if it crosses the deck, and the deck runs
+; along X. At the old azimuth only half the throw was in Z, so 1.78 m of shadow would
+; still have died on the footway. sin(66) = 0.91 puts 1.63 m of the parapet's shadow
+; and 5.9 m of the lamppost's straight across the carriageway.
 ;
-; colour: 5400 K, a clear-day sun at 51 degrees through ~1.29 air masses. Warm white,
-; not orange. The old Color(1, 0.784, 0.541) is roughly 3200 K, which is sunset.
+; The swing pays for itself twice more. The parapet lattice, the arch and every
+; baluster present their broad faces to +-Z, and those faces went from
+; N.L = 0.315 to 0.757 -- 2.4x the key on the hero material of the location, which
+; Round 1 measured as a black cutout at mean RGB (11, 16, 27). And the Ribeira
+; facades, which face +x, drop from 0.545 to 0.337: they are still clearly lit, their
+; window reveals and cornices finally throw shadows across them instead of being
+; flat-lit, and the background stops out-shouting the playable deck by as much.
 ;
-; angular_distance 0.6 -> 0.53, the sun's true angular diameter. A low sun through 5
-; air masses genuinely has a fuzzy limb and wide penumbrae; a high one does not, and
-; crisp contact shadows are what plant an object on the deck.
+; NEITHER OF THOSE TWO HAS LANDED YET, and the reason is not this vector. Everything
+; MeshBaker bakes -- all the ironwork, all the abutment masonry, every Ribeira facade
+; -- currently stores vertex normals that are the NEGATIVE of the engine's convention
+; (mesh_baker.gd's _tri_uv takes +RH(a, b, c); Godot's own primitives store -RH for
+; the identical winding). Ray-probing the parapet from three of the shot vantages
+; returns N = (0, 0, -1) on surfaces facing a +z camera, i.e. N.L = -0.757 against
+; this sun, so those surfaces receive NO key at all and are lit by the blue sky fill
+; alone -- which is exactly why they measure blue-black at (11, 18, 33). The world
+; stream has the same finding written up independently in
+; scripts/world/landmarks/_winding_probe.gd. Until mesh_baker.gd is fixed, the two
+; gains above are arithmetic rather than pixels, and the first thing to re-measure
+; afterwards is the focal hierarchy: the background is currently darker than the
+; design intends, not brighter.
+;
+; It is still a real Porto sun, just earlier in the same morning. Latitude 41.15 N,
+; declination +6.5 degrees (about 3 April, or 9 September), hour angle 49.7 degrees:
+; altitude 34.0, azimuth 114 from north = 66 east of south. In this arena's compass
+; +x is south and -z is downstream toward the Atlantic, so that is where it belongs.
+; Every vantage in tools/shots.json sits at +z looking toward -z, and the +z component
+; is now 0.76, i.e. the key is firmly over the camera's shoulder rather than in its
+; face -- no vantage looks anywhere near the disk.
+;
+; energy 2.0 -> 2.8. This is bookkeeping, not a brightening: a horizontal deck sees
+; sin(34) = 0.559 of normal incidence against sin(51) = 0.777, so 2.8 x 0.559 = 1.57
+; against the old 2.0 x 0.777 = 1.55. The most-looked-at surface in the game lands
+; within 1% of where the tonemap was already graded for it, and the entire change buys
+; direction rather than exposure -- the RUBRIC's "exposure-driven, not
+; multiplier-driven" read the way it is meant to be.
+;
+; colour: 5100 K, a clear-day sun at 34 degrees through ~1.79 air masses. Very
+; slightly warmer than the 5400 K it was at 51, because that is what an extra half an
+; air mass does. R-B = 0.145; a 3200 K sunset is 0.46, and _atmosphere_probe.gd fails
+; anything at or above 0.2.
+;
+; angular_distance stays 0.53, the sun's true angular diameter. It sets the penumbra
+; through project.godot's soft_shadow_filter_quality, and 0.53 degrees means a
+; contact shadow is still hard at its own feet and softens over metres, which is what
+; plants an object rather than stickering it.
 [node name="SunLight" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.5, -0.67304, 0.54501, 0, 0.62933, 0.77715, -0.86603, -0.38858, 0.31466, 0, 30, 0)
-light_color = Color(1, 0.945, 0.878, 1)
-light_energy = 2.0
+transform = Transform3D(0.913546, -0.227445, 0.337181, 0, 0.829038, 0.559193, -0.406737, -0.510845, 0.757364, 0, 30, 0)
+light_color = Color(1, 0.935, 0.855, 1)
+light_energy = 2.8
 light_angular_distance = 0.53
 shadow_enabled = true
 

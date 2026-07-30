@@ -1,0 +1,22 @@
+[gd_resource type="NoiseTexture2D" format=3]
+
+[sub_resource type="Gradient" id="Gradient_uvdvb"]
+interpolation_mode = 1
+offsets = PackedFloat32Array(0, 0.19, 0.37, 0.55, 0.73, 0.88)
+colors = PackedColorArray(0.82, 0.815, 0.805, 1, 1, 0.995, 0.985, 1, 0.895, 0.89, 0.88, 1, 0.955, 0.95, 0.94, 1, 0.855, 0.845, 0.83, 1, 0.935, 0.93, 0.92, 1)
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_gicup"]
+noise_type = 2
+seed = 3413
+frequency = 0.028
+fractal_type = 0
+cellular_jitter = 0.9
+cellular_return_type = 0
+
+[resource]
+width = 256
+height = 256
+noise = SubResource("FastNoiseLite_gicup")
+color_ramp = SubResource("Gradient_uvdvb")
+seamless = true
+seamless_blend_skirt = 0.15

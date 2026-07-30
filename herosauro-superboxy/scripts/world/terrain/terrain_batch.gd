@@ -78,6 +78,31 @@ const FOLIAGE_TILE := 0.55
 const TIMBER := Color(0.28, 0.21, 0.15)
 const TIMBER_TILE := 0.7
 
+## Port pipes and packing crates on the Gaia cais. Its own tone, well up from
+## TIMBER: a stack of casks in trunk-brown next to iron-black hoops reads at
+## seventy metres as one amorphous dark blob, which is what the first render of
+## the lodge yard produced. Coopered oak is a good deal paler than a plane tree,
+## and the value gap against the hoops is the only thing that makes a barrel a
+## barrel at that range.
+const COOPERAGE := Color(0.475, 0.325, 0.185)
+const COOPERAGE_TILE := 0.5
+
+## Cafe parasols and shop awnings on the Ribeira. Two tones and no more: the
+## whole point of a quayside terrace at forty metres is the RHYTHM of bright
+## canopies against dark gaps, and two values give that a beat without turning
+## fifty umbrellas into fifty materials. Cream is the common one; the red is the
+## accent that stops a row of them reading as one long stripe.
+const CANVAS_CREAM := Color(0.855, 0.815, 0.735)
+const CANVAS_RED := Color(0.660, 0.285, 0.235)
+const CANVAS_TILE := 0.4
+
+## Painted lettering on the Gaia sign frames. Off-white rather than pure: it sits
+## against a bright sky and pure white would clip through the tonemapper's
+## shoulder before the letterforms could read.
+const SIGN_FACE := Color(0.900, 0.885, 0.845)
+
+static var _canvas_two_sided: Dictionary = {}
+
 static var _foliage_two_sided: Dictionary = {}
 
 ## Distant reaches drop out of the shadow pass; see the header.
@@ -141,6 +166,18 @@ func leaf_lit() -> MeshBaker:
 
 func timber() -> MeshBaker:
 	return baker(timber_mat())
+
+
+func cooperage() -> MeshBaker:
+	return baker(cooperage_mat())
+
+
+func canvas(warm: bool = false) -> MeshBaker:
+	return baker(canvas_mat(CANVAS_RED if warm else CANVAS_CREAM))
+
+
+func sign_face() -> MeshBaker:
+	return baker(sign_face_mat())
 
 
 func triangle_count() -> int:
@@ -211,6 +248,30 @@ static func dark_mat() -> StandardMaterial3D:
 
 static func timber_mat() -> StandardMaterial3D:
 	return ToonFactory.wood(TIMBER, TIMBER_TILE)
+
+
+static func cooperage_mat() -> StandardMaterial3D:
+	return ToonFactory.wood(COOPERAGE, COOPERAGE_TILE)
+
+
+## Awning and parasol cloth. Culling is OFF for the same reason the foliage is:
+## a canopy is a single-thickness sheet, and a back-face-culled one disappears
+## the moment the camera drops under its lip — which from a bridge deck twelve
+## metres above the quay is exactly what happens to the near ones.
+static func canvas_mat(color: Color) -> StandardMaterial3D:
+	var cached: StandardMaterial3D = _canvas_two_sided.get(color)
+	if cached != null:
+		return cached
+	var m: StandardMaterial3D = ToonFactory.cloth(color, CANVAS_TILE).duplicate()
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_canvas_two_sided[color] = m
+	return m
+
+
+## Painted sign lettering. Flat and chalky: it is house paint on a steel plate,
+## and any specular on it at eighty metres is a sparkle, not a highlight.
+static func sign_face_mat() -> StandardMaterial3D:
+	return ToonFactory.plaster(SIGN_FACE, 0.9)
 
 
 ## Foliage. Culling is OFF: canopies and ivy are built from thin shells and open

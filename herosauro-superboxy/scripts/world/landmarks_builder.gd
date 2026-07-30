@@ -1039,12 +1039,17 @@ static func _lodge_sign(batch: Batch, at: Transform3D, spec: LodgeSpec, ridge_y:
 		return
 	# Centre the seven-cell cap height between the frame's two rails.
 	var y0 := ridge_y + 0.2 + (spec.sign_height - 0.2 - cell * 7.0) * 0.5
-	_sign_text(batch.baker(Batch.sign_face()), at, text, -text_w * 0.5 + cell * 0.5, y0, cell)
+	sign_text(batch.baker(Batch.sign_face()), at, text, -text_w * 0.5 + cell * 0.5, y0, cell)
 
 
 ## Lay out a string in 5x7 cells as quads, merging each row's runs so a letter
 ## costs a dozen triangles instead of thirty-five.
-static func _sign_text(b: MeshBaker, at: Transform3D, text: String, x0: float, y0: float,
+##
+## Public because the port houses' lettering is not only on their own roofs: the
+## Gaia bank carries the same names on standing frames up the hillside, and
+## quay_kit.gd builds those. One alphabet in the project, one implementation of
+## it, and callers hand over whatever MeshBaker they want the glyphs in.
+static func sign_text(b: MeshBaker, at: Transform3D, text: String, x0: float, y0: float,
 		cell: float) -> void:
 	var face := at * Transform3D(Basis(), Vector3(0.0, 0.0, 0.06))
 	var pen := x0

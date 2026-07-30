@@ -21,8 +21,22 @@ const RigScript := preload("res://scripts/world/lighting_rig.gd")
 ## (porto_sky.gdshader through LIGHT0_*, lighting_rig.gd's fill derivation, and
 ## water_wave.gdshader's glint). If the scene's sun moves and this is not updated,
 ## the check below fails, which is the point.
-const SUN_FROM := Vector3(0.54501, 0.77715, 0.31466)
-const SUN_ELEVATION_DEG := 51.0
+const SUN_FROM := Vector3(0.337181, 0.559193, 0.757364)
+const SUN_ELEVATION_DEG := 34.0
+## Azimuth of that vector, degrees east of +x. Checked separately from the elevation
+## because Round 2 moved BOTH and they buy different things: the elevation buys shadow
+## length, the azimuth buys shadow DIRECTION across a deck that runs along x, plus 2.4x
+## the key on the ironwork's broad +-z faces.
+const SUN_AZIMUTH_DEG := 66.0
+## What the re-key exists for, and therefore the thing worth asserting rather than
+## describing. Parapet height above the footway it stands on, in metres.
+const PARAPET_HEIGHT := 1.20
+## Footway width from the kerb line to the parapet: bridge_arena.gd's
+## WALKWAY_OUTER - ROADWAY_HALF. A parapet shadow shorter than this dies on the
+## pavement, invisible from a deck-level camera, which is exactly the defect the
+## re-key is for.
+const FOOTWAY_WIDTH := 1.55
+const CLOUD_SHADER_PATH := "res://assets/shaders/soft_cloud.gdshader"
 const ARENA_PATH := "res://scenes/world/bridge_arena.tscn"
 ## The deck surface: the single most-looked-at material in the game, and the one the
 ## tonemap's exposure is graded against.
@@ -93,6 +107,19 @@ func _check_shaders() -> void:
 	# shots and this shader had no parse check at all before this pass.
 	var wave: Shader = load(WATER_SHADER_PATH)
 	_uniforms("water_wave.gdshader", wave, 14)
+
+	# The clouds are a shader now rather than a StandardMaterial3D, for the reasons at
+	# the top of soft_cloud.gdshader. Its sun_direction default is only a compile-time
+	# placeholder -- sky_background.gd overwrites it from the real SunLight at load --
+	# but a placeholder that is silently wrong is how Mat_river ended up two rounds
+	# stale, so it is checked exactly as the water shader's is.
+	var cloud: Shader = load(CLOUD_SHADER_PATH)
+	_uniforms("soft_cloud.gdshader", cloud, 7)
+	var cloud_sun := _shader_vec3_default(cloud.code, "sun_direction")
+	print("  cloud sun_direction default %s" % str(cloud_sun.snapped(Vector3.ONE * 0.001)))
+	if cloud_sun.distance_to(SUN_FROM) > 0.01:
+		_fail("soft_cloud.gdshader's sun_direction default %s is not the scene's sun %s"
+				% [str(cloud_sun), str(SUN_FROM)])
 	# The glint direction is a copy of the sun, and a copy is a thing that goes stale.
 	# Read out of the SOURCE, not out of the RenderingServer: headless runs the dummy
 	# backend, where shader_get_parameter_default() returns null for everything.
@@ -169,7 +196,31 @@ func _check_sun() -> void:
 		if absf(elev - SUN_ELEVATION_DEG) > 1.0:
 			_fail("sun elevation %.1f deg, not the %.1f the comments claim"
 					% [elev, SUN_ELEVATION_DEG])
-		# Warm WHITE, not orange. A 5400 K sun has R-B around 0.12; the 3200 K
+		var azim := rad_to_deg(atan2(from.z, from.x))
+		print("  azimuth      %.1f deg east of +x (want %.1f)" % [azim, SUN_AZIMUTH_DEG])
+		if absf(azim - SUN_AZIMUTH_DEG) > 2.0:
+			_fail("sun azimuth %.1f deg, not the %.1f this stream's files are written for"
+					% [azim, SUN_AZIMUTH_DEG])
+
+		# The whole point of Round 2's re-key, and the reason it is an assertion rather
+		# than a paragraph. At 51 degrees a 1.2 m parapet threw 0.97 m of shadow, and
+		# with the old azimuth only half of that was ACROSS the deck -- so it landed
+		# inside its own 1.55 m footway, where a deck-level camera never sees it. That
+		# is Round 1's "nothing in frame is planted by a shadow the player can see",
+		# and it is a property of the light vector, so it belongs here.
+		var throw_total := PARAPET_HEIGHT / tan(deg_to_rad(elev))
+		var horiz := Vector2(from.x, from.z).length()
+		var across := throw_total * (absf(from.z) / maxf(horiz, 0.0001))
+		print("  shadow throw %.2f m total, %.2f m ACROSS the deck (footway %.2f m)"
+				% [throw_total, across, FOOTWAY_WIDTH])
+		if across < FOOTWAY_WIDTH:
+			_fail("a %.2f m parapet throws %.2f m across the deck; it dies on its own footway"
+					% [PARAPET_HEIGHT, across])
+		# The other side of the same requirement. The brief asks for a bright clear
+		# day, not a slide back toward the sunset this project already removed once.
+		if elev < 22.0:
+			_fail("elevation %.1f deg is sliding back toward sunset" % elev)
+		# Warm WHITE, not orange. A 5100 K sun has R-B around 0.15; the 3200 K
 		# golden-hour one had 0.46.
 		var warmth := color.r - color.b
 		print("  sun colour   R-B %+.3f (want < 0.2, i.e. warm white not orange)" % warmth)
@@ -183,14 +234,106 @@ func _check_sun() -> void:
 		# reaches the light.
 		var deck_mat: StandardMaterial3D = load(DECK_MATERIAL_PATH)
 		var a := deck_mat.albedo_color
-		var albedo := (a.r + a.g + a.b) / 3.0 / ToonFactory.DETAIL_ALBEDO_GAIN
+		# albedo_color is the value the BRIGHTEST texel reaches, because it carries the
+		# pre-division for both texture layers' means. Undo both to recover what the
+		# surface actually reflects on average. The second divisor is new this round --
+		# the deck now wears a surface-scale granite albedo map as well as the shared
+		# fine one, and forgetting it here would overstate the deck by 19%.
+		var map_gain := ToonFactory._albedo_map_gain(ToonFactory.Surface.GRANITE)
+		var mean_gain := (map_gain.r + map_gain.g + map_gain.b) / 3.0
+		var albedo := (a.r + a.g + a.b) / 3.0 / ToonFactory.DETAIL_ALBEDO_GAIN / mean_gain
 		var deck := energy * sin(deg_to_rad(elev)) * albedo
 		print("  sunlit deck  %.3f scene-referred (energy %.2f x sin(%.0f) x albedo %.3f)"
 				% [deck, energy, elev, albedo])
+		_check_fill_rig(color, energy, elev)
 		if deck < 0.28 or deck > 0.60:
 			_fail("sunlit deck at %.3f is outside the range the tonemap is graded for" % deck)
 	if not found:
 		_fail("no SunLight node in %s" % ARENA_PATH)
+
+
+## Round 1's single most precise finding, turned into arithmetic.
+##
+## It measured the deck cobble at normalised lit (1.00, 0.877, 0.949) against
+## normalised shadow (1.00, 0.818, 0.892) -- a shadow going REDDER than its own lit
+## stone under a sky at (66, 151, 211) -- and, in the same band, the cobble's
+## normal-map relief vanishing: standard deviation 8.5 outside, 2.4 inside.
+##
+## Both are properties of what is left when the key is occluded, so both can be
+## computed here from the rig's own constants rather than waited for in a render. Two
+## things are asserted about an UP-FACING surface (the deck, i.e. the surface the game
+## is played on) with the key removed:
+##
+##   1. CHROMA. The remaining light must be bluer than the key, or a shadow reads as
+##      a warm decal. This is a ratio, so it is checked as B/R.
+##   2. DIRECTIONALITY. At least two thirds of the remaining light must come from a
+##      directional source, because a normal map can only respond to light that has a
+##      direction. A shadow filled by ambient is a shadow you cannot see relief in,
+##      which is a black sticker.
+##
+## What this CANNOT see is SSIL and SDFGI, which are screen-space and world-space
+## respectively and have no closed form. They are the terms Round 1's warm shadow
+## actually came from -- the analytic sum below was already blue before this round --
+## so their cuts (ssil_intensity 0.60 -> 0.32, radius 4.0 -> 2.4, sdfgi_energy
+## 0.95 -> 0.80, bounce_feedback 0.3 -> 0.2) have to be confirmed in a render. The
+## numbers printed here are the floor those cuts are landing on top of.
+func _check_fill_rig(sun_color: Color, sun_energy: float, elev: float) -> void:
+	var env: Environment = load(ENV_PATH)
+	var sky_mat := env.sky.sky_material as ShaderMaterial
+	# ambient_light_sky_contribution is 0.92, so the ambient term is essentially the
+	# dome. upper_color is the band a horizontal surface sees most of.
+	var ambient_hue: Color = sky_mat.get_shader_parameter("upper_color")
+
+	# Energies off a live LightingRig rather than copied: three numbers duplicated here
+	# would be three numbers that stop tracking the thing they are checking, which is
+	# the same failure as Mat_river's stale sun.
+	var rig: Node3D = RigScript.new()
+	var up := Vector3.UP
+	var directional := Color(0.0, 0.0, 0.0)
+	for fill in [
+		[RigScript.SKY_FILL_DIR, RigScript.SKY_FILL_COLOR, rig.sky_fill_energy],
+		[RigScript.QUAY_BOUNCE_DIR, RigScript.QUAY_BOUNCE_COLOR, rig.bounce_energy],
+		[RigScript.RIBEIRA_BOUNCE_DIR, RigScript.RIBEIRA_BOUNCE_COLOR,
+			rig.ribeira_bounce_energy],
+	]:
+		var dir: Vector3 = fill[0]
+		var c: Color = fill[1]
+		var e: float = fill[2]
+		var ndl: float = maxf(dir.normalized().dot(up), 0.0)
+		directional += Color(c.r * e * ndl, c.g * e * ndl, c.b * e * ndl)
+
+	var flat := Color(ambient_hue.r, ambient_hue.g, ambient_hue.b) * env.ambient_light_energy
+	var shadow := directional + flat
+	var key := Color(sun_color.r, sun_color.g, sun_color.b) * sun_energy * sin(deg_to_rad(elev))
+
+	var shadow_ratio := shadow.b / maxf(shadow.r, 0.0001)
+	var key_ratio := key.b / maxf(key.r, 0.0001)
+	print("  shadow term  %s   B/R %.3f   (key B/R %.3f)"
+			% [shadow.to_html(false), shadow_ratio, key_ratio])
+	if shadow_ratio <= key_ratio:
+		_fail("shadow B/R %.3f is not cooler than the key's %.3f; shadows will read warm"
+				% [shadow_ratio, key_ratio])
+
+	var dir_lum := _luma(directional)
+	var total_lum := maxf(_luma(shadow), 0.0001)
+	print("  shadow fill  %.0f%% directional / %.0f%% flat  (want >= 65%% directional)"
+			% [dir_lum / total_lum * 100.0, _luma(flat) / total_lum * 100.0])
+	if dir_lum / total_lum < 0.65:
+		_fail("only %.0f%% of the shadow term has a direction; a normal map cannot respond to the rest"
+				% (dir_lum / total_lum * 100.0))
+	# The shadow also has to stay a shadow. Too much fill and the frame has no
+	# contrast at all, which is the failure the ambient cuts were reacting against.
+	var ratio := total_lum / maxf(_luma(key) + total_lum, 0.0001)
+	print("  shadow / lit %.2f  (want 0.12 - 0.40 on a bright clear day)" % ratio)
+	if ratio > 0.40:
+		_fail("shadows sit at %.2f of lit; that is not a bright day, it is an overcast one" % ratio)
+	if ratio < 0.12:
+		_fail("shadows sit at %.2f of lit; nothing in them will read at all" % ratio)
+	rig.free()
+
+
+func _luma(c: Color) -> float:
+	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
 
 # --- Materials ---------------------------------------------------------------
@@ -260,6 +403,72 @@ func _check_materials() -> void:
 					% [c.to_html(false), m.albedo_color.to_html(false),
 						ToonFactory.ALBEDO_FLOOR, ToonFactory.ALBEDO_CEILING])
 
+	# (d) SURFACE-SCALE ALBEDO, new this round, and the answer to two of Round 1's
+	# material findings: the deck cobble measured as one identical pinkish-mauve sett
+	# repeated, and the ironwork as mean RGB (11, 16, 27) with a standard deviation of
+	# 3. The fine layer is greyscale and gone by four metres, so neither could be fixed
+	# there.
+	for pair in [["stone", granite], ["cobblestone", ToonFactory.cobblestone()],
+			["iron", painted]]:
+		var m: StandardMaterial3D = pair[1]
+		if m.albedo_texture == null:
+			_fail("%s() has no surface-scale albedo map; its colour is one flat value"
+					% pair[0])
+
+	# The gain that keeps those maps a modulation rather than a tint. ToonFactory
+	# measures it off a 96-square rasterisation of the noise field; this recomputes it
+	# at 160, so a mismatch means either the factory's sample resolution has stopped
+	# converging or the descriptors on disk have been regenerated into something it is
+	# no longer reasoning about. Both have already happened once each this round --
+	# see the note above _albedo_map_gain in toon_factory.gd.
+	for entry in [[ToonFactory.Surface.GRANITE, "granite"],
+			[ToonFactory.Surface.COBBLE, "cobble"], [ToonFactory.Surface.IRON, "iron"]]:
+		var surface: int = entry[0]
+		var label: String = entry[1]
+		var gain := ToonFactory._albedo_map_gain(surface)
+		var measured: Variant = _map_mean(ToonFactory._ALBEDO_MAPS[surface])
+		if measured == null:
+			print("  %-10s gain %s   (texture not rasterised; mean unchecked)"
+					% [label, gain.to_html(false)])
+			continue
+		var mean: Color = measured
+		var net := Color(gain.r * mean.r, gain.g * mean.g, gain.b * mean.b)
+		print("  %-10s gain (%.3f %.3f %.3f) x measured mean (%.3f %.3f %.3f) = (%.3f %.3f %.3f)"
+				% [label, gain.r, gain.g, gain.b, mean.r, mean.g, mean.b, net.r, net.g, net.b])
+		for ch in [net.r, net.g, net.b]:
+			if absf(ch - 1.0) > 0.04:
+				_fail("%s albedo map's gain leaves a net %.3f; it tints every %s surface in the game"
+						% [label, ch, label])
+
+	# (e) THE DECK MATERIAL. It is hand-written rather than built by the factory, and
+	# Round 1 found out what that costs: detail_blend_mode was 2, the comment beside it
+	# said 2 was MUL, and BlendMode 2 is SUB. ALBEDO - detail went negative across the
+	# whole surface and clamped to black, which is why 14% of 01_deck_mid measured as
+	# constant RGB (0, 1, 2) at standard deviation 0.0. Asserted by NAME so the enum
+	# cannot be mis-copied again.
+	var deck: StandardMaterial3D = load(DECK_MATERIAL_PATH)
+	print("  deck .tres   detail blend %d (MUL is %d)  albedo %s  surface map %s"
+			% [deck.detail_blend_mode, BaseMaterial3D.BLEND_MODE_MUL,
+				deck.albedo_color.to_html(false),
+				"yes" if deck.albedo_texture != null else "NO"])
+	if deck.detail_blend_mode != BaseMaterial3D.BLEND_MODE_MUL:
+		_fail("the deck material's detail blend is %d, not MUL (%d); its albedo will clamp to black"
+				% [deck.detail_blend_mode, BaseMaterial3D.BLEND_MODE_MUL])
+	if not deck.detail_enabled or deck.detail_albedo == null:
+		_fail("the deck material lost its close-range detail layer")
+	if deck.albedo_texture == null:
+		_fail("the deck material has no surface-scale albedo map; the fascia is one flat value")
+	# Its albedo_color is hand-carried and has to match what the factory would compute.
+	var deck_gain := ToonFactory._albedo_map_gain(ToonFactory.Surface.GRANITE)
+	var authored := Color(0.283, 0.2788, 0.2708)
+	var expect := Color(
+		authored.r * ToonFactory.DETAIL_ALBEDO_GAIN * deck_gain.r,
+		authored.g * ToonFactory.DETAIL_ALBEDO_GAIN * deck_gain.g,
+		authored.b * ToonFactory.DETAIL_ALBEDO_GAIN * deck_gain.b)
+	if absf(deck.albedo_color.r - expect.r) > 0.01:
+		_fail("deck albedo %s does not carry both texture gains; expected %s"
+				% [deck.albedo_color.to_html(false), expect.to_html(false)])
+
 	# The cache is what collapses two hundred facades onto a handful of materials.
 	# Snapping metallic before the key is built is supposed to make it collapse
 	# harder, not softer: two call sites asking for different half-metals now share.
@@ -269,6 +478,43 @@ func _check_materials() -> void:
 			% ["yes" if a == b else "NO"])
 	if a != b:
 		_fail("metallic snap happens after the cache key, so it costs a draw call")
+
+
+## The per-channel mean of a NoiseTexture2D's ramped output, in LINEAR.
+##
+## Rebuilt from the descriptor's own Noise and Gradient rather than read off
+## tex.get_image(), and that is not stubbornness: NoiseTexture2D rasterises on the
+## WorkerThreadPool and get_image() returns null until it lands, so headless — which is
+## where this probe runs — would silently skip the check every single time.
+##
+## 160 x 160 against ToonFactory's 96 x 96, through ToonFactory.sample_noise() so the
+## frequency-scaling rule that keeps the sample over the whole field has exactly one
+## implementation. The check is therefore a convergence test on the factory's sample
+## resolution, and it has already earned its place twice this round: it caught a
+## uniform ramp integral that was 10% off on iron, and then a sample window that was 9%
+## off on cobble.
+##
+## Returns null only if the descriptor is missing a piece, in which case the caller
+## says so rather than passing vacuously.
+func _map_mean(tex: NoiseTexture2D) -> Variant:
+	if tex == null or tex.color_ramp == null:
+		return null
+	var size := 160
+	var img := ToonFactory.sample_noise(tex, size)
+	if img == null:
+		return null
+	var ramp: Gradient = tex.color_ramp
+	var sum := Color(0.0, 0.0, 0.0)
+	for y in size:
+		for x in size:
+			# The noise image is greyscale, so its red channel IS the field value, and
+			# that value is what NoiseTexture2D feeds the gradient. The albedo sampler
+			# carries a source_color hint, so what multiplies ALBEDO is the LINEAR
+			# value of an sRGB-authored stop.
+			var c := ramp.sample(img.get_pixel(x, y).r).srgb_to_linear()
+			sum += Color(c.r, c.g, c.b)
+	var n := float(size * size)
+	return Color(sum.r / n, sum.g / n, sum.b / n)
 
 
 # --- Environment -------------------------------------------------------------
@@ -394,6 +640,16 @@ func _check_fog(env: Environment) -> void:
 	print("  far parapet from mid-deck (50 m): %.1f%% haze" % (deck_total * 100.0))
 	if deck_total > 0.20:
 		_fail("%.0f%% haze across the playable deck" % (deck_total * 100.0))
+	# The near end of the same requirement, and it is the one that matters now that the
+	# ramp was pulled in from 40 m to 18 m to carry the aerial perspective. Everything
+	# playable happens inside 40 m of the camera.
+	var near := _depth(40.0, env.fog_depth_begin, env.fog_depth_end,
+			env.fog_depth_curve, env.fog_density)
+	var near_v := 1.0 - exp(-env.volumetric_fog_density * 40.0)
+	var near_total := near * (1.0 - near_v) + near_v
+	print("  playable corridor (40 m): %.1f%% haze" % (near_total * 100.0))
+	if near_total > 0.09:
+		_fail("%.1f%% haze at 40 m; the playable corridor is being veiled" % (near_total * 100.0))
 	# ...and the mid-ground has to actually sit back, or there is no depth cue at all
 	# and the bridge, the Ribeira and the hills read as one plane. 100 m is where the
 	# terraces are; 168 m is the near edge of the backdrop scan.
@@ -407,7 +663,13 @@ func _check_fog(env: Environment) -> void:
 	var far_total := far * (1.0 - far_v) + far_v
 	print("  Ribeira terraces (100 m): %.1f%%   backdrop (168 m): %.1f%%   step %+.1f points"
 			% [mid_total * 100.0, far_total * 100.0, (far_total - mid_total) * 100.0])
-	if mid_total < 0.08:
+	# 0.08 -> 0.16. Round 1 measured the background at twice the deck's luminance and
+	# 2.5x its saturation with only 12% of veil on it at 100 m, so the old floor was
+	# passing a frame whose focal hierarchy was inverted. Depth has to come from value
+	# compression and desaturation toward the sky -- explicitly NOT from more distance
+	# blur, which softens the arch (the identity anchor) while leaving the disposable
+	# background sharp.
+	if mid_total < 0.16:
 		_fail("only %.0f%% haze at 100 m; the mid-ground does not sit back" % (mid_total * 100.0))
 	if far_total - mid_total < 0.05:
 		_fail("only %.1f points of haze between the terraces and the backdrop"
