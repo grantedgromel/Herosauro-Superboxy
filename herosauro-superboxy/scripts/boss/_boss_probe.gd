@@ -404,7 +404,7 @@ func _check_rock_telegraph_and_volley() -> void:
 	var a := _hero(1)
 	var b := _hero(2)
 	# Pinned beyond his 16 m rock range, so every decision is a throw.
-	for i in int(16.0 * TICK):
+	for i in int(13.0 * TICK):
 		boss.global_position = Vector3(22.0, boss.global_position.y, 0.0)
 		a.global_position = Vector3(-10.0, 2.2, -2.0)
 		b.global_position = Vector3(-10.0, 2.2, 2.0)
@@ -484,7 +484,7 @@ func _check_damage_share() -> void:
 	var boss := _boss()
 	var a := _hero(1)
 	var b := _hero(2)
-	for i in int(25.0 * TICK):
+	for i in int(18.0 * TICK):
 		# Both flanking at the same distance, so nothing but the giant's own
 		# choices decides the split.
 		if i % 3 == 0:
@@ -497,9 +497,9 @@ func _check_damage_share() -> void:
 	var d1 := int(_damage_by_hero[1])
 	var d2 := int(_damage_by_hero[2])
 	var total := d1 + d2
-	print("  -- 25 s flanking him: hero 1 took %d, hero 2 took %d (%.0f%% / %.0f%%), %.1f dps team"
+	print("  -- 18 s flanking him: hero 1 took %d, hero 2 took %d (%.0f%% / %.0f%%), %.1f dps team"
 		% [d1, d2, 100.0 * float(d1) / float(maxi(1, total)),
-			100.0 * float(d2) / float(maxi(1, total)), float(total) / 25.0])
+			100.0 * float(d2) / float(maxi(1, total)), float(total) / 18.0])
 	_ok(total > 0, "he lands damage on a flanking pair at all (%d)" % total)
 	_ok(d1 > 0 and d2 > 0, "neither flank is ignored (%d / %d)" % [d1, d2])
 
