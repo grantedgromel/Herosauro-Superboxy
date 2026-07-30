@@ -89,9 +89,30 @@ assets/
   shaders/       water_wave.gdshader
   models/backdrop/   photogrammetry city scan (see ATTRIBUTION.md)
 tools/
-  shotrunner.{gd,tscn}   # headless screenshot harness, fixed vantage points
+  harness.py             # capture / diff / sheet / verify / check — the review loop
+  baseline.{gd,tscn}     # reproducible single-shot capture, one process per shot
+  shots.json             # the shot manifest, shared by the harness and the capture
+  profile.{gd,tscn}      # frame-cost distribution over a live fight + budget gate
   playtest.{gd,tscn}     # headless scripted playthrough
+  critic/RUBRIC.md       # what an adversarial reviewer scores frames against
 ```
+
+### Quality tooling
+
+Visual work is driven by a render-and-review loop rather than by inspection —
+see `docs/REVIEW_LOOP.md`, and `ARCHITECTURE.md` for the contract that makes
+parallel work on it safe.
+
+```bash
+python3 tools/harness.py check                          # pre-commit smoke
+python3 tools/harness.py capture --out /tmp/r1 --jobs 2 # render the shot set
+python3 tools/harness.py sheet /tmp/r1                  # one image to review
+python3 tools/harness.py diff /tmp/r1 /tmp/r2           # per-pixel regression gate
+```
+
+The gate is per-pixel, which only works because captures are reproducible:
+fixed timestep, seeded RNG, no wall-clock animation, and one fresh process per
+shot. `harness.py verify` proves that property rather than assuming it.
 
 ### Notable systems
 

@@ -171,6 +171,9 @@ const BARGE_UPPER := Color(0.72, 0.68, 0.60)
 var _flocks: Array[Dictionary] = []
 var _vessels: Array[Dictionary] = []
 var _rng := RandomNumberGenerator.new()
+## Seconds of simulated time since this node entered the tree. The animation
+## clock for every gull and vessel — see the note in _process().
+var _decor_time: float = 0.0
 
 
 func _ready() -> void:
@@ -185,12 +188,21 @@ func _ready() -> void:
 		_build_mist()
 
 
-func _process(_delta: float) -> void:
-	# Wall clock rather than accumulated delta, matching sky_background.gd, so the
-	# two sets of decor never drift apart and a frame spike cannot desync a flock.
-	var t := float(Time.get_ticks_msec()) / 1000.0
-	_animate_gulls(t)
-	_animate_vessels(t)
+func _process(delta: float) -> void:
+	# Accumulated delta, NOT Time.get_ticks_msec(). This used to read the wall
+	# clock "so the two sets of decor never drift apart", and accumulating does
+	# that strictly better: sky_background.gd integrates the same delta from the
+	# same first frame, so the two stay locked without either of them depending
+	# on how long the engine happened to spend booting.
+	#
+	# The wall clock also made every screenshot a different screenshot. Two runs
+	# reach this line milliseconds apart, so every gull and every rabelo sat
+	# somewhere new in every capture, and the per-pixel regression gate in
+	# tools/harness.py could never report anything but failure. See ARCHITECTURE.md,
+	# "Why the determinism rules exist".
+	_decor_time += delta
+	_animate_gulls(_decor_time)
+	_animate_vessels(_decor_time)
 
 
 # --- Gulls -------------------------------------------------------------------

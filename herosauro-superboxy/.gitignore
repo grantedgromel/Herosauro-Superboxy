@@ -19,6 +19,12 @@
 !/web/.gdignore
 !/web/.nojekyll
 
+# Harness scratch: captures, contact sheets and diff heatmaps are outputs of a
+# review round, not sources. They are large, they change on every run, and the
+# thing worth keeping from a round is the findings, not the pixels.
+/shots/
+tools/__pycache__/
+
 # OS cruft
 .DS_Store
 Thumbs.db

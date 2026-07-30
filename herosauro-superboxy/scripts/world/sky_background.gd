@@ -64,6 +64,9 @@ var _clouds: Array[Node3D] = []
 var _rabelos: Array[Node3D] = []
 var _gulls: Array[Node3D] = []
 var _gull_data: Array[Dictionary] = []
+## Seconds of simulated time since this node entered the tree — the animation
+## clock for the rabelos and gulls. See the note in _process().
+var _decor_time: float = 0.0
 
 
 const CityBackdropScene: PackedScene = preload("res://scenes/world/city_backdrop.tscn")
@@ -244,9 +247,13 @@ func _process(delta: float) -> void:
 		if cloud.position.x > CLOUD_WRAP_MAX:
 			cloud.position.x = CLOUD_WRAP_MIN
 
-	# Ticks approximate the water shader's TIME, so hulls ride the same waves
-	# the river surface is showing.
-	var t := float(Time.get_ticks_msec()) / 1000.0
+	# Accumulated delta, NOT Time.get_ticks_msec(). It still approximates the
+	# water shader's TIME closely enough that hulls ride the waves the river
+	# surface is showing, and unlike the wall clock it is identical on every run
+	# — which is what lets tools/harness.py gate captures per pixel. river_life.gd
+	# integrates the same delta, so the two decor sets stay locked to each other.
+	_decor_time += delta
+	var t := _decor_time
 	for i in _rabelos.size():
 		var boat := _rabelos[i]
 		var wave := sin((boat.position.x + t * 0.5) * 0.18) + cos((boat.position.z + t * 0.4) * 0.234)
