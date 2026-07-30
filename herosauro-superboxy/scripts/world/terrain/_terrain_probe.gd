@@ -5,6 +5,7 @@ extends SceneTree
 ##   godot --headless --path . --script scripts/world/terrain/_terrain_probe.gd
 
 const TB := preload("res://scripts/world/terrain_builder.gd")
+const TerrainBatch := preload("res://scripts/world/terrain/terrain_batch.gd")
 
 ## Anything above this inside the bridge landing is standing in the arch.
 const WATER_LINE := -14.9
