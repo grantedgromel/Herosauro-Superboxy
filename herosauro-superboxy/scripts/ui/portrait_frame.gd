@@ -10,7 +10,12 @@ extends Control
 ## The frame is not decoration: it carries the character's colour, so the player
 ## learns "green cluster = me, amber banner = the giant" before reading a word.
 
-const RIM_WIDTH := 3
+## Thick on purpose. The rim is the character's colour and it is the piece the
+## player reads before any text, so it has to survive being 84 px across on a
+## screen full of sunlit granite. Three pixels was a border; six is a bezel.
+const RIM_WIDTH := 6
+## The ink stroke around the outside of the plate, under the colour rim.
+const PLATE_KEYLINE := 3
 
 var actor: int = UIStyle.Actor.HEROSAURO
 var accent: Color = UIStyle.HERO_GREEN
@@ -40,7 +45,9 @@ func _ready() -> void:
 	_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_art.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var inset := float(RIM_WIDTH + 2)
+	# Clear of the keyline AND the colour rim, or the crop's shoulders are cut
+	# off by the bezel it is supposed to sit inside.
+	var inset := float(RIM_WIDTH + PLATE_KEYLINE + 2)
 	_art.offset_left = inset
 	_art.offset_top = inset
 	_art.offset_right = -inset
@@ -50,6 +57,12 @@ func _ready() -> void:
 	_rim = Panel.new()
 	_rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Inset by the plate's keyline so both strokes are visible at once — a
+	# coloured rim drawn flush with a dark one just hides it.
+	_rim.offset_left = PLATE_KEYLINE
+	_rim.offset_top = PLATE_KEYLINE
+	_rim.offset_right = -PLATE_KEYLINE
+	_rim.offset_bottom = -PLATE_KEYLINE
 	_rim.add_theme_stylebox_override("panel", _rim_box)
 	add_child(_rim)
 
@@ -70,19 +83,25 @@ func _apply(which: int, resolution: int = 256) -> void:
 	if _art:
 		_art.texture = UIStyle.portrait_head(which, resolution)
 
-	# Plate: a dark wash tinted toward the character so the line art separates.
-	_plate_box.bg_color = UIStyle.SURFACE.lerp(accent, 0.16)
-	_plate_box.bg_color.a = 0.92
+	# Plate: an opaque ink wash tinted toward the character so the line art
+	# separates. Fully opaque now — over bright daylight, a 92% plate is a window
+	# onto whatever is blowing out behind the hero's face.
+	_plate_box.bg_color = UIStyle.SURFACE.lerp(accent, 0.22)
+	_plate_box.bg_color.a = 1.0
 	_plate_box.set_corner_radius_all(UIStyle.RADIUS_MD)
-	_plate_box.corner_detail = 12
-	_plate_box.set_border_width_all(0)
-	_plate_box.shadow_color = Color(0.01, 0.005, 0.02, 0.55)
-	_plate_box.shadow_size = 10
-	_plate_box.shadow_offset = Vector2(0, 4)
+	_plate_box.corner_detail = 16
+	# The dark keyline lives on the PLATE and the colour rim sits inside it, so
+	# the avatar reads as a coloured bezel set into an ink surround — two strokes,
+	# which is what stops a bright accent rim dissolving into a bright backdrop.
+	_plate_box.set_border_width_all(PLATE_KEYLINE)
+	_plate_box.border_color = UIStyle.KEYLINE
+	_plate_box.shadow_color = UIStyle.SHADOW
+	_plate_box.shadow_size = 14
+	_plate_box.shadow_offset = Vector2(0, 5)
 
 	_rim_box.bg_color = Color(0, 0, 0, 0)
 	_rim_box.set_corner_radius_all(UIStyle.RADIUS_MD)
-	_rim_box.corner_detail = 12
+	_rim_box.corner_detail = 16
 	_rim_box.set_border_width_all(RIM_WIDTH)
 	_rim_box.border_color = accent.lerp(UIStyle.TEXT_PRIMARY, 0.25)
 

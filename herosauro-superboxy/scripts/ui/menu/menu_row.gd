@@ -19,21 +19,29 @@ signal value_changed(index: int)
 
 # --- Metrics -----------------------------------------------------------------
 
-const TEXT_PX := 25
-const PILL_PX := 13
-const MARKER_WIDTH := 5.0
-const MARKER_INSET := 4.0
-const FOCUS_SHIFT := 12.0        # how far the content slides right when focused
+const TEXT_PX := 27
+const PILL_PX := 14
+const MARKER_WIDTH := 8.0
+const MARKER_INSET := 8.0
+const FOCUS_SHIFT := 14.0        # how far the content slides right when focused
 const SHIFT_TIME := 0.16
-const PILL_GAP := 6
-const PAD_LEFT := 22.0
-const PAD_RIGHT := 18.0
+const PILL_GAP := 7
+const PAD_LEFT := 30.0
+const PAD_RIGHT := 20.0
 
 # --- Colour ------------------------------------------------------------------
+#
+# Every row is a PHYSICAL PLATE, not a word with a hover wash behind it. The
+# backdrop is now bright saturated daylight and the menu column runs straight
+# down the middle of it, so an 11% tint that read as a highlight over a dim
+# sunset reads over noon as nothing at all. Idle rows carry a substantial ink
+# slab; the focused one goes solid and gold-lit and gains a heavier keyline, so
+# the selection is a change of material rather than a change of opacity.
 
-const IDLE_TEXT := Color(0.86, 0.82, 0.78, 0.82)
-const HOT_FILL := Color(1.0, 0.86, 0.62, 0.11)
-const DOWN_FILL := Color(1.0, 0.86, 0.62, 0.18)
+const IDLE_TEXT := Color(0.80, 0.86, 0.93, 0.92)
+const IDLE_FILL := Color(0.055, 0.118, 0.192, 0.80)
+const HOT_FILL := Color(0.106, 0.208, 0.322, 0.96)
+const DOWN_FILL := Color(0.153, 0.278, 0.42, 0.98)
 
 var id: StringName = &""
 var kind: int = Kind.ACTION
@@ -67,7 +75,11 @@ func setup(row_id: StringName, caption: String, row_kind: int = Kind.ACTION,
 	var mk := StyleBoxFlat.new()
 	mk.bg_color = UIStyle.GOLD
 	mk.set_corner_radius_all(int(MARKER_WIDTH / 2.0))
-	mk.corner_detail = 6
+	mk.corner_detail = 10
+	# The marker gets the same ink keyline as everything else in the kit. A bare
+	# gold bar against a bright river is a smear; a keylined one is a part.
+	mk.set_border_width_all(2)
+	mk.border_color = UIStyle.KEYLINE
 	_marker.add_theme_stylebox_override("panel", mk)
 	_marker.modulate.a = 0.0
 	add_child(_marker)
@@ -92,25 +104,32 @@ func setup(row_id: StringName, caption: String, row_kind: int = Kind.ACTION,
 	_refresh()
 
 
-## Only `focus` carries the highlight fill, and `hover` is deliberately empty.
-## Button draws the focus box ON TOP of whichever of normal/hover/pressed applies
-## rather than instead of it, so putting the same fill on both would make a
-## moused row (which takes focus on hover) exactly twice as bright as a
-## keyboarded one. Pressed still stacks, which is what a press should do.
+## `normal` carries the idle slab; `focus` carries the lit one and `hover` is
+## deliberately empty. Button draws the focus box ON TOP of whichever of
+## normal/hover/pressed applies rather than instead of it, so putting the same
+## fill on both would make a moused row (which takes focus on hover) exactly
+## twice as bright as a keyboarded one. Pressed still stacks, which is what a
+## press should do — and because the lit fill is opaque, stacking it over the
+## idle slab is free rather than additive.
 func _style() -> void:
-	add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	add_theme_stylebox_override("normal", _fill(IDLE_FILL, 2, UIStyle.KEYLINE, 0.0))
 	add_theme_stylebox_override("hover", StyleBoxEmpty.new())
-	add_theme_stylebox_override("focus", _fill(HOT_FILL))
-	add_theme_stylebox_override("pressed", _fill(DOWN_FILL))
+	add_theme_stylebox_override("focus", _fill(HOT_FILL, 4, UIStyle.KEYLINE, 6.0))
+	add_theme_stylebox_override("pressed", _fill(DOWN_FILL, 4, UIStyle.KEYLINE, 2.0))
 	add_theme_stylebox_override("disabled", StyleBoxEmpty.new())
 
 
-func _fill(c: Color) -> StyleBoxFlat:
+func _fill(c: Color, border: int, rim: Color, lift: float) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = c
 	sb.set_corner_radius_all(UIStyle.RADIUS_MD)
-	sb.corner_detail = 10
-	sb.set_border_width_all(0)
+	sb.corner_detail = 16
+	sb.set_border_width_all(border)
+	sb.border_color = rim
+	if lift > 0.0:
+		sb.shadow_color = UIStyle.SHADOW
+		sb.shadow_size = int(lift * 2.0)
+		sb.shadow_offset = Vector2(0, lift)
 	return sb
 
 
@@ -143,20 +162,22 @@ func _paint_pills() -> void:
 		var on := i == index
 		var tint: Color = _pill_colors[i]
 		var sb := StyleBoxFlat.new()
-		sb.bg_color = tint if on else Color(1.0, 0.92, 0.82, 0.06)
+		sb.bg_color = tint if on else UIStyle.BASE
 		sb.set_corner_radius_all(UIStyle.RADIUS_SM)
-		sb.corner_detail = 8
-		sb.set_border_width_all(1)
-		sb.border_color = tint.lightened(0.25) if on else UIStyle.HAIRLINE
+		sb.corner_detail = 12
+		# Both states get the ink keyline, so the unselected pills are still
+		# objects sitting in the row rather than ghosts of the selected one.
+		sb.set_border_width_all(3)
+		sb.border_color = UIStyle.KEYLINE
 		sb.content_margin_left = UIStyle.SPACE_SM
 		sb.content_margin_right = UIStyle.SPACE_SM
-		sb.content_margin_top = 3
-		sb.content_margin_bottom = 3
+		sb.content_margin_top = 4
+		sb.content_margin_bottom = 4
 		_pills[i].add_theme_stylebox_override("panel", sb)
 		_pill_labels[i].add_theme_color_override("font_color",
 				UIStyle.BASE if on else UIStyle.TEXT_DISABLED)
-		# The selected pill loses its outline: dark text on a bright gold chip
-		# does not need one, and keeping it just makes the letters muddy.
+		# The selected pill loses its outline: dark text on a bright chip does
+		# not need one, and keeping it just makes the letters muddy.
 		_pill_labels[i].add_theme_constant_override("outline_size", 0 if on else 2)
 
 

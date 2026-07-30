@@ -1,12 +1,13 @@
 extends PlayerBase
 ## Super Boxy: the nimble brawler in a green hoodie, denim overalls, red mask,
-## cape and boxing gloves. His signature move is the Boxy Dash — a short, fast,
-## gravity-defying lunge that bonks the boss for big combo damage, throwing a
-## punch as he connects.
+## cape and boxing gloves — PLAYER TWO. His signature move is the Boxy Dash: a
+## short, fast, gravity-defying lunge that bonks the boss for big combo damage,
+## throwing a punch as he connects.
 ##
-## NOT SPAWNED in the solo build (main.gd only builds Herosauro). Kept intact and
-## compiling as the second playable hero, and as the reference implementation of
-## PlayerBase._custom_locomotion.
+## The close-range, fast half of the pair against Herosauro's reach: a quicker,
+## lighter jab, a shorter cooldown on the special, and a special that has to be
+## in the giant's face to do anything — which is what makes the two heroes want
+## to stand in different places.
 ##
 ## Visual is a Meshy-generated, RIGGED + ANIMATED glTF (walk / run / punch),
 ## driven by PlayerBase's AnimationTree.
@@ -16,6 +17,11 @@ const DASH_DURATION := 0.25
 const DASH_DAMAGE := 25
 const DASH_HIT_RANGE := 5.0
 const GHOST_INTERVAL := 0.06
+## How hard the frame kicks when the dash connects. Well above the basic jab's
+## 0.16 — this is the biggest single thing either hero does to the giant, and the
+## impact contract says every hit gets a camera response in proportion.
+const DASH_SHAKE := 0.55
+const DASH_SHAKE_TIME := 0.26
 
 const DashTrailScene: PackedScene = preload("res://scenes/fx/dash_trail.tscn")
 const SuperBoxyModel: PackedScene = preload("res://assets/models/superboxy.glb")
@@ -50,6 +56,9 @@ func _build_visuals() -> void:
 	model.scale = Vector3.ONE * MODEL_SCALE
 	model.position.y = MODEL_Y
 	_model_root.add_child(model)
+	# The GLB ships albedo only — no normal/roughness/metallic. Same treatment
+	# Herosauro gets, or Boxy reads as a flat decal next to a hero who does not.
+	ToonFactory.upgrade_glb_materials(model)
 	# "punch" substring-matches the model's punch clip — baked as "punch1" (the
 	# "Punch Combo 1" animation). Both the basic attack and the dash play it.
 	# No "idle" key: the art has none, so PlayerBase synthesizes one from "walk".
@@ -63,6 +72,11 @@ func _perform_ability() -> void:
 	_ghost_accum = 0.0
 	AudioManager.play_dash()
 	play_action_anim("ability", 0.5)   # throw a punch as he dashes in
+	# The lunge itself: a hard horizontal squash, so the body flattens into the
+	# direction of travel before the ghosts start. PlayerBase has already applied
+	# the generic anticipation; this is the extra Boxy gets for launching himself.
+	_kick_squash(-0.14)
+	GameManager.request_shake(0.10, 0.14)
 
 
 func _custom_locomotion(delta: float) -> bool:
@@ -84,13 +98,34 @@ func _custom_locomotion(delta: float) -> bool:
 				var dx := here.x - there.x
 				var dz := here.z - there.z
 				if sqrt(dx * dx + dz * dz) < DASH_HIT_RANGE:
-					GameManager.damage_boss(DASH_DAMAGE, 2)
-					if boss.has_method("nudge"):
-						boss.nudge(_dash_dir, 1.2)
-					GameManager.hit_stop(0.06)
-					_hit_boss = true
+					_land_dash(boss)
+
+		if _dash_time <= 0.0:
+			# Follow-through on the way out of the lunge: the body springs back
+			# past neutral rather than simply stopping being squashed.
+			_kick_squash(0.16)
 		return true
 	return false
+
+
+## The dash connecting is the pair's biggest single hit, so it carries all five
+## parts of the impact contract: the ghost trail and the giant's own hit reaction
+## are the visual, this is the audio, the hit-stop and the camera, and the UI
+## picks it up from GameManager.boss_damaged.
+func _land_dash(boss: Node) -> void:
+	GameManager.damage_boss(DASH_DAMAGE, player_id)
+	if boss.has_method("nudge"):
+		boss.nudge(_dash_dir, 1.2)
+	AudioManager.play_super_boxy_hit()
+	GameManager.hit_stop(0.06)
+	GameManager.request_shake(DASH_SHAKE, DASH_SHAKE_TIME)
+	_hit_boss = true
+
+
+func _cancel_actions() -> void:
+	_dash_time = 0.0
+	_hit_boss = false
+	_ghost_accum = 0.0
 
 
 func _spawn_ghost() -> void:

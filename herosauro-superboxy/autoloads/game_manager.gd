@@ -7,6 +7,12 @@ extends Node
 ## All cross-cutting game events flow through this node's signals so that
 ## entities and UI stay decoupled: gameplay nodes CALL the mutator methods
 ## (damage_boss, damage_player, ...) and everyone else REACTS to the signals.
+##
+## TWO HEROES. Health, combo and score attribution are all keyed by `player_id`
+## (1 = Herosauro, 2 = Super Boxy), and `active_player_ids()` is the single place
+## that decides which of them a given session actually fields. In co-op a hero at
+## zero health is DOWN and comes back via `revive_player()`; the run ends only
+## when no hero is left standing.
 
 signal state_changed(new_state: int)
 signal game_started

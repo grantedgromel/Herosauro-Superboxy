@@ -8,9 +8,17 @@ extends Control
 ## ring snaps to a full gold circle, throws one expanding pulse, and then keeps a
 ## slow breathing glow until the ability is spent again.
 
-const RING_WIDTH := 6.0
+## Thick enough that the sweep is a moulded band rather than a drawn line. The
+## dial is 62 px across in the HUD, so a 6 px ring was 10% of its diameter and
+## disappeared against a bright frame; 9 px is a machined collar.
+const RING_WIDTH := 8.0
+## The ink keyline drawn around the disc and the ring, in the same weight the
+## rest of the kit uses.
+const KEY_WIDTH := 3.0
 const READY_FLASH_TIME := 0.45
-const ARC_POINTS := 48
+## 64 rather than 48: at RING_WIDTH the facets of a 48-segment circle are
+## visible on the outer edge of the arc.
+const ARC_POINTS := 64
 
 var accent: Color = UIStyle.GOLD
 var glyph: String = "E"
@@ -34,7 +42,20 @@ func _ready() -> void:
 	_glyph_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_glyph_label.offset_bottom = -2.0
 	add_child(_glyph_label)
+	resized.connect(_fit_glyph)
+	_fit_glyph()
 	set_process(true)
+
+
+## The key cap inside the ring is sized off the dial, not off the type scale.
+## The ring and its keyline eat a fixed number of pixels, so a glyph at a fixed
+## step fits a 68 px dial and collides with the collar on a 48 px one.
+func _fit_glyph() -> void:
+	if _glyph_label == null:
+		return
+	var px := maxi(13, roundi(minf(size.x, size.y) * 0.32))
+	_glyph_label.add_theme_font_size_override("font_size", px)
+	_glyph_label.add_theme_constant_override("outline_size", maxi(3, px / 5))
 
 
 ## `key` is the binding shown inside the ring (e.g. "E"). `tint` colours the
@@ -89,33 +110,40 @@ func _draw() -> void:
 	if r <= 4.0:
 		return
 
-	# Drop shadow, then the recessed disc the ring sits in.
-	draw_circle(c + Vector2(0, 3), r, Color(0.01, 0.005, 0.02, 0.45))
-	draw_circle(c, r, Color(0.07, 0.05, 0.10, 0.94))
-	draw_arc(c, r - 0.5, 0.0, TAU, ARC_POINTS, UIStyle.HAIRLINE, 1.0, true)
+	# Drop shadow, then the ink keyline, then the recessed disc the ring sits in.
+	# The keyline is drawn as a filled circle UNDER the face rather than as an
+	# arc over it, so the outer edge stays perfectly round at any radius.
+	draw_circle(c + Vector2(0, 4), r, UIStyle.SHADOW)
+	draw_circle(c, r, UIStyle.KEYLINE)
+	draw_circle(c, r - KEY_WIDTH, UIStyle.BASE)
 
-	var ring_r := r - RING_WIDTH * 0.5 - 2.0
+	var ring_r := r - KEY_WIDTH - RING_WIDTH * 0.5 - 2.0
 
-	# Empty track.
-	draw_arc(c, ring_r, 0.0, TAU, ARC_POINTS, Color(0, 0, 0, 0.45), RING_WIDTH, true)
+	# Empty track, sunk into the face.
+	draw_arc(c, ring_r, 0.0, TAU, ARC_POINTS, Color(0, 0, 0, 0.55), RING_WIDTH, true)
 
 	# Sweep, clockwise from twelve o'clock.
 	if _shown > 0.001:
 		var start := -PI * 0.5
-		var col := accent if _was_ready else accent.lerp(UIStyle.TEXT_SECONDARY, 0.38)
+		var col := accent if _was_ready else accent.lerp(UIStyle.TEXT_DISABLED, 0.45)
 		draw_arc(c, ring_r, start, start + TAU * _shown, ARC_POINTS, col, RING_WIDTH, true)
+		# A lighter band along the outer half of the sweep, the same trick the
+		# health bar's sheen uses: it turns a flat arc into a curved surface.
+		draw_arc(c, ring_r + RING_WIDTH * 0.26, start, start + TAU * _shown, ARC_POINTS,
+			Color(minf(1.0, col.r + 0.26), minf(1.0, col.g + 0.26), minf(1.0, col.b + 0.26), 0.7),
+			RING_WIDTH * 0.34, true)
 
 	# Inner face so the glyph has something to sit on.
-	draw_circle(c, ring_r - RING_WIDTH * 0.5 - 1.0, Color(0.10, 0.07, 0.14, 0.92))
+	draw_circle(c, ring_r - RING_WIDTH * 0.5 - 1.5, UIStyle.SURFACE_RAISED)
 
 	if _was_ready:
 		# Slow breathing halo — the "you can use this" state.
 		var breathe := 0.5 + 0.5 * sin(_pulse * 3.4)
-		draw_arc(c, r - 1.0, 0.0, TAU, ARC_POINTS,
-			Color(accent.r, accent.g, accent.b, 0.12 + 0.22 * breathe), 2.0, true)
+		draw_arc(c, r + 2.0, 0.0, TAU, ARC_POINTS,
+			Color(accent.r, accent.g, accent.b, 0.16 + 0.30 * breathe), 3.0, true)
 
 	if _ready_flash > 0.0:
 		# One expanding ring at the instant it comes off cooldown.
 		var k := 1.0 - _ready_flash
-		draw_arc(c, r + 10.0 * k, 0.0, TAU, ARC_POINTS,
-			Color(accent.r, accent.g, accent.b, 0.75 * _ready_flash), 3.0, true)
+		draw_arc(c, r + 14.0 * k, 0.0, TAU, ARC_POINTS,
+			Color(accent.r, accent.g, accent.b, 0.85 * _ready_flash), 4.0, true)

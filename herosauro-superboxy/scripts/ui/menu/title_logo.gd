@@ -1,22 +1,29 @@
 extends Control
 ## The game's logo lockup: two stacked display lines, a gold rule and a
-## letterspaced strapline, treated so it survives being laid over a bright
-## golden-hour sky.
+## letterspaced strapline, treated so it survives being laid over a bright,
+## saturated, MOVING midday sky. There is no tone behind it we can rely on: over
+## seventy-four seconds of camera move the same letter crosses blue sky, white
+## river glare and sunlit granite, so the lockup has to carry its own contrast.
 ##
-## Four things do that work, in order of how much they matter:
+## Five things do that work, in order of how much they matter:
 ##
-##   1. A hard drop shadow behind every display line. The outline UIStyle already
-##      puts on its titles holds an edge against mid tones; it does not hold one
-##      against a blown-out sun, and a displaced dark copy does.
-##   2. A heavy outline on top of that, sized off the font size so it stays
+##   1. A HARD INK KEYLINE around every letterform, drawn as its own pass. This
+##      is what makes the lockup a moulded sticker rather than coloured text: a
+##      comic logo is defined by the black line around it, and against a blue
+##      midday sky a warm outline alone has nothing to hold on to. It is a
+##      separate Label because Godot draws exactly one outline per Label, and the
+##      face needs its own, thinner, warmer one on top of this.
+##   2. A hard drop shadow behind that. The keyline holds the edge; the displaced
+##      dark copy is what gives the whole lockup thickness.
+##   3. A heavy outline on the face, sized off the font size so it stays
 ##      proportional when the lockup auto-fits down on a narrow window.
-##   3. A vertical warm gradient over the letterforms — pale at the top where the
+##   4. A vertical warm gradient over the letterforms — pale at the top where the
 ##      sky would catch them, deep amber at the baseline. This is the one part
 ##      that needs a shader, and it is written as a *multiplier* over the label's
 ##      own font colour rather than as an absolute fill, precisely so that
 ##      turning USE_SHINE_SHADER off degrades to flat UIStyle.GOLD and not to
 ##      white text or, worse, an unshaded magenta rectangle.
-##   4. A slow specular sweep across the lockup every few seconds. Cheap, and it
+##   5. A slow specular sweep across the lockup every few seconds. Cheap, and it
 ##      is what stops a static title screen reading as a screenshot.
 ##
 ## The lockup is left-aligned and stacked rather than centred on one line. Porto
@@ -46,8 +53,14 @@ const SIZE_STRAP := 20
 const GAP_LINES := -12.0          # display faces overlap slightly; Bangers has deep bearing
 const GAP_RULE := 22.0
 const GAP_STRAP := 12.0
-const RULE_HEIGHT := 3.0
-const SHADOW_OFFSET := Vector2(5.0, 6.0)
+const RULE_HEIGHT := 4.0
+const SHADOW_OFFSET := Vector2(6.0, 7.0)
+## Outline weights, as fractions of the font size. The keyline is the outer black
+## stroke that defines the letterform; the face's own rim sits inside it and is a
+## warm burnt amber rather than black, which is what gives the gold a lit edge
+## instead of a second dead one.
+const OUTLINE_KEYLINE := 0.15
+const OUTLINE_FACE := 0.075
 
 # --- Shine -------------------------------------------------------------------
 
@@ -132,21 +145,25 @@ func _ready() -> void:
 
 # --- Construction ------------------------------------------------------------
 
-## One display line: a dark displaced copy, then the lit face over it. Built as
-## two plain Labels rather than one Label with a shadow constant because Godot's
-## label shadow sits *under* the outline, which on a heavy outline like this one
-## makes it disappear entirely.
+## One display line, back to front: a dark displaced copy, the ink keyline, then
+## the lit face. Built as three plain Labels rather than one Label with a shadow
+## constant because Godot's label shadow sits *under* the outline (which on a
+## heavy outline makes it disappear entirely) and because a Label carries exactly
+## one outline, so the keyline and the face's own rim cannot share a node.
 func _display_row(text: String, size: int) -> Dictionary:
-	var ink := Color(0.04, 0.025, 0.06, 0.60)
-	var shadow := _face(text, size, ink, ink, false)
+	var drop := Color(0.02, 0.05, 0.09, 0.55)
+	var shadow := _face(text, size, drop, drop, false, OUTLINE_KEYLINE)
 	add_child(shadow)
-	var face := _face(text, size, UIStyle.GOLD, Color(0.05, 0.03, 0.07, 0.92),
-			USE_SHINE_SHADER)
+	var ink := _face(text, size, UIStyle.KEYLINE, UIStyle.KEYLINE, false, OUTLINE_KEYLINE)
+	add_child(ink)
+	var face := _face(text, size, UIStyle.GOLD, Color(0.35, 0.16, 0.03, 0.95),
+			USE_SHINE_SHADER, OUTLINE_FACE)
 	add_child(face)
-	return {"face": face, "shadow": shadow, "size": size, "px": size}
+	return {"face": face, "shadow": shadow, "ink": ink, "size": size, "px": size}
 
 
-func _face(text: String, size: int, color: Color, outline: Color, shaded: bool) -> Label:
+func _face(text: String, size: int, color: Color, outline: Color, shaded: bool,
+		outline_fraction: float) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -156,7 +173,7 @@ func _face(text: String, size: int, color: Color, outline: Color, shaded: bool) 
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_color_override("font_outline_color", outline)
-	l.add_theme_constant_override("outline_size", maxi(6, roundi(size * 0.11)))
+	l.add_theme_constant_override("outline_size", maxi(6, roundi(size * outline_fraction)))
 	if shaded:
 		var sh := Shader.new()
 		sh.code = SHINE_SHADER
@@ -193,13 +210,21 @@ func relayout(max_width: float, ui_scale: float) -> float:
 		var px := maxi(12, roundi(int(row["size"]) * ui_scale * fit))
 		var face: Label = row["face"]
 		var shadow: Label = row["shadow"]
-		for l: Label in [face, shadow]:
+		var ink: Label = row["ink"]
+		# The keyline passes keep the heavy stroke and the face keeps the light
+		# one, at every fitted size — a keyline that stops scaling with the type
+		# is the first thing that gives away an auto-fitted lockup.
+		for l: Label in [shadow, ink]:
 			l.add_theme_font_size_override("font_size", px)
-			l.add_theme_constant_override("outline_size", maxi(4, roundi(px * 0.11)))
+			l.add_theme_constant_override("outline_size", maxi(5, roundi(px * OUTLINE_KEYLINE)))
 			l.size = Vector2(max_width, px * 1.34)
+		face.add_theme_font_size_override("font_size", px)
+		face.add_theme_constant_override("outline_size", maxi(3, roundi(px * OUTLINE_FACE)))
+		face.size = Vector2(max_width, px * 1.34)
 		row["px"] = px
 		var offset := SHADOW_OFFSET * ui_scale * fit
 		face.position = Vector2(0.0, y)
+		ink.position = Vector2(0.0, y)
 		shadow.position = Vector2(0.0, y) + offset
 		y += px * 1.34 + GAP_LINES * ui_scale * fit
 

@@ -267,13 +267,13 @@ static func build_credits() -> Control:
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	column.add_child(_paragraph(
-			"A boss fight on the Ponte de Dom Luís I, at golden hour, over the Douro."))
+			"A boss fight on the Ponte de Dom Luís I, in the midday sun, over the Douro."))
 
 	column.add_child(_section("THE CAST"))
 	for actor in [UIStyle.Actor.HEROSAURO, UIStyle.Actor.SUPERBOXY, UIStyle.Actor.ADAMASTOR]:
 		var line := HBoxContainer.new()
 		line.add_theme_constant_override("separation", UIStyle.SPACE_MD)
-		line.add_child(UIStyle.chip(UIStyle.actor_color(actor), 12.0))
+		line.add_child(UIStyle.chip(UIStyle.actor_color(actor), 14.0))
 		var who := UIStyle.text(UIStyle.actor_name(actor), UIStyle.Scale.LABEL,
 				UIStyle.actor_color(actor), HORIZONTAL_ALIGNMENT_LEFT)
 		who.custom_minimum_size = Vector2(150, 0)
@@ -311,7 +311,7 @@ static func _section(heading: String) -> Control:
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(UIStyle.text(heading, UIStyle.Scale.LABEL, UIStyle.GOLD,
 			HORIZONTAL_ALIGNMENT_LEFT))
-	box.add_child(UIStyle.divider(1, 0.09))
+	box.add_child(UIStyle.divider(2, 0.18))
 	return box
 
 

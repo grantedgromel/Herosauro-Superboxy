@@ -66,6 +66,11 @@ var segments: int = 4
 ## Draws a distinct gold notch at this fraction (e.g. the phase-2 threshold).
 ## Negative disables it.
 var phase_marker: float = -1.0
+## Drains right-to-left instead of left-to-right. Set on player two's bar so the
+## co-op HUD is a true mirror: both heroes' health empties toward the outside of
+## the screen, away from the fight, rather than both draining the same way and
+## making one of the two panels read as a copy of the other.
+var mirrored: bool = false
 
 var _shown: float = 1.0
 ## Spring velocity of `_shown`, in bar-fractions per second.
@@ -301,15 +306,13 @@ func _draw() -> void:
 	# Chip bar. Hot orange and desaturated so it reads as "was here a moment ago"
 	# rather than as a second resource.
 	if _ghost > _shown + EPS:
-		var g := inner
-		g.size.x = inner.size.x * _ghost
+		var g := _slice(inner, _ghost)
 		_fill_box.bg_color = Color(1.0, 0.58, 0.26, 0.72)
 		draw_style_box(_fill_box, g)
 
 	# Main fill, plus a lighter band across its top so it curves.
 	if _shown > 0.001:
-		var f := inner
-		f.size.x = maxf(inner.size.x * _shown, 3.0)
+		var f := _slice(inner, _shown)
 
 		var body := live
 		if _shown <= LOW_RATIO:
@@ -329,8 +332,9 @@ func _draw() -> void:
 		# object with a front face, and it is the part the eye tracks when the
 		# spring overshoots.
 		if f.size.x > 6.0:
-			var cap := Rect2(Vector2(f.end.x - 4.0, f.position.y + 1.0), Vector2(4.0, f.size.y - 2.0))
-			draw_rect(cap, Color(1.0, 1.0, 1.0, 0.55))
+			var cap_x := f.position.x if mirrored else f.end.x - 4.0
+			draw_rect(Rect2(Vector2(cap_x, f.position.y + 1.0), Vector2(4.0, f.size.y - 2.0)),
+				Color(1.0, 1.0, 1.0, 0.55))
 
 		if _flash > 0.0:
 			_fill_box.bg_color = Color(1, 1, 1, 0.78 * _flash)
@@ -344,6 +348,15 @@ func _draw() -> void:
 	draw_line(whole.position + Vector2(pad + 3.0, 2.5),
 		whole.position + Vector2(whole.size.x - pad - 3.0, 2.5),
 		Color(1.0, 0.94, 0.82, 0.30), 2.0, true)
+
+
+## The filled part of `track` at `frac`, anchored to whichever end this bar
+## drains from. One helper so the chip bar and the real fill can never disagree
+## about which way round the widget is.
+func _slice(track: Rect2, frac: float) -> Rect2:
+	var w := maxf(track.size.x * frac, 3.0)
+	var x := track.end.x - w if mirrored else track.position.x
+	return Rect2(Vector2(x, track.position.y), Vector2(w, track.size.y))
 
 
 func _draw_notches(inner: Rect2) -> void:

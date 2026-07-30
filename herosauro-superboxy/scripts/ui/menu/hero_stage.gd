@@ -11,12 +11,12 @@ extends Control
 ## Each figure is three stacked copies of the same texture:
 ##
 ##   shadow  a dark displaced copy. Alpha-keyed line art dropped straight onto a
-##           photographic sunset reads as a sticker; a displaced dark copy is the
-##           cheapest thing that puts it in the scene, and it suits hand-drawn
-##           cartoon art in a way a soft blur would not.
-##   rim     a slightly enlarged copy in a warm tint, behind the body. The sun in
-##           this world is low and behind the Ribeira, so everything in the
-##           foreground is backlit and everything backlit has a hot edge.
+##           photographic daylight render reads as a sticker; a displaced dark
+##           copy is the cheapest thing that puts it in the scene, and it suits
+##           hand-drawn cartoon art in a way a soft blur would not.
+##   rim     a slightly enlarged copy in a hot near-white tint, behind the body.
+##           The sun is overhead and fierce, so every foreground figure carries a
+##           bright edge where it turns away from the camera.
 ##   body    the art itself, tinted.
 ##
 ## Motion is deliberately tiny. Two things drive it: a slow breath per figure on
@@ -59,12 +59,20 @@ const RESAMPLE_STEP := 32
 
 ## Adamastor sits in the sun's shadow side and reads as cut stone. Knocking him
 ## back in value is also what keeps the right half of the frame quiet enough for
-## the logo to hold the left.
-const ADAMASTOR_TINT := Color(0.50, 0.44, 0.60, 0.95)
-const ADAMASTOR_RIM := Color(1.00, 0.52, 0.22, 0.55)
+## the logo to hold the left. Cooled toward the sky rather than toward plum: at
+## noon the light that reaches a shadowed face is the blue sky, not a low sun.
+const ADAMASTOR_TINT := Color(0.46, 0.46, 0.62, 0.95)
+## Rims went from a low orange backlight to a hot near-white one. The sun is
+## overhead now, not behind the Ribeira — the edge it puts on a foreground
+## cut-out is the colour of the sun itself, and a warm-orange halo under midday
+## reads as the leftover of a grade nobody removed.
+const ADAMASTOR_RIM := Color(1.00, 0.88, 0.66, 0.50)
 const HERO_TINT := Color(1.0, 1.0, 1.0, 1.0)
-const HERO_RIM := Color(1.00, 0.80, 0.44, 0.60)
-const SHADOW_TINT := Color(0.05, 0.03, 0.08, 0.34)
+const HERO_RIM := Color(1.00, 0.96, 0.84, 0.62)
+## The contact pocket and the drop shadow are the DECK's shadow colour, so they
+## belong to the ink family the rest of the kit is built from rather than to the
+## old plum. Contact is what plants a cut-out; it is not decoration.
+const SHADOW_TINT := Color(0.02, 0.05, 0.09, 0.38)
 const SHADOW_OFFSET := Vector2(0.016, 0.010)   # in stage units, down and right
 ## The rim is a fixed width in screen pixels, not a percentage of the figure.
 ## Scaling it with the art would give Adamastor a fat halo and Super Boxy none,
@@ -114,8 +122,10 @@ func _build(actor: int, height: float, from_right: float, feet: float,
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(holder)
 
-	# A pocket of dusk under each figure. Without it a dark cut-out over a bright
-	# river has nothing to sit in and the silhouette shreds against the water.
+	# A pocket of deck shadow under each figure. Without it a cut-out over a
+	# sunlit river has nothing to sit in and the silhouette shreds against the
+	# water — and the RUBRIC counts an object floating on ambient as the single
+	# fastest way to read as amateur.
 	var pocket := TextureRect.new()
 	pocket.texture = _pocket_texture()
 	pocket.stretch_mode = TextureRect.STRETCH_SCALE

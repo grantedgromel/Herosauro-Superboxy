@@ -63,9 +63,12 @@ const LOGO_WIDTH_MAX := 620.0
 const LOGO_WIDTH_FRACTION := 0.46
 const COLUMN_WIDTH_MAX := 430.0
 const COLUMN_WIDTH_FRACTION := 0.34
-const LOGO_TO_LIST := 44.0
+const LOGO_TO_LIST := 40.0
 const HINTS_BASELINE := 58.0     # up from the bottom edge
-const LIST_BOTTOM_CLEAR := 92.0
+## Air kept under the column, above the hint row. Trimmed when the rows became
+## plates: the column got taller, and the clamp below was pushing it up into the
+## strapline to keep this gap, which is the wrong thing to protect.
+const LIST_BOTTOM_CLEAR := 74.0
 
 # --- Timing ------------------------------------------------------------------
 

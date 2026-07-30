@@ -197,6 +197,21 @@ const _HEAD_REGION := [
 	Rect2i(136, 0, 360, 360),    # Adamastor  (631 x 900)
 ]
 
+## Full-figure crops, also measured from alpha bounds.
+##
+## THE SUPER BOXY SHEET HAS TWO POSES ON IT — a front view at the top and a back
+## view under it, separated by a 26 px empty band. Scaling the raw sheet, which
+## is what every full-figure call site used to do, therefore drew Super Boxy at
+## half height with a second Super Boxy standing behind him: on the title screen,
+## and on the co-op victory card. Cropping to the front pose is the fix, and
+## every actor gets a measured region rather than only the one that needed it,
+## because "the sheet is the figure" is the assumption that caused this.
+const _FIGURE_REGION := [
+	Rect2i(6, 6, 276, 888),      # Herosauro  — one pose, full bleed
+	Rect2i(4, 3, 205, 425),      # Super Boxy — front pose only; back view at y 454
+	Rect2i(1, 6, 623, 886),      # Adamastor  — one pose
+]
+
 const _ACTOR_NAME := ["HEROSAURO", "SUPER BOXY", "ADAMASTOR"]
 const _ACTOR_EPITHET := [
 	"THE LITTLE DINO OF THE RIBEIRA",
@@ -367,7 +382,10 @@ static func plate(tint: Color = SURFACE, tint_amount: float = 0.0,
 	shell.clip_contents = true
 
 	var outer := StyleBoxFlat.new()
-	outer.bg_color = _ELEV_FILL[e].lerp(tint, tint_amount * 0.55)
+	# Lighter than the face. The shell is almost entirely covered by its own
+	# border and the inset face, so this only shows in the anti-aliased corner
+	# sliver — which is exactly where a raised lip would catch the light.
+	outer.bg_color = _ELEV_FILL[e].lightened(0.12).lerp(tint, tint_amount * 0.55)
 	outer.bg_color.a = maxf(_ELEV_FILL[e].a, 0.97)
 	outer.set_corner_radius_all(radius)
 	outer.corner_detail = 16
@@ -378,7 +396,7 @@ static func plate(tint: Color = SURFACE, tint_amount: float = 0.0,
 	outer.shadow_offset = Vector2(0, _ELEV_DROP[e])
 	shell.add_theme_stylebox_override("panel", outer)
 
-	# Inner face, inset by the keyline. Lighter than the shell so the keyline
+	# Inner face, inset by the keyline. Darker than the shell, so the keyline
 	# reads as a raised lip around a recessed face rather than as a drawn line.
 	var face := Panel.new()
 	face.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -388,41 +406,47 @@ static func plate(tint: Color = SURFACE, tint_amount: float = 0.0,
 	face.offset_top = inset
 	face.offset_right = -inset
 	face.offset_bottom = -inset
+	var face_radius := maxi(2, radius - _ELEV_BORDER[e])
 	var inner := StyleBoxFlat.new()
-	inner.bg_color = _ELEV_FILL[e].lightened(0.05).lerp(tint, tint_amount)
+	inner.bg_color = _ELEV_FILL[e].lerp(tint, tint_amount)
 	inner.bg_color.a = maxf(_ELEV_FILL[e].a, 0.97)
-	inner.set_corner_radius_all(maxi(2, radius - _ELEV_BORDER[e]))
+	inner.set_corner_radius_all(face_radius)
 	inner.corner_detail = 16
 	face.add_theme_stylebox_override("panel", inner)
 	shell.add_child(face)
 
-	# The bevel: a short warm gradient down from the top edge. Height is a third
-	# of the radius rather than a fixed number so it stays in proportion when the
-	# same factory is used for a 40 px pill and a 140 px hero panel.
-	var bevel := _bevel_strip(maxf(6.0, float(radius) * 0.75))
-	shell.add_child(bevel)
+	# Gloss over the top half and shade under the bottom quarter. Together they
+	# are the whole "moulded" read, and they are drawn as PANELS with per-corner
+	# radii rather than as a gradient rectangle for a specific reason: a gradient
+	# quad laid over a rounded plate paints the transparent corners too, which
+	# squares them off. A stylebox rounded on the top corners and square on the
+	# bottom follows the plate exactly.
+	face.add_child(_gloss(face_radius, 0.0, 0.52, Color(1.0, 0.96, 0.86, 0.13), true))
+	face.add_child(_gloss(face_radius, 0.76, 1.0, Color(0.0, 0.02, 0.05, 0.20), false))
 	return shell
 
 
-## The warm top-light band used by `plate()`. Separate so a hand-built widget
-## that cannot use the whole plate can still get the same lighting.
-static func _bevel_strip(height: float) -> TextureRect:
-	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 1.0])
-	grad.colors = PackedColorArray([HAIRLINE_STRONG, Color(1.0, 0.94, 0.82, 0.0)])
-	var gt := GradientTexture2D.new()
-	gt.gradient = grad
-	gt.width = 4
-	gt.height = 64
-	gt.fill_from = Vector2(0, 0)
-	gt.fill_to = Vector2(0, 1)
-	var tr := TextureRect.new()
-	tr.texture = gt
-	tr.stretch_mode = TextureRect.STRETCH_SCALE
-	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	tr.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	tr.offset_bottom = height
-	return tr
+## One half of a plate's shading. `top`/`bottom` are anchor fractions, so the
+## band keeps its proportion whatever height the plate is given.
+static func _gloss(radius: int, top: float, bottom: float, tint: Color,
+		round_top: bool) -> Panel:
+	var p := Panel.new()
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	p.anchor_left = 0.0
+	p.anchor_right = 1.0
+	p.anchor_top = top
+	p.anchor_bottom = bottom
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = tint
+	sb.corner_detail = 16
+	if round_top:
+		sb.corner_radius_top_left = radius
+		sb.corner_radius_top_right = radius
+	else:
+		sb.corner_radius_bottom_left = radius
+		sb.corner_radius_bottom_right = radius
+	p.add_theme_stylebox_override("panel", sb)
+	return p
 
 
 ## Legacy shape of `surface()`. Kept for screens that still pass a raw colour.
@@ -564,14 +588,14 @@ static func button(body: String, primary: bool = false,
 	b.add_theme_stylebox_override("focus", _btn_box(hover_fill, 7.0, RADIUS_MD))
 	b.add_theme_stylebox_override("disabled", _btn_box(SURFACE, 0.0, RADIUS_MD))
 
-	# The top-light band. Added as a child rather than as a border so it can be a
-	# gradient — a flat 2 px light line along the top reads as a stroke, and a
-	# gradient reads as a curved surface catching the sun.
-	var bevel := _bevel_strip(float(RADIUS_MD))
-	bevel.offset_left = 4.0
-	bevel.offset_right = -4.0
-	bevel.offset_top = 4.0
-	b.add_child(bevel)
+	# The gloss. Added as a child rather than as a border because a StyleBoxFlat
+	# has one border colour and a moulded key needs a dark keyline and a lit top
+	# face at the same time. Inset by the keyline so it never paints over it.
+	var gloss := _gloss(RADIUS_MD - 4, 0.0, 0.5, Color(1.0, 0.97, 0.90, 0.16), true)
+	gloss.offset_left = 4.0
+	gloss.offset_right = -4.0
+	gloss.offset_top = 4.0
+	b.add_child(gloss)
 
 	_add_hover_lift(b)
 	return b
@@ -669,6 +693,102 @@ static func key_cap(key: String) -> PanelContainer:
 	return p
 
 
+# --- Live bindings -----------------------------------------------------------
+#
+# Every control hint in the game reads the Input Map rather than restating it. A
+# hand-written key list is a lie waiting to happen — it is correct exactly until
+# someone rebinds something — and in TWO-PLAYER CO-OP it is a lie twice over,
+# because the two heroes are driven by two entirely different sets of hardware.
+# `InputManager.action_name(player, action)` is public for exactly this, and it
+# is the only thing that knows slot 2's actions carry a "p2_" prefix.
+
+## Xbox-layout names for JoyButton indices 0..14, and axis names for 0..5.
+## Spelled out rather than drawn as glyphs because neither font in this project
+## carries controller symbols, and a missing glyph on the web export (which has
+## no system font to fall back to) is a tofu box in a control hint.
+const PAD_BUTTONS := ["A", "B", "X", "Y", "View", "Guide", "Menu", "L3", "R3",
+		"LB", "RB", "D-Up", "D-Down", "D-Left", "D-Right"]
+const PAD_AXES := ["L-Stick", "L-Stick", "R-Stick", "R-Stick", "LT", "RT"]
+
+
+## One InputEvent as something a player can read. Empty for events with no useful
+## caption, which the callers drop.
+static func event_caption(ev: InputEvent) -> String:
+	if ev is InputEventKey:
+		var k := ev as InputEventKey
+		var code := k.physical_keycode if k.physical_keycode != 0 else k.keycode
+		var caption := OS.get_keycode_string(code)
+		# The keypad twins of Enter and the arrows say nothing a player needs.
+		return "" if caption.begins_with("Kp ") else caption
+	if ev is InputEventMouseButton:
+		match (ev as InputEventMouseButton).button_index:
+			MOUSE_BUTTON_LEFT:
+				return "LMB"
+			MOUSE_BUTTON_RIGHT:
+				return "RMB"
+			MOUSE_BUTTON_MIDDLE:
+				return "MMB"
+			_:
+				return ""
+	if ev is InputEventJoypadButton:
+		var i := int((ev as InputEventJoypadButton).button_index)
+		return PAD_BUTTONS[i] if i >= 0 and i < PAD_BUTTONS.size() else ""
+	if ev is InputEventJoypadMotion:
+		var axis := int((ev as InputEventJoypadMotion).axis)
+		return PAD_AXES[axis] if axis >= 0 and axis < PAD_AXES.size() else ""
+	return ""
+
+
+## What `actions` are actually bound to for local slot `player`, as captions.
+##
+## Keyboard and mouse first, then the pad. Reading the Input Map in declaration
+## order would interleave them — "W, L-Stick, A, S, D" — which is unreadable.
+## `per_action` caps how many captions each action contributes, so a compact hint
+## row can ask for one apiece while a full controls table asks for all of them.
+static func binding_caps(player: int, actions: Array, per_action: int = 0) -> PackedStringArray:
+	var keys := PackedStringArray()
+	var pads := PackedStringArray()
+	for bare in actions:
+		var action: StringName = InputManager.action_name(player, StringName(bare))
+		if not InputMap.has_action(action):
+			continue
+		var taken := 0
+		for ev in InputMap.action_get_events(action):
+			var cap := event_caption(ev)
+			if cap.is_empty():
+				continue
+			var into: PackedStringArray = pads if _is_pad_event(ev) else keys
+			if into.has(cap):
+				continue
+			into.append(cap)
+			taken += 1
+			if per_action > 0 and taken >= per_action:
+				break
+	for p in pads:
+		if not keys.has(p):
+			keys.append(p)
+	return keys
+
+
+static func _is_pad_event(ev: InputEvent) -> bool:
+	return ev is InputEventJoypadButton or ev is InputEventJoypadMotion
+
+
+## `LABEL [key][key]` — one captioned binding, for a hint row that has to show a
+## specific hero's real keys.
+static func binding_pair(caption: String, caps: PackedStringArray) -> HBoxContainer:
+	var pair := HBoxContainer.new()
+	pair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	pair.add_theme_constant_override("separation", SPACE_XS)
+	pair.add_child(text(caption, Scale.MICRO, TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT))
+	if caps.is_empty():
+		pair.add_child(text("unbound", Scale.MICRO, TEXT_DISABLED))
+		return pair
+	for cap in caps:
+		pair.add_child(key_cap(cap))
+	return pair
+
+
 ## `entries` is an Array of ["KEY", "Action"] pairs; renders them as key badges
 ## with their action beside them, evenly spaced.
 static func hint_row(entries: Array, gap: int = SPACE_LG) -> HBoxContainer:
@@ -752,17 +872,25 @@ static func portrait_head(actor: int, px: int = 256) -> Texture2D:
 	return out
 
 
-## The whole figure, resampled to `height` px tall with mipmaps. Use for large
-## character art (menu, results card) so downscaling stays clean.
+## The character's front pose, resampled to `height` px tall with mipmaps. Use
+## for large character art (menu, results card) so downscaling stays clean.
+##
+## Crops to _FIGURE_REGION rather than to the sheet — see the note there. The
+## returned texture is `height` px tall and proportionally wide, so a call site
+## can size against the height alone and never has to know the source aspect.
 static func portrait_scaled(actor: int, height: int) -> Texture2D:
 	var a := clampi(actor, 0, 2)
 	var key := "full|%d|%d" % [a, height]
 	if _tex_cache.has(key):
 		return _tex_cache[key]
 	var src := portrait_full(a)
-	var sz := src.get_size()
-	var target := Vector2i(maxi(1, int(round(sz.x * height / maxf(sz.y, 1.0)))), height)
-	var out: Texture2D = _resample(src, Rect2i(Vector2i.ZERO, Vector2i(sz)), target)
+	# Explicitly typed: the const array is untyped, so `:=` cannot infer Rect2i
+	# here and the whole design system fails to compile.
+	var region: Rect2i = _FIGURE_REGION[a]
+	var target := Vector2i(
+		maxi(1, int(round(float(region.size.x) * height / maxf(float(region.size.y), 1.0)))),
+		height)
+	var out: Texture2D = _resample(src, region, target)
 	if out == null:
 		out = src
 	_tex_cache[key] = out

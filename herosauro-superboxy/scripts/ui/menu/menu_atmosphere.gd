@@ -1,11 +1,18 @@
 extends Control
 ## The grade sitting between the live 3D and the UI.
 ##
-## The backdrop is a real golden-hour render: the sky is brighter than every text
-## colour in the palette, and the camera keeps moving, so there is no fixed patch
-## of frame that can be relied on to stay dark. Rather than fight that with
-## heavier and heavier text outlines, the whole left and top of the frame is
-## given a graded pocket to sit in, and the frame edge is closed with a vignette.
+## The backdrop is a real BRIGHT DAYLIGHT render now — blue sky, sunlit granite,
+## glare off the Douro. Every one of those is brighter than every text colour in
+## the palette, the camera keeps moving, and there is no fixed patch of frame
+## that can be relied on to stay dark. Rather than fight that with heavier and
+## heavier text outlines, the whole left and top of the frame is given a graded
+## pocket to sit in, and the frame edge is closed with a vignette.
+##
+## THIS IS COMPOSITION, NOT A LEGIBILITY CRUTCH. The in-game HUD deliberately
+## uses none of it — it puts opaque plates under its readouts instead, because
+## dimming a fight to read a health bar is a bad trade. A title screen is the
+## other case: it is a poster, the darkened corners ARE the poster, and the eye
+## is supposed to be led from the lockup down the column and out into Porto.
 ##
 ## Five layers, back to front:
 ##
@@ -14,45 +21,57 @@ extends Control
 ##   left scrim     the menu column's — the one that does the most work, because
 ##                  a vertical list of text runs down the brightest part of the
 ##                  river when the camera swings west
-##   horizon glare  a wide warm band where the sun sits, added rather than mixed,
-##                  so it reads as light in the lens and not as a beige rectangle
+##   sun haze       a wide band of aerial perspective where the sky meets the
+##                  gorge, added rather than mixed, so it reads as light in the
+##                  lens and not as a beige rectangle
 ##   vignette       closes the corners and stops the eye leaving the frame
 ##
-## Plus a slow drift of warm motes, which is the cheapest possible answer to "a
-## static title screen looks like a screenshot". The gulls circling in-world do
-## the rest.
+## Plus a slow drift of motes, which is the cheapest possible answer to "a static
+## title screen looks like a screenshot". The gulls circling in-world do the rest.
 
 # --- Proportions (fractions of the frame) ------------------------------------
 #
-# THESE EIGHT NUMBERS ARE THE VISUAL PASS. They were set by reasoning about the
-# composite (top and left overlap in the corner where the logo sits, so their
-# strengths multiply out to about 0.73 there and fall off fast from it) but
-# nobody has yet seen them over a real render. If the menu comes back muddy,
-# these are the dials — nothing else in this screen needs touching.
+# THESE EIGHT NUMBERS ARE THE VISUAL PASS. Top and left overlap in the corner
+# where the logo sits, so their strengths compose to roughly 0.50 there and fall
+# off fast from it.
+#
+# THEY WENT DOWN, NOT UP, WHEN THE WORLD WENT TO NOON — which is the opposite of
+# the obvious correction and is the point. The reflex when text stops holding
+# against a bright sky is to darken the sky; a render of that reflex applied here
+# came back as a frame that was almost entirely dusk with a bright slot in the
+# middle, i.e. it threw away the whole reason the art direction changed. The
+# legibility is bought instead by the things that own it: the menu rows are
+# opaque keylined plates now and the lockup carries a hard ink keyline, so the
+# grade only has to close the corners and lead the eye, which is what a scrim is
+# actually for. If the menu comes back muddy, these are the dials — and the
+# direction to move them is DOWN.
 
-const TOP_SCRIM := 0.36
-const TOP_STRENGTH := 0.48
-const BOTTOM_SCRIM := 0.24
-const BOTTOM_STRENGTH := 0.55
-const LEFT_SCRIM := 0.50
-const LEFT_STRENGTH := 0.52
-const VIGNETTE_ALPHA := 0.50
-const VIGNETTE_INNER := 0.36
+const TOP_SCRIM := 0.38
+const TOP_STRENGTH := 0.30
+const BOTTOM_SCRIM := 0.26
+const BOTTOM_STRENGTH := 0.36
+const LEFT_SCRIM := 0.44
+const LEFT_STRENGTH := 0.30
+const VIGNETTE_ALPHA := 0.34
+const VIGNETTE_INNER := 0.38
 
-## The sun in this world is low and off the left of the shot for most of the
-## camera's swing, so the glare is a wide horizontal band rather than a disc:
-## a disc would have to track the sun's screen position, and would be wrong the
-## moment the camera pitched.
-const GLARE_TOP := 0.30
-const GLARE_BOTTOM := 0.82
-const GLARE_COLOR := Color(1.0, 0.62, 0.30)
-const GLARE_ALPHA := 0.085
+## The haze band. Under a high midday sun there is no low disc to track and no
+## orange horizon; what there IS, looking down the gorge, is aerial perspective —
+## the far city washing out into the sky. A wide, pale, faintly warm band across
+## the middle distance is that, and it is also what pushes background Porto back
+## behind the cast, which is the composition the RUBRIC asks for.
+const GLARE_TOP := 0.22
+const GLARE_BOTTOM := 0.62
+const GLARE_COLOR := Color(0.86, 0.93, 1.0)
+const GLARE_ALPHA := 0.10
 
 # --- Motes -------------------------------------------------------------------
 
 const MOTE_COUNT := 34
 const MOTE_LIFETIME := 11.0
-const MOTE_COLOR := Color(1.0, 0.85, 0.60, 0.34)
+## Dust in a shaft of noon sun is white, not amber. Warmed a few percent so it
+## still belongs to the same light as the key rather than reading as snow.
+const MOTE_COLOR := Color(1.0, 0.97, 0.90, 0.30)
 
 var _top: TextureRect
 var _bottom: TextureRect
@@ -63,13 +82,17 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
+	# The haze goes UNDER the scrims. It is part of the render — the far city
+	# receding — and a warm wash painted over the graded corners would just lift
+	# the pocket the whole composition depends on.
+	add_child(_glare())
+
 	_top = UIStyle.scrim(true, 240.0, TOP_STRENGTH)
 	add_child(_top)
 	_bottom = UIStyle.scrim(false, 180.0, BOTTOM_STRENGTH)
 	add_child(_bottom)
 
 	add_child(_side_scrim())
-	add_child(_glare())
 	add_child(_vignette())
 
 	_motes = _build_motes()
@@ -139,8 +162,8 @@ func _glare() -> TextureRect:
 	tr.anchor_right = 1.0
 	tr.anchor_top = GLARE_TOP
 	tr.anchor_bottom = GLARE_BOTTOM
-	# Added, not mixed: light in a lens is additive, and a mixed warm rectangle
-	# over a sunset just lowers contrast.
+	# Added, not mixed: light in a lens is additive, and a mixed pale rectangle
+	# over a daylight render just lowers contrast everywhere at once.
 	var mat := CanvasItemMaterial.new()
 	mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
 	tr.material = mat
