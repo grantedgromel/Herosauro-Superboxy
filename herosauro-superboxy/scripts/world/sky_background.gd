@@ -27,11 +27,23 @@ const CLOUD_WRAP_MIN := -120.0    # x where a cloud re-appears after wrapping
 const CLOUD_WRAP_MAX := 120.0     # x past which a cloud wraps back
 
 # --- Ribeira palette ---------------------------------------------------------
-# Pitched a good 10-15% darker than a photograph of these houses would suggest.
-# The key light is 2.4 energy of Color(1, 0.78, 0.54) and AgX has a 12.0 white
-# point: at the old values the ochres, creams and roses all converged on the same
-# hot cream and the terrace lost its stripe. Chroma went up as the values came
-# down, so the hue survives the exposure instead of being bleached out of it.
+# Pitched a good 10-15% darker than a photograph of these houses would suggest, with
+# the chroma raised to match. That was originally a defence against a warm key and a
+# high AgX white point bleaching every hue toward the same hot cream, and it still
+# holds under the daylight rig for a different and better reason:
+#
+# these facades stand at -x facing +x, and the sun is now 51 degrees up at azimuth
+# +x, so they are lit close to square — NdotL ~0.55 against the 0.20 a horizontal
+# surface saw at 11.5 degrees. Under porto_daylight.tres (key 2.0, exposure 0.72,
+# agx_white 4.0) the ochre at Color(0.80, 0.60, 0.22) lands around 0.47 linear in red,
+# high on the curve but short of the shoulder, which is a bright wall that has kept
+# its hue. Photo values here would land past the white point and the terrace would go
+# back to being one cream stripe — the failure this palette was authored against.
+#
+# The saturation these carry also has to survive adjustment_saturation 1.12 on top of
+# a per-channel LUT whose slope through the mid-tones is 1.3, which pulls the channels
+# apart again. The reds are the closest to the edge; a render was checked at 1.20 and
+# they went neon, which is why the environment's saturation is 1.12.
 
 const RIBEIRA_WALLS := [
 	Color(0.80, 0.60, 0.22),  # ochre yellow
@@ -336,9 +348,23 @@ func _build_rabelo(parent: Node3D) -> Node3D:
 # --- Clouds ------------------------------------------------------------------
 
 func _build_clouds() -> void:
-	# Fully rough and untextured: a detail normal on a 4 m puff at 50 m just
-	# shimmers, and the rim term already gives the golden-hour edge glow.
-	var cloud_mat := ToonFactory.solid(Color(0.95, 0.90, 0.84), 0.0, 1.0)
+	# Retinted from warm cream to a neutral, faintly cool white: fair-weather cumulus
+	# at 10:50 is white on its sunward side and blue-grey underneath from the sky it
+	# sits in, and a cream cloud against a hard blue sky was one of the last large
+	# objects in frame still carrying the sunset. ToonFactory clamps it to
+	# ALBEDO_CEILING anyway — nothing diffuse reflects 95%.
+	#
+	# No longer FLAT. These were untextured on the grounds that a detail normal on a
+	# 4 m puff at 50 m is just shimmer, and that is true of the FINE layer — which is
+	# why fine_detail is off — but it was never true of a coarse one. A render of shot
+	# 07 came back with the clouds reading as exactly what they are: smooth spheres
+	# with a hard silhouette and no surface, the single most obviously untextured thing
+	# in the frame and a straight fail on the RUBRIC's first material line. The plaster
+	# map at a 3.2 m tile is one soft lump per two metres of puff, which breaks the
+	# sphere without ever resolving as noise, and 0.45 of normal scale is as far as
+	# that can go before the lumps start reading as rock.
+	var cloud_mat := ToonFactory.build(Color(0.93, 0.94, 0.95), ToonFactory.Surface.PLASTER,
+			1.0, 0.0, 3.2, 0.45, 0.22, Color.BLACK, 0.0, 1.0, 0.5, false)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
 

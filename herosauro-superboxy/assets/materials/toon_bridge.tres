@@ -1,7 +1,9 @@
-[gd_resource type="StandardMaterial3D" load_steps=3 format=3]
+[gd_resource type="StandardMaterial3D" load_steps=5 format=3]
 
 [ext_resource type="Texture2D" path="res://assets/textures/detail_granite_normal.tres" id="1_normal"]
 [ext_resource type="Texture2D" path="res://assets/textures/detail_granite_mask.tres" id="2_mask"]
+[ext_resource type="Texture2D" path="res://assets/textures/detail_fine_normal.tres" id="3_fine_normal"]
+[ext_resource type="Texture2D" path="res://assets/textures/detail_fine_albedo.tres" id="4_fine_albedo"]
 
 ; Deck surface and parapet walls of the Dom Luis bridge: dark granite roadway.
 ;
@@ -11,23 +13,59 @@
 ; black under the raking sun. Granite is both truer to the real bridge and far
 ; better behaved: dielectric, dark, rough, so deck and parapet stay in the same
 ; exposure range from every angle.
+;
+; Everything below is written by hand rather than through ToonFactory because this is
+; a .tscn ext_resource, but it has to track what the factory does or the deck -- the
+; single most-looked-at surface in the game, and shots 01 and 04 -- would be the one
+; surface in frame without the close-range detail layer. Keep the two in step: the
+; factory's stone() is granite, roughness 0.92, normal_scale 1.15, ao_light_affect
+; 0.52, plus the shared fine pair at a 0.28 m tile.
 
 [resource]
 resource_name = "BridgeGranite"
-albedo_color = Color(0.283, 0.279, 0.271, 1)
+; 0.283 -> 0.312. The fine albedo layer multiplies by about 0.88 on average, so the
+; authored value has to be pre-divided by that or the deck quietly goes 12% darker
+; than the number says. Same correction the factory applies as DETAIL_ALBEDO_GAIN.
+albedo_color = Color(0.312, 0.307, 0.298, 1)
 metallic = 0.0
-metallic_specular = 0.35
+; 0.35 -> 0.5 (F0 4%). 0.35 was suppressing the dielectric response below what any
+; real mineral surface has, which under a low sun was invisible and under a high one
+; is the difference between wet-looking granite and a matte print of granite.
+metallic_specular = 0.5
 roughness = 0.88
-; Kept deliberately low: the granite detail normal is high-contrast noise, and
-; at deck scale anything above ~0.4 reads as loose gravel rather than paving.
+; 0.22 -> 0.34. The granite mask's roughness spread was widened from 0.74-1.00 to
+; 0.52-1.00 and its AO channel was un-inverted in the same pass, so this map now has
+; considerably more to say; at 0.22 most of it was being thrown away. Still well under
+; the ~0.5 where deck-scale speckle starts reading as loose gravel rather than paving.
 normal_enabled = true
-normal_scale = 0.22
+normal_scale = 0.34
 normal_texture = ExtResource("1_normal")
 roughness_texture = ExtResource("2_mask")
+; ao_light_affect 0.3 -> 0.5, matching stone(). A 51-degree sun reaches into the joints
+; that an 11.5 degree one left inside its own shadow, so crevice darkening now has to
+; be carried by the AO term rather than by the key missing them.
 ao_enabled = true
-ao_light_affect = 0.3
+ao_light_affect = 0.5
 ao_texture = ExtResource("2_mask")
 ao_texture_channel = 1
+; 0.34 = one granite tile per 2.94 m of deck.
 uv1_scale = Vector3(0.34, 0.34, 0.34)
 uv1_triplanar = true
+; The close-range layer. 1/0.28 = 3.571 tiles per metre, i.e. ~1.1 mm per texel, which
+; is what is still resolving in 04_cobble_macro at a metre and a half from the surface
+; at a grazing angle -- the shot that exists specifically because flat texturing is
+; impossible to hide there. detail_uv_layer 1 is UV2; detail_blend_mode 2 is MUL, so
+; the map modulates the granite colour instead of replacing it.
+detail_enabled = true
+detail_uv_layer = 1
+detail_blend_mode = 2
+detail_albedo = ExtResource("4_fine_albedo")
+detail_normal = ExtResource("3_fine_normal")
+uv2_scale = Vector3(3.571, 3.571, 3.571)
+uv2_triplanar = true
+; A rim term on a horizontal plane seen from above does nothing but lift the far end of
+; the deck toward the sky colour, which is the opposite of the RUBRIC's "the playable
+; corridor is the brightest, highest-contrast thing in frame". Off here, unlike the
+; factory's default, and this is the one place the two deliberately disagree.
+rim_enabled = false
 texture_filter = 5

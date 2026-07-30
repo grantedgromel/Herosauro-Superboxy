@@ -5,6 +5,8 @@ extends Control
 ## The game is two-player co-op, so the HUD carries two of these — one in each
 ## bottom corner, mirror images of each other. That symmetry is the design:
 ##
+##                            ×7                  ×3
+##                     HIT COMBO ▬▬▬▬        ▬▬▬▬ HIT COMBO
 ##     ┌───────────────────────────┐      ┌───────────────────────────┐
 ##     │ ▣  P1 HEROSAURO       ( ◔)│      │(◔ )       SUPER BOXY P2  ▣│
 ##     │    ▐███████ 84/100▌ SPECIAL│     │SPECIAL ▐100/100 ███████▌  │
@@ -21,9 +23,20 @@ extends Control
 ## daylight, a solid object is legible where a translucent one is a window onto
 ## whatever is currently blowing out behind the hero.
 ##
+## THE COMBO COUNTER LIVES HERE, NOT IN THE MIDDLE OF THE SCREEN. Each hero now
+## keeps an independent chain with its own timeout window, so one shared splash
+## would have to arbitrate between two unrelated numbers — "show the highest",
+## "show the most recent" — and every arbitration rule throws away the only fact
+## the player cares about, which is the state of THEIR chain. It is therefore a
+## per-hero readout, and it is placed on the panel's INBOARD edge, overhanging
+## the plate: it stays unambiguously attached to its owner while pointing in
+## toward the fight, and it is the one thing on the panel allowed off the plate,
+## because a combo splash that is politely contained is not a splash.
+##
 ## It knows nothing about players. Everything visible here is driven by the HUD
-## from `GameManager.player_damaged` / `player_respawned`, plus an ability
-## fraction the HUD reads off the `players` group. That is the whole interface.
+## from `GameManager.player_damaged` / `player_respawned` / `combo_changed`, plus
+## an ability fraction the HUD reads off the `players` group. That is the whole
+## interface.
 
 ## Design size. Both panels are exactly this, at both ends of the screen.
 const PANEL := Vector2(430.0, 122.0)
@@ -39,6 +52,26 @@ const GUTTER := 16.0
 const LOW_RATIO := 0.28
 ## Rate the panel's own accent glow decays after a hit, per second.
 const HIT_LAMBDA := 4.5
+
+# --- Combo --------------------------------------------------------------------
+
+## Width of the combo cluster, and how far it overhangs the top of the plate.
+const COMBO_W := 236.0
+const COMBO_RISE := 108.0
+## Chains shorter than this are not worth shouting about — two hits is a pair,
+## not a combo, and a counter that appeared on every second swing would be
+## permanent furniture rather than a reward.
+const COMBO_MIN := 2
+## Display size of the numeral. Below the TITLE step on purpose: this is now a
+## per-hero readout sitting in a corner rather than one splash owning the middle
+## of the screen, and at 60 px two of them fight the boss banner.
+const COMBO_PX := 52
+## How hard the numeral shakes, in pixels, at the moment a hit lands, plus its
+## decay per second and its ringing frequency. Fast and high — a combo counter
+## should feel struck, not wobbled.
+const COMBO_SHAKE := 7.0
+const COMBO_SHAKE_LAMBDA := 7.0
+const COMBO_SHAKE_HZ := 41.0
 
 var player_id: int = 1
 var actor: int = UIStyle.Actor.HEROSAURO
@@ -57,6 +90,19 @@ var _dial_cap: Label
 var _status: PanelContainer
 var _status_label: Label
 var _down_veil: ColorRect
+
+var _combo_count: Label
+var _combo_word: Label
+var _combo_track: Panel
+var _combo_fill: Panel
+## Resting position of the numeral, captured at build time. The shake is
+## measured from it, and every combo control is placed with explicit top-left
+## offsets, so writing `position` here fights no anchor.
+var _combo_home: Vector2 = Vector2.ZERO
+var _combo_value: int = 0
+var _combo_left: float = 0.0
+var _combo_shake: float = 0.0
+var _combo_shake_phase: float = 0.0
 
 ## Decaying 0..1 used for the hit rim glow. Integrated from delta, never read off
 ## the wall clock, so a capture at a fixed frame rate is reproducible.
@@ -138,6 +184,8 @@ func setup(id: int, right_hand: bool) -> void:
 		HORIZONTAL_ALIGNMENT_CENTER)
 	_place(_dial_cap, Vector2(dial_x - 14.0, 76.0), Vector2(DIAL + 28.0, 16.0))
 
+	_build_combo()
+
 	# Drawn over everything and normally invisible: a hero at zero health is out
 	# of the fight and the panel has to say so louder than a dimmed portrait can.
 	_down_veil = ColorRect.new()
@@ -147,6 +195,56 @@ func setup(id: int, right_hand: bool) -> void:
 	_place(_down_veil, Vector2(3.0, 3.0), Vector2(PANEL.x - 6.0, PANEL.y - 6.0))
 
 	set_process(false)
+
+
+## The combo cluster, hanging off the top of the plate's inboard edge.
+##
+## Placed at negative y through the same mirroring `_place()` every other part
+## uses, so it lands on the panel's inboard side automatically — the right of
+## player one's plate, the left of player two's — and points into the middle of
+## the screen where the fight is. No plate under it: it is a transient shout, and
+## a panel that appeared and vanished five times a fight would read as a bug.
+func _build_combo() -> void:
+	var x := PANEL.x - COMBO_W
+
+	_combo_count = UIStyle.title("", COMBO_PX, UIStyle.GOLD)
+	_combo_count.horizontal_alignment = _trail_align()
+	# Heavier than the raw-pixel path would give it. This is the one readout with
+	# nothing behind it but the live 3D frame, so the ink keyline is doing the
+	# whole legibility job on its own.
+	_combo_count.add_theme_constant_override("outline_size", 12)
+	_place(_combo_count, Vector2(x, -COMBO_RISE), Vector2(COMBO_W, 72.0))
+	_combo_home = _combo_count.position
+
+	_combo_word = UIStyle.text("HIT COMBO", UIStyle.Scale.LABEL, UIStyle.GOLD_DEEP, _trail_align())
+	_place(_combo_word, Vector2(x, -34.0), Vector2(COMBO_W, 20.0))
+
+	# Depletion rail: this hero's own combo window running out, drawn as a
+	# shrinking bar so they can see how long they have to land the next hit.
+	_combo_track = Panel.new()
+	_combo_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var tb := StyleBoxFlat.new()
+	tb.bg_color = UIStyle.BASE
+	tb.set_corner_radius_all(4)
+	tb.set_border_width_all(2)
+	tb.border_color = UIStyle.KEYLINE
+	_combo_track.add_theme_stylebox_override("panel", tb)
+	_place(_combo_track, Vector2(x + COMBO_W - 150.0, -12.0), Vector2(150.0, 8.0))
+
+	_combo_fill = Panel.new()
+	_combo_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var fb := StyleBoxFlat.new()
+	fb.bg_color = UIStyle.GOLD
+	fb.set_corner_radius_all(4)
+	_combo_fill.add_theme_stylebox_override("panel", fb)
+	# Pinned to the track's top-left with all four anchors at 0, so resizing the
+	# fill each frame only moves its own offsets. A stretched preset here would
+	# have the layout fight the width we set and log an override warning.
+	_combo_fill.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	_combo_fill.size = Vector2(150.0, 8.0)
+	_combo_track.add_child(_combo_fill)
+
+	_show_combo(false)
 
 
 ## Mirrors a child's placement for player two. Children are positioned in
@@ -253,6 +351,71 @@ func reset() -> void:
 	scale = Vector2.ONE
 	modulate = Color.WHITE
 	_plate.modulate = Color.WHITE
+
+
+## This hero's chain length, straight off `combo_changed` for their player_id.
+## Anything under COMBO_MIN clears the readout.
+func set_combo(count: int) -> void:
+	if count < COMBO_MIN:
+		clear_combo()
+		return
+	_combo_value = count
+	_combo_left = GameManager.COMBO_TIMEOUT
+	# Digits only in the display face — Bangers is a decorative Latin set and a
+	# missing glyph there falls back to the engine default, which looks broken.
+	_combo_count.text = str(count)
+	_show_combo(true)
+
+	# Higher chains run hotter: it starts in this hero's own colour and climbs
+	# through gold to ember, so a long chain is visibly a different thing from a
+	# two-hit one — and the two heroes' counters never start the same colour,
+	# which is the second cue that says whose chain each one is.
+	var heat := clampf(float(count - COMBO_MIN) / 8.0, 0.0, 1.0)
+	var tint := accent.lerp(UIStyle.GOLD, 0.72).lerp(UIStyle.EMBER, heat)
+	_combo_count.add_theme_color_override("font_color", tint)
+	_combo_word.add_theme_color_override("font_color", tint.darkened(0.15))
+	var fb := _combo_fill.get_theme_stylebox("panel") as StyleBoxFlat
+	if fb:
+		fb.bg_color = tint
+
+	# Pop AND shake. The pop says "this went up"; the shake says "you hit
+	# something". A counter that only scales reads as a UI transition.
+	_combo_count.pivot_offset = Vector2(
+		0.0 if mirrored else _combo_count.size.x, _combo_count.size.y * 0.5)
+	var pop := 1.34 - 0.12 * heat
+	_combo_count.scale = Vector2(pop, pop)
+	_combo_shake = 1.0
+	_combo_shake_phase = 0.0
+	var t := _combo_count.create_tween()
+	t.tween_property(_combo_count, "scale", Vector2.ONE, 0.26) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	set_process(true)
+
+
+func clear_combo() -> void:
+	_combo_value = 0
+	_combo_left = 0.0
+	_combo_shake = 0.0
+	if _combo_count != null:
+		_combo_count.position = _combo_home
+		_combo_count.scale = Vector2.ONE
+	_show_combo(false)
+
+
+func _show_combo(on: bool) -> void:
+	for n in [_combo_count, _combo_word, _combo_track]:
+		if n != null:
+			(n as CanvasItem).visible = on
+
+
+## The combo cluster's rect in the HUD's own space. It is the one part of this
+## widget that deliberately leaves the plate, so the layout probe needs a way to
+## ask where it went.
+func combo_rect() -> Rect2:
+	if _combo_count == null:
+		return Rect2(position, Vector2.ZERO)
+	return Rect2(position + _combo_home, _combo_count.size) \
+		.merge(Rect2(position + _combo_track.position, _combo_track.size))
 
 
 ## Ability cooldown, 0..1, fed straight from the hero's own readout.

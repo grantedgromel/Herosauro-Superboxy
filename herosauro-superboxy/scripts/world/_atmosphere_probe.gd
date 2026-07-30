@@ -11,9 +11,23 @@ extends SceneTree
 ## Run:
 ##   godot --headless --path . --script scripts/world/_atmosphere_probe.gd
 
-const ENV_PATH := "res://assets/environments/porto_golden_hour.tres"
+const ENV_PATH := "res://assets/environments/porto_daylight.tres"
 const RiverLifeScript := preload("res://scripts/world/river_life.gd")
 const RigScript := preload("res://scripts/world/lighting_rig.gd")
+
+## SunLight's +Z basis column in bridge_arena.tscn — the direction the key comes
+## from. Duplicated here on purpose: this probe's whole job is to catch the numbers
+## and the comments drifting apart, and three files reason about this vector
+## (porto_sky.gdshader through LIGHT0_*, lighting_rig.gd's fill derivation, and
+## water_wave.gdshader's glint). If the scene's sun moves and this is not updated,
+## the check below fails, which is the point.
+const SUN_FROM := Vector3(0.54501, 0.77715, 0.31466)
+const SUN_ELEVATION_DEG := 51.0
+const ARENA_PATH := "res://scenes/world/bridge_arena.tscn"
+## The deck surface: the single most-looked-at material in the game, and the one the
+## tonemap's exposure is graded against.
+const DECK_MATERIAL_PATH := "res://assets/materials/toon_bridge.tres"
+const WATER_SHADER_PATH := "res://assets/shaders/water_wave.gdshader"
 
 var _fails := 0
 
@@ -21,9 +35,13 @@ var _fails := 0
 func _initialize() -> void:
 	print("=== shaders parse ===")
 	_check_shaders()
+	print("=== key light ===")
+	_check_sun()
 	print("=== environment ===")
 	var env: Environment = load(ENV_PATH)
 	_check_env(env)
+	print("=== materials ===")
+	_check_materials()
 	print("=== aerial perspective ===")
 	_check_fog(env)
 	print("=== compatibility tier ===")
@@ -58,7 +76,10 @@ func _fail(msg: String) -> void:
 func _check_shaders() -> void:
 	var sky: Environment = load(ENV_PATH)
 	var sky_mat := sky.sky.sky_material as ShaderMaterial
-	_uniforms("porto_sky.gdshader", sky_mat.shader, 30)
+	# 27 after the Belt of Venus, the Earth-shadow wedge and counter_spread were
+	# deleted — eight uniforms of evening phenomena that a 51-degree sun does not
+	# have. Margin as before: the floor is the real count less about 10%.
+	_uniforms("porto_sky.gdshader", sky_mat.shader, 24)
 
 	var gull := Shader.new()
 	gull.code = RiverLifeScript.GULL_SHADER
@@ -68,12 +89,186 @@ func _check_shaders() -> void:
 	foam.code = RiverLifeScript.FOAM_SHADER
 	_uniforms("RiverLife.FOAM_SHADER", foam, 6)
 
+	# 16 after mirror_albedo was added. The Douro is a third of the frame in three
+	# shots and this shader had no parse check at all before this pass.
+	var wave: Shader = load(WATER_SHADER_PATH)
+	_uniforms("water_wave.gdshader", wave, 14)
+	# The glint direction is a copy of the sun, and a copy is a thing that goes stale.
+	# Read out of the SOURCE, not out of the RenderingServer: headless runs the dummy
+	# backend, where shader_get_parameter_default() returns null for everything.
+	#
+	# Only the DEFAULT is checkable at all. Mat_river in bridge_arena.tscn overrides
+	# every uniform in this shader, that scene belongs to the world stream, and its
+	# copy of this vector is still the old sunset one — which is why the shader now
+	# carries mirror_albedo, so a stale warm mirror colour cannot own a third of the
+	# frame on its own. See the header of water_wave.gdshader.
+	var glint_dir := _shader_vec3_default(wave.code, "sun_direction")
+	print("  water sun_direction default %s" % str(glint_dir.snapped(Vector3.ONE * 0.001)))
+	if glint_dir.distance_to(SUN_FROM) > 0.01:
+		_fail("water_wave.gdshader's sun_direction default %s is not the scene's sun %s"
+				% [str(glint_dir), str(SUN_FROM)])
+
+
+## `uniform vec3 <name> = vec3(a, b, c);` out of shader source, as a Vector3.
+func _shader_vec3_default(code: String, uniform_name: String) -> Vector3:
+	var re := RegEx.new()
+	re.compile("uniform\\s+vec3\\s+%s\\s*=\\s*vec3\\(([^)]*)\\)" % uniform_name)
+	var m := re.search(code)
+	if m == null:
+		_fail("no vec3 uniform named %s with a default" % uniform_name)
+		return Vector3.ZERO
+	var parts := m.get_string(1).split(",")
+	if parts.size() != 3:
+		_fail("%s's default is not three components" % uniform_name)
+		return Vector3.ZERO
+	return Vector3(float(parts[0]), float(parts[1]), float(parts[2]))
+
 
 func _uniforms(label: String, shader: Shader, expect_min: int) -> void:
 	var n := shader.get_shader_uniform_list(true).size()
 	print("  %-28s %d uniforms" % [label, n])
 	if n < expect_min:
 		_fail("%s parsed to %d uniforms, expected at least %d" % [label, n, expect_min])
+
+
+# --- Key light ---------------------------------------------------------------
+
+## The one number nothing else in the stream can derive for itself. SunLight is the
+## world stream's node in the world stream's scene — this stream is only allowed to
+## set its transform, colour and energy — so the reasoning in three separate files
+## hangs off a vector that lives somewhere else entirely. Read it back out of the
+## scene and check it is still what those files say it is.
+func _check_sun() -> void:
+	var packed: PackedScene = load(ARENA_PATH)
+	if packed == null:
+		_fail("could not load %s" % ARENA_PATH)
+		return
+	var state := packed.get_state()
+	var found := false
+	for i in state.get_node_count():
+		if state.get_node_name(i) != "SunLight":
+			continue
+		found = true
+		var xf := Transform3D.IDENTITY
+		var color := Color.WHITE
+		var energy := 1.0
+		for p in state.get_node_property_count(i):
+			match state.get_node_property_name(i, p):
+				"transform": xf = state.get_node_property_value(i, p)
+				"light_color": color = state.get_node_property_value(i, p)
+				"light_energy": energy = state.get_node_property_value(i, p)
+		# A DirectionalLight3D shines down its own -Z, so the direction light comes
+		# FROM is the basis's +Z column.
+		var from := xf.basis.z.normalized()
+		var elev := rad_to_deg(asin(clampf(from.y, -1.0, 1.0)))
+		print("  SunLight from %s   elevation %.1f deg   %s @ %.2f"
+				% [str(from.snapped(Vector3.ONE * 0.001)), elev, color.to_html(false), energy])
+		if from.distance_to(SUN_FROM) > 0.01:
+			_fail("SunLight points %s; this stream's files are written for %s"
+					% [str(from), str(SUN_FROM)])
+		if absf(elev - SUN_ELEVATION_DEG) > 1.0:
+			_fail("sun elevation %.1f deg, not the %.1f the comments claim"
+					% [elev, SUN_ELEVATION_DEG])
+		# Warm WHITE, not orange. A 5400 K sun has R-B around 0.12; the 3200 K
+		# golden-hour one had 0.46.
+		var warmth := color.r - color.b
+		print("  sun colour   R-B %+.3f (want < 0.2, i.e. warm white not orange)" % warmth)
+		if warmth >= 0.2:
+			_fail("sun colour R-B %+.3f is a sunset, not daylight" % warmth)
+		# Deck irradiance: energy * sin(elevation) * effective albedo, read off the
+		# real material rather than hard-coded, because the deck is the surface the
+		# tonemap is graded around and a number copied by hand here is a number that
+		# goes stale the first time someone retints the granite. "Effective" is the
+		# authored albedo times the fine detail layer's mean, which is what actually
+		# reaches the light.
+		var deck_mat: StandardMaterial3D = load(DECK_MATERIAL_PATH)
+		var a := deck_mat.albedo_color
+		var albedo := (a.r + a.g + a.b) / 3.0 / ToonFactory.DETAIL_ALBEDO_GAIN
+		var deck := energy * sin(deg_to_rad(elev)) * albedo
+		print("  sunlit deck  %.3f scene-referred (energy %.2f x sin(%.0f) x albedo %.3f)"
+				% [deck, energy, elev, albedo])
+		if deck < 0.28 or deck > 0.60:
+			_fail("sunlit deck at %.3f is outside the range the tonemap is graded for" % deck)
+	if not found:
+		_fail("no SunLight node in %s" % ARENA_PATH)
+
+
+# --- Materials ---------------------------------------------------------------
+
+## ToonFactory is this pass's other half. None of the look can be judged here, but
+## the three rules it enforces centrally can be, and all three are RUBRIC lines that
+## the frame fails outright if they regress.
+func _check_materials() -> void:
+	var granite := ToonFactory.stone()
+	var painted := ToonFactory.iron()
+	var railhead := ToonFactory.iron(ToonFactory.IRON_GREY, 1.0, 0.85, 0.26)
+	var glaze := ToonFactory.ceramic()
+
+	print("  stone()      albedo %s  rough %.2f  metal %.1f  F0 %.2f  detail %s @ %.2f m"
+			% [granite.albedo_color.to_html(false), granite.roughness, granite.metallic,
+				granite.metallic_specular, "yes" if granite.detail_enabled else "NO",
+				1.0 / maxf(granite.uv2_scale.x, 0.001)])
+	print("  iron()       metal %.1f -> F0 %.2f   railhead(0.85) metal %.1f"
+			% [painted.metallic, painted.metallic_specular, railhead.metallic])
+
+	# (a) two texture scales on every textured surface.
+	for pair in [["stone", granite], ["iron", painted], ["ceramic", glaze]]:
+		var m: StandardMaterial3D = pair[1]
+		if not m.detail_enabled:
+			_fail("%s() has no close-range detail layer" % pair[0])
+		elif not m.uv2_triplanar:
+			_fail("%s()'s detail layer is not triplanar, so it has no UVs to ride" % pair[0])
+		elif m.detail_albedo == null:
+			_fail("%s() has no detail albedo, so its albedo is a flat colour" % pair[0])
+		if m.normal_texture == null:
+			_fail("%s() has no surface normal map" % pair[0])
+		if m.roughness_texture == null:
+			_fail("%s() has a constant roughness across the surface" % pair[0])
+
+	# (b) the detail layer must MODULATE albedo, not replace it, and must not wipe
+	# out the surface normal — which is what its alpha channel is for.
+	var fine: NoiseTexture2D = granite.detail_albedo
+	var blend: float = fine.color_ramp.colors[0].a
+	print("  fine layer   blend alpha %.2f   albedo ramp %.2f..%.2f (sRGB)"
+			% [blend, fine.color_ramp.colors[0].r,
+				fine.color_ramp.colors[fine.color_ramp.colors.size() - 1].r])
+	if granite.detail_blend_mode != BaseMaterial3D.BLEND_MODE_MUL:
+		_fail("detail blend is not MUL, so the layer replaces the authored colour")
+	if blend > 0.85:
+		_fail("detail alpha %.2f: the fine normal is replacing the surface normal" % blend)
+	if blend < 0.2:
+		_fail("detail alpha %.2f is too weak to be albedo variation" % blend)
+
+	# (c) metals are 0 or 1.
+	for pair in [["stone", granite], ["iron", painted], ["ceramic", glaze],
+			["railhead", railhead]]:
+		var m: StandardMaterial3D = pair[1]
+		if m.metallic > 0.001 and m.metallic < 0.999:
+			_fail("%s() is %.2f metallic; metals are 0 or 1" % [pair[0], m.metallic])
+	if railhead.metallic < 0.999:
+		_fail("a call site asking for 0.85 metallic did not get bare metal")
+	if painted.metallic_specular <= 0.5:
+		_fail("painted iron got no specular back for the metallic it lost")
+
+	# Physical albedo range, checked on the two worst offenders in the codebase.
+	for c in [Color(0.95, 0.90, 0.84), Color(0.93, 0.91, 0.85), Color(0.01, 0.01, 0.01)]:
+		var m := ToonFactory.solid(c)
+		var peak: float = maxf(m.albedo_color.r, maxf(m.albedo_color.g, m.albedo_color.b))
+		var dim: float = minf(m.albedo_color.r, minf(m.albedo_color.g, m.albedo_color.b))
+		if peak > ToonFactory.ALBEDO_CEILING + 0.001 or dim < ToonFactory.ALBEDO_FLOOR - 0.001:
+			_fail("solid(%s) -> albedo %s is outside %.2f..%.2f"
+					% [c.to_html(false), m.albedo_color.to_html(false),
+						ToonFactory.ALBEDO_FLOOR, ToonFactory.ALBEDO_CEILING])
+
+	# The cache is what collapses two hundred facades onto a handful of materials.
+	# Snapping metallic before the key is built is supposed to make it collapse
+	# harder, not softer: two call sites asking for different half-metals now share.
+	var a := ToonFactory.iron(ToonFactory.IRON_GREY, 1.6, 0.30, 0.62)
+	var b := ToonFactory.iron(ToonFactory.IRON_GREY, 1.6, 0.45, 0.62)
+	print("  cache        iron(0.30) and iron(0.45) share a material: %s"
+			% ["yes" if a == b else "NO"])
+	if a != b:
+		_fail("metallic snap happens after the cache key, so it costs a draw call")
 
 
 # --- Environment -------------------------------------------------------------
@@ -95,9 +290,26 @@ func _check_env(env: Environment) -> void:
 		_fail("fog_sky_affect %.2f fogs the sky itself" % env.fog_sky_affect)
 	if env.volumetric_fog_sky_affect != 0.0:
 		_fail("volumetric_fog_sky_affect %.2f fogs the sky itself" % env.volumetric_fog_sky_affect)
-	if env.fog_depth_begin > 30.0:
-		_fail("fog_depth_begin %.0f starts too far out to layer the mid-ground"
-				% env.fog_depth_begin)
+
+	# The sky is what every shaded surface in the arena is filled by
+	# (ambient_light_sky_contribution 0.92), so a warm sky is a warm frame no matter
+	# what the key does. Checked as a channel relationship rather than as literal
+	# values so a retune does not have to come here, but a slide back toward sunset
+	# does. Zenith must be the most saturated blue in the dome; the horizon haze must
+	# still be blue-biased rather than cream.
+	var sky_mat := env.sky.sky_material as ShaderMaterial
+	var zenith: Color = sky_mat.get_shader_parameter("zenith_color")
+	var horizon: Color = sky_mat.get_shader_parameter("horizon_color")
+	var haze: Color = sky_mat.get_shader_parameter("haze_color")
+	print("  sky          zenith B-R %+.3f   horizon B-R %+.3f   haze B-R %+.3f  (all want > 0)"
+			% [zenith.b - zenith.r, horizon.b - horizon.r, haze.b - haze.r])
+	for pair in [["zenith", zenith], ["horizon", horizon], ["haze", haze]]:
+		var c: Color = pair[1]
+		if c.b - c.r <= 0.0:
+			_fail("sky %s_color is warm (B-R %+.3f); this is a daylight sky"
+					% [pair[0], c.b - c.r])
+	if zenith.b - zenith.r < 0.4:
+		_fail("zenith_color B-R %+.3f is not a genuinely blue sky" % (zenith.b - zenith.r))
 
 	# The grade LUT must be monotonic per channel or it inverts tonal order.
 	var lut := env.adjustment_color_correction as GradientTexture1D
@@ -111,14 +323,31 @@ func _check_env(env: Environment) -> void:
 			_fail("grade LUT is not monotonic at t = %.3f" % (float(i) / 64.0))
 			break
 		prev = c
+	# Split-toning is gone. Shadows may stay faintly cool — under a high sun they are
+	# literally lit by a blue sky, so that is the colour of a shadow rather than a
+	# look — but the highlights must be neutral, because a midday sun clips white and
+	# a warm clip is the single most golden-hour thing a frame can still be doing.
 	var shadow := lut.gradient.sample(0.07)
 	var high := lut.gradient.sample(0.8)
-	print("  grade split  shadow R-B %+.3f (want < 0)   highlight R-B %+.3f (want > 0)"
-			% [shadow.r - shadow.b, high.r - high.b])
-	if shadow.r - shadow.b >= 0.0:
-		_fail("grade LUT does not cool the shadows")
-	if high.r - high.b <= 0.0:
-		_fail("grade LUT does not warm the highlights")
+	var clip := lut.gradient.sample(1.0)
+	print("  grade tone   shadow R-B %+.3f (want <= 0)   highlight R-B %+.3f (want ~0)   clip %s"
+			% [shadow.r - shadow.b, high.r - high.b, clip.to_html(false)])
+	if shadow.r - shadow.b > 0.0:
+		_fail("grade LUT warms the shadows; sky-lit shadows are cool or neutral")
+	if absf(high.r - high.b) > 0.02:
+		_fail("grade LUT split-tones the highlights by %+.3f" % (high.r - high.b))
+	if absf(clip.r - clip.b) > 0.01 or clip.r < 0.99:
+		_fail("grade LUT clips to %s, not to neutral white" % clip.to_html(false))
+
+	# The contrast has to live somewhere. It is in the LUT's low mids now, so the
+	# stop below the neutral pivot must sit under identity.
+	var crunch := lut.gradient.sample(0.06)
+	print("  grade shape  LUT(0.06) = %.3f (want < 0.06)   LUT(0.50) = %.3f (want > 0.50)"
+			% [crunch.g, lut.gradient.sample(0.5).g])
+	if crunch.g >= 0.06:
+		_fail("grade LUT has no shadow crunch; the frame will read flat")
+	if lut.gradient.sample(0.5).g <= 0.5:
+		_fail("grade LUT does not lift the upper mids; this is not a high-key grade")
 
 
 # --- Fog ---------------------------------------------------------------------
@@ -151,7 +380,13 @@ func _check_fog(env: Environment) -> void:
 	print("  worst compat/forward+ mismatch %.3f at %.0f m" % [worst, worst_d])
 	if worst > 0.06:
 		_fail("compatibility fallback drifts %.3f from the Forward+ curve" % worst)
-	# Anything the player stands on has to stay crisp.
+
+	# Two ends of the same requirement, and both are about the CURVE rather than
+	# about any one parameter — the previous version asserted fog_depth_begin <= 30,
+	# which is a proxy that stopped tracking the resource the moment the range was
+	# widened to 640 m and then reported failure for four rounds.
+	#
+	# Anything the player stands on has to stay crisp...
 	var deck := _depth(50.0, env.fog_depth_begin, env.fog_depth_end,
 			env.fog_depth_curve, env.fog_density)
 	var deck_v := 1.0 - exp(-env.volumetric_fog_density * 50.0)
@@ -159,6 +394,34 @@ func _check_fog(env: Environment) -> void:
 	print("  far parapet from mid-deck (50 m): %.1f%% haze" % (deck_total * 100.0))
 	if deck_total > 0.20:
 		_fail("%.0f%% haze across the playable deck" % (deck_total * 100.0))
+	# ...and the mid-ground has to actually sit back, or there is no depth cue at all
+	# and the bridge, the Ribeira and the hills read as one plane. 100 m is where the
+	# terraces are; 168 m is the near edge of the backdrop scan.
+	var mid := _depth(100.0, env.fog_depth_begin, env.fog_depth_end,
+			env.fog_depth_curve, env.fog_density)
+	var mid_v := 1.0 - exp(-env.volumetric_fog_density * minf(100.0, env.volumetric_fog_length))
+	var mid_total := mid * (1.0 - mid_v) + mid_v
+	var far := _depth(168.0, env.fog_depth_begin, env.fog_depth_end,
+			env.fog_depth_curve, env.fog_density)
+	var far_v := 1.0 - exp(-env.volumetric_fog_density * minf(168.0, env.volumetric_fog_length))
+	var far_total := far * (1.0 - far_v) + far_v
+	print("  Ribeira terraces (100 m): %.1f%%   backdrop (168 m): %.1f%%   step %+.1f points"
+			% [mid_total * 100.0, far_total * 100.0, (far_total - mid_total) * 100.0])
+	if mid_total < 0.08:
+		_fail("only %.0f%% haze at 100 m; the mid-ground does not sit back" % (mid_total * 100.0))
+	if far_total - mid_total < 0.05:
+		_fail("only %.1f points of haze between the terraces and the backdrop"
+				% ((far_total - mid_total) * 100.0))
+	# Aerial perspective is the sky showing through the geometry. If the veil is
+	# mostly fog_light_color instead, distance takes on a flat tint rather than the
+	# sky's own colour, which is the milky-screen failure an earlier pass shipped.
+	print("  aerial perspective %.2f, fog tint %s"
+			% [env.fog_aerial_perspective, env.fog_light_color.to_html(false)])
+	if env.fog_aerial_perspective < 0.8:
+		_fail("aerial_perspective %.2f: the far field is fog, not sky"
+				% env.fog_aerial_perspective)
+	if env.fog_light_color.r - env.fog_light_color.b > 0.0:
+		_fail("fog_light_color is warm; it tints every distant surface in a 5400 K frame")
 
 
 func _depth(d: float, begin: float, end: float, curve: float, density: float) -> float:

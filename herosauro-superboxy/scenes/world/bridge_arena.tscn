@@ -146,11 +146,41 @@ cast_shadow = 0
 mesh = SubResource("Mesh_river")
 surface_material_override/0 = SubResource("Mat_river")
 
+; --- SunLight: Porto at mid-morning, not the golden hour ---
+; The twelve floats in a Transform3D literal are the basis ROWS, so the +Z axis --
+; the direction light comes FROM, because a DirectionalLight3D shines down its own
+; -Z -- is the third element of each row: (0.54501, 0.77715, 0.31466).
+;
+; asin(0.77715) = 51.0 degrees of elevation, and the horizontal part sits 30 degrees
+; east of +x. That is a real Porto sun: latitude 41.15 N, early April or early
+; September, about 10:50 solar time. In this arena's compass +x is Gaia (south, where
+; the midday sun actually is) and -z is downstream toward the Atlantic (west), so
+; south-by-southeast is where the sun belongs and the old -x/-z sun was lighting the
+; city from the north.
+;
+; The azimuth is not just physics, it is framing. The Porto terraces stand at -x and
+; face the water, i.e. face +x, so a sun from +x lights the facades square on -- shot
+; 07_ribeira, the "is this recognisably Porto" test, was previously lit from behind
+; them. Almost every vantage in tools/shots.json sits at +z looking toward -z, so the
+; +z component puts the key behind the camera's shoulder rather than in its face.
+;
+; energy 2.4 -> 2.0. At 11.5 degrees a horizontal deck saw sin(11.5) = 0.20 of normal
+; incidence; at 51 degrees it sees 0.78, which is 3.9x more light on the single
+; most-looked-at surface in the game. Dropping the key 17% still leaves the deck 3.2x
+; brighter than it was, and the tonemap in porto_daylight.tres is re-graded around
+; that -- the RUBRIC's "exposure-driven, not multiplier-driven".
+;
+; colour: 5400 K, a clear-day sun at 51 degrees through ~1.29 air masses. Warm white,
+; not orange. The old Color(1, 0.784, 0.541) is roughly 3200 K, which is sunset.
+;
+; angular_distance 0.6 -> 0.53, the sun's true angular diameter. A low sun through 5
+; air masses genuinely has a fuzzy limb and wide penumbrae; a high one does not, and
+; crisp contact shadows are what plant an object on the deck.
 [node name="SunLight" type="DirectionalLight3D" parent="."]
-transform = Transform3D(-0.47954, 0.17546, -0.859785, 0, 0.979807, 0.19995, 0.87751, 0.095885, -0.469882, 0, 30, 0)
-light_color = Color(1, 0.784, 0.541, 1)
-light_energy = 2.4
-light_angular_distance = 0.6
+transform = Transform3D(0.5, -0.67304, 0.54501, 0, 0.62933, 0.77715, -0.86603, -0.38858, 0.31466, 0, 30, 0)
+light_color = Color(1, 0.945, 0.878, 1)
+light_energy = 2.0
+light_angular_distance = 0.53
 shadow_enabled = true
 
 [node name="SkyBackground" parent="." instance=ExtResource("4_sky")]

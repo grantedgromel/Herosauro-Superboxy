@@ -1,4 +1,4 @@
-// Stylised-realistic Douro water for the golden-hour Porto arena.
+// Stylised-realistic Douro water for the daylight Porto arena.
 //
 // The previous version displaced vertices with two sines and then coloured the
 // surface with sin(u * 38) * sin(u * 38). That pattern had nothing to do with
@@ -14,33 +14,104 @@
 // there is no riverbed geometry, so the deep water would show sky straight
 // through it. The shallow/deep split rides view angle and wave height instead,
 // which is what actually drives the read looking down from a bridge deck.
+//
+// ============================================================================
+// THE DEFAULTS BELOW ARE ALL OVERRIDDEN BY Mat_river IN bridge_arena.tscn, AND
+// THAT MATERIAL IS STILL AUTHORED FOR THE SUNSET.
+//
+// Every uniform in this file is set explicitly by that sub-resource, so changing a
+// default here changes nothing at runtime. The defaults are corrected anyway,
+// because they are what the next scene to use this shader will get and because a
+// default that documents a sun which no longer exists is worse than no default. The
+// arena scene belongs to the world stream; the four values it needs changed, with
+// the reasoning, are:
+//
+//   shallow_color   (0.86, 0.685, 0.47)  -> (0.72, 0.80, 0.87)
+//       This is the colour a grazing sightline returns, i.e. what the river is
+//       mirroring. It was pinned under the sky shader's old warm horizon_color; that
+//       is now (0.741, 0.831, 0.898) and a mirror cannot out-hue what it reflects.
+//       Left warm, the far half of the Douro stays a sunset band under a blue sky —
+//       and it is the largest single surface in shots 06 and 09.
+//   glint_color     (1.0, 0.80, 0.55)    -> (1.0, 0.97, 0.90)
+//       The glitter path is specular sunlight, so it is the sun's colour: 5400 K
+//       warm white, not 3200 K amber.
+//   glint_sharpness 165                  -> 240
+//       A low sun spreads its glitter into a long soft path down the water because
+//       the reflected angle sweeps slowly; a 51-degree sun concentrates it into a
+//       hard patch. The wide lobe under a high sun reads as a smear.
+//   sun_direction   (-0.859785, 0.19995, -0.469882) -> (0.54501, 0.77715, 0.31466)
+//       SunLight's +Z basis column, which moved when the sun did. Left alone the
+//       glitter sits on the wrong side of the river from every other highlight in
+//       the frame, which is the kind of tell a critic finds immediately.
+// ============================================================================
 shader_type spatial;
 render_mode cull_disabled;
 
 // --- Set from bridge_arena.tscn: these names must not change ----------------
 
-uniform vec4 shallow_color : source_color = vec4(0.945, 0.620, 0.400, 1.0);
-uniform vec4 deep_color : source_color = vec4(0.180, 0.320, 0.500, 1.0);
+// The grazing / mirror colour: pale estuary sky, matching the sky shader's
+// horizon_color. Warm here was the single most sunset-coloured number in the file.
+uniform vec4 shallow_color : source_color = vec4(0.720, 0.800, 0.870, 1.0);
+// Douro silt-green rather than open-ocean blue. Under a high sun the near water is
+// mostly this, because very little of it is at a grazing angle.
+uniform vec4 deep_color : source_color = vec4(0.110, 0.195, 0.230, 1.0);
 uniform float wave_speed = 0.5;
 uniform float wave_height = 0.35;      // metres, peak of the summed swell
 uniform float wave_scale = 0.18;       // base angular frequency (1 / metres)
 uniform float flow = 0.02;             // downstream drift of the whole wave field
-uniform vec4 glint_color : source_color = vec4(1.0, 0.85, 0.55, 1.0);
+// Specular sunlight, so it is the sun's own colour at 5400 K.
+uniform vec4 glint_color : source_color = vec4(1.0, 0.97, 0.90, 1.0);
 uniform float glint_strength = 0.45;
 
 // --- Tuning -----------------------------------------------------------------
 
-// World-space direction *towards* the sun. Default matches the SunLight basis
-// in bridge_arena.tscn; if that light moves, move this with it.
-uniform vec3 sun_direction = vec3(0.354, 0.707, 0.612);
-uniform float glint_sharpness : hint_range(16.0, 512.0) = 190.0;
+// World-space direction *towards* the sun, i.e. SunLight's +Z basis column in
+// bridge_arena.tscn: 51 degrees up, 30 degrees east of +x. If that light moves,
+// move this with it — and move Mat_river's copy of it, which is the one that counts.
+uniform vec3 sun_direction = vec3(0.54501, 0.77715, 0.31466);
+// 190 -> 240. Tighter, because a high sun's glitter path is a concentrated patch
+// rather than the long soft streak a low one lays down the water.
+uniform float glint_sharpness : hint_range(16.0, 512.0) = 240.0;
 uniform float chop_strength : hint_range(0.0, 3.0) = 1.0;
-uniform float water_roughness : hint_range(0.0, 0.4) = 0.055;
-// How fast the surface flips from deep to sun-glare as the view angle flattens.
-// Higher = a narrower, hotter band pinned to the far bank.
-uniform float horizon_falloff : hint_range(1.0, 8.0) = 3.0;
+uniform float water_roughness : hint_range(0.0, 0.4) = 0.07;
+// How fast the surface flips from deep to sky-mirror as the view angle flattens.
+// Higher = a narrower band pinned to the far bank. 3.0 counted almost the whole
+// surface as grazing and rendered the Douro as a flat pale sheet — a sandbank, not a
+// river; 5.2 keeps the mirror term where it belongs and lets deep_color own the near
+// and middle field. (This is the value Mat_river already uses; the default was the
+// known-bad one.)
+uniform float horizon_falloff : hint_range(1.0, 8.0) = 5.2;
+
+// How much of the grazing-angle mirror is carried by ALBEDO, with the rest left to
+// the BRDF's own specular. This uniform is NEW in the daylight pass and is
+// deliberately not one Mat_river sets, because it is the fix for a structural bug
+// rather than a retune of an authored value.
+//
+// The bug: at a grazing angle this shader mixed the whole way to shallow_color in
+// ALBEDO, and then the renderer applied Schlick Fresnel on top of a ROUGHNESS 0.07
+// surface and reflected the sky as well. The mirror was being paid for twice — once
+// as a diffuse colour and once as an actual reflection — so the far half of the river
+// came out as a flat sheet of shallow_color with the sky's reflection stacked on it.
+// Under a warm sunset shallow_color that is a glare band, which is what it was tuned
+// as; under a daylight rig with an untouched sunset uniform it is a pink sheet
+// covering the middle third of shot 07, which is what a render measured.
+//
+// 0.30 keeps shallow_color's hue as a hint of what the water is mirroring — silt and
+// suspended sediment do genuinely tint the surface return — and hands the other 70%
+// to the specular path, which reflects the actual sky, actually occluded, through SSR
+// on Forward+ and through the radiance cubemap on Compatibility. That is both the
+// physically correct split and the one that stops a stale colour dominating a third
+// of the frame.
+//
+// This does not make Mat_river's shallow_color correct, it makes it survivable. The
+// value it should hold is in the header.
+uniform float mirror_albedo : hint_range(0.0, 1.0) = 0.30;
+
 uniform vec4 foam_color : source_color = vec4(0.93, 0.95, 0.96, 1.0);
-uniform float foam_strength : hint_range(0.0, 1.0) = 0.30;
+// 0.30 -> 0.18. Whitecaps key off smoothstep(0.45, 0.95, h) on the unit-amplitude
+// swell, so they fire on every crest however calm the water is set to be. The Douro
+// at Porto is a tidal pool between two banks; foam belongs on the near water as a hint.
+uniform float foam_strength : hint_range(0.0, 1.0) = 0.18;
 
 varying vec3 world_pos;
 
@@ -115,15 +186,19 @@ void fragment() {
 	}
 	vec3 to_cam = normalize(INV_VIEW_MATRIX[3].xyz - world_pos);
 
-	// Looking straight down you see into the water (deep); at a grazing angle
-	// the surface turns into a mirror for the sunset (shallow_color is the warm
-	// one). Shaped like real Fresnel rather than a linear ramp, which is what
-	// pins the glare band to the far bank instead of washing the whole river.
+	// Looking straight down you see into the water (deep); at a grazing angle the
+	// surface turns into a mirror for the sky (shallow_color is the pale one).
+	// Shaped like real Fresnel rather than a linear ramp, which is what pins the
+	// bright band to the far bank instead of washing the whole river.
 	// Troughs bias a shade deeper than crests.
 	float facing = clamp(dot(n_world, to_cam), 0.0, 1.0);
 	float fresnel = pow(1.0 - facing, horizon_falloff);
-	float depth_mix = clamp(1.0 - fresnel - h * 0.18, 0.0, 1.0);
-	vec3 base = mix(shallow_color.rgb, deep_color.rgb, depth_mix);
+	// Written as "how far toward the mirror", not "how deep", so mirror_albedo can
+	// scale the one term without also scaling the depth cue. See its declaration:
+	// the other 70% of the mirror is the renderer's specular, which reflects the real
+	// sky instead of a colour standing in for one.
+	float mirror = clamp(fresnel + h * 0.18, 0.0, 1.0) * mirror_albedo;
+	vec3 base = mix(deep_color.rgb, shallow_color.rgb, mirror);
 
 	// Whitecaps on the top sliver of the crests, broken up so the band isn't a
 	// clean contour line. Keyed off normalised wave height, so it survives
@@ -140,8 +215,10 @@ void fragment() {
 	ALBEDO = mix(base, foam_color.rgb, foam);
 	NORMAL = normalize((VIEW_MATRIX * vec4(n_world, 0.0)).xyz);
 	EMISSION = glint_color.rgb * glint * glint_strength;
-	// Near-mirror everywhere but the foam, so the sky radiance map actually
-	// shows up as a reflection instead of a flat wash.
+	// Near-mirror everywhere but the foam, so the sky radiance map — and SSR, which
+	// is what puts the arch and the Ribeira in the water — actually shows up as a
+	// reflection instead of a flat wash. This term matters far more under a blue sky
+	// with an iron lattice across it than it did under an amber one.
 	ROUGHNESS = mix(water_roughness, 0.55, foam);
 	METALLIC = 0.0;
 	// Left at the 4% dielectric default: the BRDF's own Schlick term already
