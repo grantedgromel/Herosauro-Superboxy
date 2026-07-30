@@ -149,13 +149,13 @@ const DIELECTRIC_METAL_SPECULAR := 0.62
 ## slight softening — which is the correct behaviour for a second layer.
 const DETAIL_TILE_METERS := 0.28
 
-## The fine albedo map averages about 0.88 of white in linear terms, so leaving it
-## alone would quietly darken every authored colour in the game by roughly 12% and
-## make forty call sites' palettes mean something they do not say. This puts that
-## back. It is not a look dial — the RUBRIC's "exposure-driven, not
-## multiplier-driven" rule is about fixing LIGHTING with albedo, and this is a
-## texture-mean correction. It is applied before ALBEDO_CEILING, so it can never
-## push a colour out of range.
+## The fine layer's NET multiplier on albedo runs 0.68 at the bottom of its range to
+## 1.00 at the top and averages about 0.88, so leaving it alone would quietly darken
+## every authored colour in the game by roughly 12% and make forty call sites'
+## palettes mean something they do not say. 1/0.885 puts that back. It is not a look
+## dial — the RUBRIC's "exposure-driven, not multiplier-driven" rule is about fixing
+## LIGHTING with albedo, and this is a texture-mean correction. It is applied before
+## ALBEDO_CEILING, so it can never push a colour out of range.
 const DETAIL_ALBEDO_GAIN := 1.13
 
 static var _cache: Dictionary = {}
@@ -254,9 +254,10 @@ static func cloth(color: Color = CLOTH_LINEN, tile_meters: float = 0.45) -> Stan
 ## Glazed ceramic — the azulejo panels. Wet-looking: that hard specular kick off
 ## a tile front is the whole reason azulejos read as Porto and not as blue paint,
 ## and under a hard blue sky it is a far bigger part of the frame than it was under a
-## hazy one. specular 0.65 = F0 near 6%, which is a fired lead glaze rather than the
-## 4% Godot assumes for everything, and it is the difference between a tile panel that
-## flashes as the camera passes and one that does not.
+## hazy one. Godot's metallic_specular is F0 = 0.16 * s^2, so 0.65 is F0 = 6.8%: a
+## fired lead glaze rather than the 4% the 0.5 default assumes for everything, and the
+## difference between a tile panel that flashes as the camera passes and one that does
+## not.
 static func ceramic(color: Color = AZULEJO_BLUE, tile_meters: float = 0.5) -> StandardMaterial3D:
 	return build(color, Surface.TERRACOTTA, 0.14, 0.0, tile_meters, 0.30, 0.14,
 			Color.BLACK, 0.0, 1.0, 0.65)

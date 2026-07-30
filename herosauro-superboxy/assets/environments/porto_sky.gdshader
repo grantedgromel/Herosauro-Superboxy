@@ -59,7 +59,15 @@ uniform vec4 upper_color : source_color = vec4(0.322, 0.541, 0.804, 1.0);
 // Sea haze coming up the Douro estuary. Pale, and still faintly blue: horizon haze
 // under a high sun is scattered *sky*, so it desaturates toward white, not toward
 // cream. The cream version of this number was the single loudest remnant of sunset.
-uniform vec4 horizon_color : source_color = vec4(0.741, 0.831, 0.898, 1.0);
+//
+// Darkened 0.741,0.831,0.898 -> 0.660,0.760,0.850 after a render measured the far
+// bank at luminance 0.69 against a sky at 0.59. Distant geometry is 90% veiled by
+// fog_aerial_perspective, i.e. it takes the colour of the sky BEHIND it — and the sky
+// behind anything on the skyline is this band. Too bright here and the backdrop comes
+// out brighter than the dome above it, which is the RUBRIC's "background competing
+// with playable space" failure arriving through the atmosphere rather than through
+// the art.
+uniform vec4 horizon_color : source_color = vec4(0.660, 0.760, 0.850, 1.0);
 // sin(elevation) at which the pale band hands over to upper_color. 0.30 = 17.5 deg.
 uniform float horizon_band : hint_range(0.05, 0.9) = 0.30;
 // Shape exponents inside each band. Below 1 the band gives way early, above 1 it
@@ -79,13 +87,16 @@ uniform float zenith_shape : hint_range(0.2, 4.0) = 0.90;
 // point — and stacking a tight layer on a broad one gives the band a bright core
 // and a long soft tail, which is what a photograph shows.
 //
-// Both energies come down (0.55/0.30 -> 0.42/0.26) and both falloffs tighten. A low
+// Both energies come down (0.55/0.30 -> 0.34/0.26) and both falloffs tighten. A low
 // sun fires its light along the same sightlines the haze sits in, so the band is
 // blinding and deep; a high sun lights the haze from above and it reads as a modest
-// pale hem. Overdoing it here is what makes a daylight sky look smoggy.
-uniform vec4 haze_color : source_color = vec4(0.827, 0.878, 0.925, 1.0);
+// pale hem. Overdoing it here is what makes a daylight sky look smoggy — and, because
+// the depth fog takes 90% of its colour from whatever sky is behind the geometry, it
+// is also what makes the far bank glow. The tight layer took the second cut
+// (0.42 -> 0.34) for the same reason horizon_color darkened.
+uniform vec4 haze_color : source_color = vec4(0.760, 0.828, 0.888, 1.0);
 uniform float haze_tight_falloff : hint_range(2.0, 80.0) = 18.0;   // e-fold at 3.2 deg
-uniform float haze_tight_energy : hint_range(0.0, 1.0) = 0.42;
+uniform float haze_tight_energy : hint_range(0.0, 1.0) = 0.34;
 uniform float haze_broad_falloff : hint_range(1.0, 40.0) = 4.5;    // e-fold at 12.8 deg
 uniform float haze_broad_energy : hint_range(0.0, 1.0) = 0.26;
 

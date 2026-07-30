@@ -343,6 +343,7 @@ func reset() -> void:
 	_face.set_dimmed(false)
 	_down_veil.visible = false
 	_set_status(0, "", UIStyle.GOLD)
+	clear_combo()
 	_hit = 0.0
 	if _recoil != null and _recoil.is_valid():
 		_recoil.kill()
@@ -447,8 +448,33 @@ func _set_status(kind: int, body: String, tint: Color) -> void:
 	set_process(true)
 
 
+## This hero's combo window, run down locally. GameManager owns the authoritative
+## timer and will emit `combo_changed(pid, 0)` when it lapses; this is the visual
+## drain, so the rail is smooth instead of stepping once at the end.
+func _tick_combo(delta: float) -> void:
+	if _combo_shake > 0.0:
+		_combo_shake_phase += delta
+		_combo_shake = maxf(0.0, _combo_shake - _combo_shake * COMBO_SHAKE_LAMBDA * delta
+			- delta * 0.5)
+		# Two out-of-phase sinusoids rather than random offsets: it reads as a
+		# struck object ringing down, and it is identical on every run, which
+		# `randf()` here would not be.
+		var swing := _combo_shake * COMBO_SHAKE
+		_combo_count.position = _combo_home + Vector2(
+			sin(_combo_shake_phase * COMBO_SHAKE_HZ) * swing,
+			sin(_combo_shake_phase * COMBO_SHAKE_HZ * 0.73) * swing * 0.6)
+	elif _combo_count.position != _combo_home:
+		_combo_count.position = _combo_home
+
+	if _combo_value < COMBO_MIN:
+		return
+	_combo_left = maxf(0.0, _combo_left - delta)
+	_combo_fill.size.x = _combo_track.size.x * (_combo_left / GameManager.COMBO_TIMEOUT)
+
+
 func _process(delta: float) -> void:
 	_pulse += delta
+	_tick_combo(delta)
 	if _hit > 0.0:
 		_hit = maxf(0.0, _hit - _hit * HIT_LAMBDA * delta - delta * 0.25)
 		# The whole plate warms toward the hero's colour and cools back. Cheaper
@@ -466,5 +492,8 @@ func _process(delta: float) -> void:
 	elif _status.visible:
 		_status.modulate.a = 1.0
 
-	if _hit <= 0.0 and _status_kind != 1:
+	# Sleep only when nothing at all is animating. A live chain has to keep
+	# draining its rail, and a chain that has just landed has to keep ringing,
+	# so both hold the panel awake alongside the hit glow and the i-frame blink.
+	if _hit <= 0.0 and _status_kind != 1 and _combo_value < COMBO_MIN and _combo_shake <= 0.0:
 		set_process(false)

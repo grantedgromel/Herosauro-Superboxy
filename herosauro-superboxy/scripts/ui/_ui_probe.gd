@@ -360,19 +360,47 @@ func _check_hud() -> void:
 	_check_two_player(hud)
 	_check_bounds(hud)
 
-	# A real exchange of blows.
+	var p1: HeroPanel = hud._heroes[1]
+	var p2: HeroPanel = hud._heroes[2]
+
+	# A real exchange of blows, all of them player one's.
 	GameManager.damage_boss(8, 1)
 	GameManager.damage_boss(8, 1)
 	GameManager.damage_boss(18, 1)
 	await get_tree().process_frame
-	_ok(GameManager.p2_combo == 3, "combo counted three chained hits")
-	_ok(hud._combo_slot.visible and hud._combo_count.text == "3", "combo readout shows 3")
-	_ok(hud._combo_count.text.is_valid_int(), "combo text is digits only (Bangers-safe)")
+	_ok(GameManager.combo_for(1) == 3, "combo counted three chained hits")
+	_ok(p1._combo_count.visible and p1._combo_count.text == "3", "P1's combo readout shows 3")
+	_ok(p1._combo_count.text.is_valid_int(), "combo text is digits only (Bangers-safe)")
 	_ok(hud._pops.get_child_count() >= 1,
 		"damage numbers spawned (%d)" % hud._pops.get_child_count())
 
-	var p1: HeroPanel = hud._heroes[1]
-	var p2: HeroPanel = hud._heroes[2]
+	# THE CHAINS ARE INDEPENDENT. Player one landing three hits must not put a
+	# number over player two's head — that is the whole reason the counter moved
+	# into the panels instead of staying one shared splash.
+	_ok(not p2._combo_count.visible, "P2's combo readout stays clear of P1's chain")
+	GameManager.damage_boss(7, 2)
+	GameManager.damage_boss(7, 2)
+	await get_tree().process_frame
+	_ok(GameManager.combo_for(2) == 2, "P2 keeps a chain of their own")
+	_ok(p2._combo_count.visible and p2._combo_count.text == "2", "P2's readout shows their own 2")
+	_ok(p1._combo_count.text == "3", "P1's readout is untouched by P2's chain")
+	# ...and the two are visibly distinguishable, because a chain starting in its
+	# owner's colour is the second cue that says whose it is.
+	_ok(p1._combo_count.get_theme_color("font_color")
+		!= p2._combo_count.get_theme_color("font_color"),
+		"the two chains start in different colours")
+	# Each counter hangs off its own panel's INBOARD edge, pointing into the
+	# fight — so P1's is to the right of P1's plate and P2's to the left of P2's,
+	# and they never trade places or collide.
+	var c1 := p1.combo_rect()
+	var c2 := p2.combo_rect()
+	_ok(c1.get_center().x > Rect2(p1.position, p1.size).get_center().x,
+		"P1's combo hangs off the inboard (right) edge")
+	_ok(c2.get_center().x < Rect2(p2.position, p2.size).get_center().x,
+		"P2's combo hangs off the inboard (left) edge")
+	_ok(not c1.intersects(c2), "the two combo counters do not collide")
+	_ok(Rect2(Vector2.ZERO, VIEW).encloses(c1.merge(c2)),
+		"both combo counters stay in frame %s / %s" % [c1, c2])
 
 	GameManager.damage_player(1, 22)
 	await get_tree().process_frame
@@ -410,10 +438,13 @@ func _check_hud() -> void:
 	_ok(hud._score_value.text == UIProgress.format_score(GameManager.score),
 		"score renders grouped: '%s'" % hud._score_value.text)
 
-	# Combo window expires on its own.
-	await _wait_until(func() -> bool: return not hud._combo_slot.visible,
+	# Each hero's combo window expires on its own — GameManager runs one timer per
+	# chain, and both counters have to clear off the back of their own.
+	await _wait_until(func() -> bool:
+		return not p1._combo_count.visible and not p2._combo_count.visible,
 		int(GameManager.COMBO_TIMEOUT * 1000.0) + 3000)
-	_ok(not hud._combo_slot.visible, "combo readout clears when the window lapses")
+	_ok(not p1._combo_count.visible, "P1's combo clears when its window lapses")
+	_ok(not p2._combo_count.visible, "P2's combo clears when its window lapses")
 
 	# Low health drives the sustained edge glow, and only then. It reads the
 	# WORST-off living hero, so in co-op it is still telling you something the
@@ -461,34 +492,66 @@ func _check_hud() -> void:
 	await _check_solo()
 
 
-## The HUD reads `GameManager.player_count`, so a solo run must build ONE panel
-## and put it where the co-op HUD puts player one — not build two and leave an
-## empty plate where the second hero would have been. Checked with a throwaway
-## HUD rather than by rebuilding the main one, because player_count is read once
-## at construction and the rest of this probe depends on the co-op layout.
+## THE ROSTER IS NOT A RANGE.
+##
+## `active_player_ids()` is the single authority, and the case that breaks a
+## `range(1, player_count + 1)` is a solo run driven as HERO 2: the roster is
+## `[2]`, the range builds player one's panel for a hero who never spawns, and
+## the hero who is actually in the world gets no readout at all. Both solo
+## rosters are checked here for exactly that reason.
+##
+## Also checks the rebuild hook. The roster is chosen in the menu, long after the
+## HUD scene was built, so panels created in `_ready()` would be frozen at
+## whatever the roster happened to be at boot — this drives a live HUD from one
+## roster to the other and back.
 func _check_solo() -> void:
-	var was := GameManager.player_count
-	GameManager.player_count = 1
+	var was_count := GameManager.player_count
+	var was_hero := GameManager.human_hero
+
 	var solo: Control = HUDScene.instantiate()
 	_stage.add_child(solo)
 	await get_tree().process_frame
+	_ok(solo._heroes.size() == 2, "the HUD boots on the default co-op roster")
+
+	for hero in [1, 2]:
+		GameManager.player_count = 1
+		GameManager.human_hero = hero
+		# The roster changes in the menu; `game_started` is what tells the HUD.
+		GameManager.start_game()
+		await get_tree().process_frame
+
+		_ok(solo._heroes.size() == 1,
+			"a solo run as hero %d builds one panel (%d)" % [hero, solo._heroes.size()])
+		_ok(solo._heroes.has(hero),
+			"the panel built is hero %d's, not a range's first entry %s"
+			% [hero, str(solo._heroes.keys())])
+		if solo._heroes.has(hero):
+			var only: HeroPanel = solo._heroes[hero]
+			_ok(only.actor == UIStyle.actor_for_player(hero),
+				"the solo panel wears hero %d's face" % hero)
+			# Mirroring is a position in a pair, not a property of a player id: a
+			# lone hero 2 belongs in the same corner a lone hero 1 would take.
+			_ok(not only.mirrored, "the solo panel is the unmirrored left-hand one")
+			_near(only.position.x, UIStyle.SCREEN_MARGIN, 0.5,
+				"the solo panel keeps the left gutter")
+		# Signals aimed at the hero who is not in the world must be dropped, not
+		# coerced onto the one who is.
+		var absent := 2 if hero == 1 else 1
+		GameManager.damage_player(absent, 25)
+		GameManager.combo_changed.emit(absent, 5)
+		await get_tree().process_frame
+		_ok(solo._heroes.size() == 1, "signals for an absent hero are ignored cleanly")
+
+	# ...and back to co-op, which must restore both panels rather than leaving the
+	# solo one in place.
+	GameManager.player_count = was_count
+	GameManager.human_hero = was_hero
 	GameManager.start_game()
 	await get_tree().process_frame
-
-	_ok(solo._heroes.size() == 1, "a solo run builds one panel (%d)" % solo._heroes.size())
-	if solo._heroes.has(1):
-		var only: HeroPanel = solo._heroes[1]
-		_ok(not only.mirrored, "the solo panel is the unmirrored left-hand one")
-		_near(only.position.x, UIStyle.SCREEN_MARGIN, 0.5, "the solo panel keeps the left gutter")
-	# Damage aimed at the hero who is not in the world must be dropped, not crash
-	# the HUD on a null panel.
-	GameManager.damage_player(2, 25)
-	await get_tree().process_frame
-	_ok(solo._heroes.size() == 1, "damage to an absent hero is ignored cleanly")
+	_ok(solo._heroes.size() == 2, "returning to co-op rebuilds both panels")
 
 	solo.queue_free()
 	await get_tree().process_frame
-	GameManager.player_count = was
 
 
 ## The co-op contract, measured. Two panels, same size, mirror positions, and
@@ -520,7 +583,10 @@ func _check_two_player(hud: Control) -> void:
 		"the two panels do not touch each other")
 
 	# Every element inside a panel must stay inside it, or a mirrored offset has
-	# been mis-computed and something is hanging off the plate.
+	# been mis-computed and something is hanging off the plate. The combo cluster
+	# is the one deliberate exception — it overhangs the top edge on purpose —
+	# and it is identified by sitting at negative y rather than by name, so a
+	# control that drifts off any other edge is still caught.
 	for panel: HeroPanel in [p1, p2]:
 		var box := Rect2(Vector2.ZERO, panel.size).grow(1.0)
 		var loose: Array[String] = []
@@ -528,7 +594,10 @@ func _check_two_player(hud: Control) -> void:
 			var ctrl := c as Control
 			if ctrl == null or not ctrl.visible:
 				continue
-			if not box.encloses(Rect2(ctrl.position, ctrl.size)):
+			var r := Rect2(ctrl.position, ctrl.size)
+			if r.position.y < 0.0:
+				continue   # the combo overhang
+			if not box.encloses(r):
 				loose.append(ctrl.get_class())
 		_ok(loose.is_empty(), "P%d's contents stay on its plate %s"
 			% [panel.player_id, str(loose)])
@@ -554,25 +623,25 @@ func _check_bounds(hud: Control) -> void:
 
 	var boss := Rect2(hud._boss_plate.position, hud._boss_plate.size)
 	var read := Rect2(hud._readout_plate.position, hud._readout_plate.size)
-	var combo := Rect2(hud._combo_slot.position, hud._combo_slot.size) \
-		.merge(Rect2(hud._combo_track.position, hud._combo_track.size))
 	_ok(not read.intersects(boss), "score plate clears the boss banner %s / %s" % [read, boss])
-	_ok(not combo.intersects(read), "combo splash clears the score plate")
-	_ok(not combo.intersects(boss), "combo splash clears the boss banner")
 	_ok(read.end.x <= VIEW.x - UIStyle.SCREEN_MARGIN + 1.0, "readouts respect the right gutter")
-	_ok(combo.end.x <= VIEW.x - UIStyle.SCREEN_MARGIN + 1.0, "combo splash respects the gutter")
 
 	for pid: int in hud._heroes:
 		var panel: HeroPanel = hud._heroes[pid]
 		var hero := Rect2(panel.position, panel.size)
-		_ok(not hero.intersects(boss), "P%d's panel clears the boss banner" % pid)
-		_ok(not hero.intersects(combo), "P%d's panel clears the combo splash" % pid)
+		# The panel AND its combo overhang, since the overhang is what reaches up
+		# toward the boss banner.
+		var reach := hero.merge(panel.combo_rect())
+		_ok(not reach.intersects(boss), "P%d's cluster clears the boss banner" % pid)
+		_ok(not reach.intersects(read), "P%d's cluster clears the score plate" % pid)
 		_ok(hero.position.x >= UIStyle.SCREEN_MARGIN - 1.0,
 			"P%d respects the left gutter" % pid)
 		_ok(hero.end.x <= VIEW.x - UIStyle.SCREEN_MARGIN + 1.0,
 			"P%d respects the right gutter" % pid)
 		_ok(hero.end.y <= VIEW.y - UIStyle.SCREEN_MARGIN + 1.0,
 			"P%d respects the bottom gutter (%.0f)" % [pid, hero.end.y])
+		_ok(Rect2(Vector2.ZERO, VIEW).encloses(reach),
+			"P%d's cluster stays in frame %s" % [pid, reach])
 
 	# The epithet and the phase readout share a line under the boss bar; their
 	# boxes must not run into each other or one will draw over the other.

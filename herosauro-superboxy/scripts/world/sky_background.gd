@@ -354,17 +354,25 @@ func _build_clouds() -> void:
 	# objects in frame still carrying the sunset. ToonFactory clamps it to
 	# ALBEDO_CEILING anyway — nothing diffuse reflects 95%.
 	#
-	# No longer FLAT. These were untextured on the grounds that a detail normal on a
-	# 4 m puff at 50 m is just shimmer, and that is true of the FINE layer — which is
-	# why fine_detail is off — but it was never true of a coarse one. A render of shot
-	# 07 came back with the clouds reading as exactly what they are: smooth spheres
-	# with a hard silhouette and no surface, the single most obviously untextured thing
-	# in the frame and a straight fail on the RUBRIC's first material line. The plaster
-	# map at a 3.2 m tile is one soft lump per two metres of puff, which breaks the
-	# sphere without ever resolving as noise, and 0.45 of normal scale is as far as
-	# that can go before the lumps start reading as rock.
+	# No longer FLAT, but only barely, and the amount is measured rather than chosen.
+	#
+	# These were untextured on the grounds that a detail normal on a 4 m puff at 50 m
+	# is just shimmer. That is true of the FINE layer — which is why fine_detail is
+	# off — but it was never true of a coarse one, and a render had the clouds reading
+	# as smooth spheres with a hard silhouette and no surface. The first correction
+	# went much too far the other way: the plaster map at a 3.2 m tile with 0.45 of
+	# normal scale and 0.22 of AO measured (0.49, 0.59, 0.68) at lum 0.57 against a
+	# sky at 0.55, i.e. a cloud no brighter than the sky behind it and tinted grey-blue
+	# by its own shading — a lump of rock, not a cumulus.
+	#
+	# A cloud is not a diffuse solid. Nearly all of its brightness is forward-scattered
+	# light passing THROUGH it, which no Lambert term models, so any normal that
+	# actually shades it is wrong by construction. 5.5 m of tile and 0.14 of scale is
+	# one very soft undulation across a whole puff — enough that the silhouette is not
+	# a perfect ellipse and the surface is not a single value, and not enough to carve
+	# facets. AO is off entirely for the same reason: there are no crevices in a cloud.
 	var cloud_mat := ToonFactory.build(Color(0.93, 0.94, 0.95), ToonFactory.Surface.PLASTER,
-			1.0, 0.0, 3.2, 0.45, 0.22, Color.BLACK, 0.0, 1.0, 0.5, false)
+			1.0, 0.0, 5.5, 0.14, 0.0, Color.BLACK, 0.0, 1.0, 0.5, false)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
 

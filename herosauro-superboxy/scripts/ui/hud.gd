@@ -9,20 +9,22 @@ extends Control
 ##   │            │  THE GIANT…    PHASE 1 ◆◇ │         │ TIME    2:31 ││
 ##   │            └───────────────────────────┘         └──────────────┘│
 ##   │                                                                  │
-##   │                                                        ×5        │
-##   │                                                     HIT COMBO    │
+##   │                     ×5                        ×3                 │
+##   │              HIT COMBO ▬▬▬▬              ▬▬▬▬ HIT COMBO          │
 ##   │  ┌───────────────────┐                    ┌───────────────────┐  │
 ##   │  │▣ P1 HEROSAURO  (◔)│                    │(◔)  SUPER BOXY P2▣│  │
 ##   │  │  [==== 84/100 ===]│                    │[=== 100/100 ====] │  │
 ##   │  └───────────────────┘                    └───────────────────┘  │
 ##   └──────────────────────────────────────────────────────────────────┘
 ##
-## Four clusters, four jobs. Boss top-centre because it is the thing you are
-## fighting and your eyes are already there. THE TWO HEROES ARE MIRROR IMAGES IN
-## THE TWO BOTTOM CORNERS — same size, same content, same weight — because this
-## is co-op and a HUD that stacks a big player one over a small player two tells
-## the second player whose game they are in. Score and timer top-right, small,
-## because they are a post-match concern.
+## Three clusters, three jobs. Boss top-centre because it is the thing you are
+## fighting and your eyes are already there. THE HEROES ARE MIRROR IMAGES IN THE
+## TWO BOTTOM CORNERS — same size, same content, same weight — because this is
+## co-op and a HUD that stacks a big player one over a small player two tells the
+## second player whose game they are in. Each hero's combo hangs off the inboard
+## edge of their own plate; see hero_panel.gd for why it is not one shared splash
+## in the middle. Score and timer top-right, small, because they are a post-match
+## concern.
 ##
 ## Nothing here dims the world. Every cluster is an opaque keylined plate, which
 ## is what makes the chrome readable over a bright, saturated, high-contrast
@@ -32,9 +34,17 @@ extends Control
 ##
 ## CROSS-STREAM INTERFACE. Everything visible here comes from GameManager's
 ## signals — `player_damaged(player_id, …)`, `player_respawned`, `boss_damaged`,
-## `score_changed`, `combo_changed`, `timer_updated`, `boss_phase_changed` — plus
-## two group lookups (`players`, `boss`) for the things that are positions and
-## fractions rather than events. No player or boss script is touched.
+## `score_changed`, `combo_changed(player_id, …)`, `timer_updated`,
+## `boss_phase_changed` — from `active_player_ids()` for the roster, and from
+## `InputManager.action_name()` for the control hints. Plus two group lookups
+## (`players`, `boss`) for the things that are positions and fractions rather
+## than events. No player or boss script is touched.
+##
+## THE ROSTER IS NOT A RANGE. `active_player_ids()` is the single authority, and
+## a solo run driven as hero 2 returns `[2]` — iterating `range(1, count + 1)`
+## builds a panel for a hero who will never spawn and leaves the real one
+## unlabelled. The panels are therefore built on `game_started`, not in `_ready`,
+## because the roster is chosen in the menu after this scene already exists.
 
 const BOSS_ACTOR := UIStyle.Actor.ADAMASTOR
 
@@ -53,12 +63,6 @@ const DANGER_RATIO := 0.30
 const SCORE_LAMBDA := 9.0
 ## Seconds the score readout stays lit gold after it moves.
 const SCORE_GLOW := 0.45
-## How hard the combo splash shakes, in pixels, at the moment a hit lands.
-const COMBO_SHAKE := 7.0
-## Combo shake decay per second, and its ringing frequency in rad/s. Fast and
-## high — a combo counter should feel struck, not wobbled.
-const COMBO_SHAKE_LAMBDA := 7.0
-const COMBO_SHAKE_HZ := 41.0
 
 ## Fixed seed for the damage-number scatter. Explicit because the capture gate
 ## compares frames pixel for pixel and `randf_range()` would put every floating
@@ -66,8 +70,13 @@ const COMBO_SHAKE_HZ := 41.0
 ## rules exist".
 const POP_SEED := 0x51500FE1
 
-# Hero clusters, keyed by player_id.
+## Hero panels, keyed by player_id. Rebuilt from `active_player_ids()` whenever
+## the roster changes; see `_sync_roster()`.
 var _heroes: Dictionary = {}
+## Fixed slot in the child list the panels are (re)built into, so a rebuild
+## cannot land them on top of the pause sheet. Panels added after `_ready()`
+## would otherwise be appended last, i.e. above every overlay.
+var _hero_layer: Control
 
 # Boss banner
 var _boss_plate: Panel
@@ -83,24 +92,18 @@ var _phase_pips: Array[Panel] = []
 var _readout_plate: Panel
 var _score_value: Label
 var _timer_value: Label
-var _combo_slot: Control
-var _combo_count: Label
-var _combo_word: Label
-var _combo_track: Panel
-var _combo_fill: Panel
 
 # Effects + overlays
 var _fx: HitVignette
 var _pops: DamageNumbers
 var _pause: Control
+## Container for the pause overlay's control reference. Rebuilt with the roster,
+## because the two heroes are driven by two different sets of hardware.
+var _pause_hints: VBoxContainer
 
 var _score_shown: float = 0.0
 var _score_target: float = 0.0
 var _score_glow: float = 0.0
-var _combo_left: float = 0.0
-var _combo_value: int = 0
-var _combo_shake: float = 0.0
-var _combo_shake_phase: float = 0.0
 var _rng := RandomNumberGenerator.new()
 
 
@@ -109,13 +112,18 @@ func _ready() -> void:
 	_rng.seed = POP_SEED
 
 	# Child order is draw order: effects behind, numbers over the world but under
-	# the chrome, chrome under the pause sheet.
+	# the chrome, chrome under the pause sheet. The hero layer is claimed here
+	# and filled in later, so a mid-session roster change cannot reorder the HUD.
 	_build_effects()
 	_build_boss_banner()
-	_build_hero_panels()
+	_hero_layer = Control.new()
+	_hero_layer.name = "HeroLayer"
+	_hero_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hero_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_hero_layer)
 	_build_readouts()
-	_build_combo()
 	_build_pause()
+	_sync_roster()
 
 	GameManager.player_damaged.connect(_on_player_damaged)
 	GameManager.player_respawned.connect(_on_player_respawned)
@@ -188,21 +196,55 @@ func _build_boss_banner() -> void:
 		_phase_pips.append(pip)
 
 
-## One panel per hero, mirrored into the two bottom corners.
+## Bring the hero panels in line with the session's actual roster.
 ##
-## Built off `GameManager.player_count` rather than off what happens to be in the
-## `players` group right now: the group is empty while the HUD is constructed
-## (main.gd builds the world after the UI layer), and a panel that only appears
-## once a hero has spawned would pop in a frame late every single run.
-func _build_hero_panels() -> void:
-	var count := clampi(GameManager.player_count, 1, 2)
-	for pid in range(1, count + 1):
-		var right := pid == 2
+## Driven by `GameManager.active_player_ids()`, which is the single roster
+## authority — NOT by `player_count`, and never by a range over it. A solo run
+## driven as hero 2 has a roster of `[2]`; a range would build player one's panel
+## for a hero who is never spawned, and leave the hero who IS in the world with
+## no readout at all.
+##
+## Not driven by the `players` group either: the group is empty while the HUD is
+## constructed (main.gd builds the world after the UI layer), so a panel that
+## waited for a spawn would pop in a frame late every single run.
+##
+## Called from `_ready()` for the boot case and again from `game_started`, which
+## is the only hook that fires after the menu has chosen a roster. A run whose
+## roster is unchanged keeps its panels rather than discarding them, so a restart
+## does not throw away live tweens for nothing.
+func _sync_roster() -> void:
+	var roster := GameManager.active_player_ids()
+	if _heroes.size() == roster.size():
+		var same := true
+		for pid in roster:
+			if not _heroes.has(pid):
+				same = false
+		if same:
+			return
+
+	for panel: HeroPanel in _heroes.values():
+		_hero_layer.remove_child(panel)
+		panel.queue_free()
+	_heroes.clear()
+
+	# The SECOND hero on the roster takes the mirrored right-hand slot, whoever
+	# that is. Mirroring is a position in a pair, not a property of a player id:
+	# a lone hero 2 belongs in the same bottom-left slot a lone hero 1 would take,
+	# because there is nothing on the other side of the screen to mirror against.
+	for i in roster.size():
+		var pid: int = roster[i]
+		var right := i == 1
 		var panel := HeroPanel.new()
 		panel.setup(pid, right)
 		var x := -(M + HeroPanel.PANEL.x) if right else float(M)
-		_place(panel, Control.PRESET_BOTTOM_RIGHT if right else Control.PRESET_BOTTOM_LEFT,
-			Vector2(x, -(M + HeroPanel.PANEL.y)), HeroPanel.PANEL)
+		panel.set_anchors_preset(
+			Control.PRESET_BOTTOM_RIGHT if right else Control.PRESET_BOTTOM_LEFT)
+		var y := -(M + HeroPanel.PANEL.y)
+		panel.offset_left = x
+		panel.offset_top = y
+		panel.offset_right = x + HeroPanel.PANEL.x
+		panel.offset_bottom = y + HeroPanel.PANEL.y
+		_hero_layer.add_child(panel)
 		_heroes[pid] = panel
 
 
@@ -235,59 +277,6 @@ func _build_readouts() -> void:
 	_place(_timer_value, Control.PRESET_TOP_RIGHT, Vector2(right + pad, 74.0), Vector2(inner_w, 26))
 
 
-func _build_combo() -> void:
-	# Right edge, vertically centred: clear of the boss banner above it, clear of
-	# player two's panel below it, and out of the middle where the fight happens.
-	# The splash carries no plate on purpose — it is a transient shout, and a
-	# panel that appeared and vanished five times a fight would read as a bug.
-	var w := 240.0
-	var right := -(M + w)
-
-	# The count lives inside a slot rather than being anchored itself. The shake
-	# writes to `position`, and writing position on an anchor-placed control
-	# destroys the anchor relationship the layout depends on — so the slot owns
-	# the anchors and the label only ever moves relative to (0, 0) inside it.
-	_combo_slot = Control.new()
-	_combo_slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_place(_combo_slot, Control.PRESET_CENTER_RIGHT, Vector2(right, -60.0), Vector2(w, 84))
-
-	_combo_count = UIStyle.title("", UIStyle.Scale.TITLE, UIStyle.GOLD)
-	_combo_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_combo_count.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_combo_slot.add_child(_combo_count)
-
-	_combo_word = UIStyle.text("", UIStyle.Scale.LABEL, UIStyle.GOLD_DEEP, HORIZONTAL_ALIGNMENT_RIGHT)
-	_place(_combo_word, Control.PRESET_CENTER_RIGHT, Vector2(right, 10.0), Vector2(w, 20))
-
-	# Depletion rail: the combo window running out, drawn as a shrinking bar so
-	# the player can see how long they have to land the next hit.
-	_combo_track = Panel.new()
-	_combo_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var tb := StyleBoxFlat.new()
-	tb.bg_color = UIStyle.BASE
-	tb.set_corner_radius_all(4)
-	tb.set_border_width_all(2)
-	tb.border_color = UIStyle.KEYLINE
-	_combo_track.add_theme_stylebox_override("panel", tb)
-	_place(_combo_track, Control.PRESET_CENTER_RIGHT, Vector2(right + w - 150.0, 36.0),
-		Vector2(150, 8))
-
-	_combo_fill = Panel.new()
-	_combo_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var fb := StyleBoxFlat.new()
-	fb.bg_color = UIStyle.GOLD
-	fb.set_corner_radius_all(4)
-	_combo_fill.add_theme_stylebox_override("panel", fb)
-	# Pinned to the track's top-left with all four anchors at 0, so resizing the
-	# fill each frame only moves its own offsets. A stretched preset here would
-	# have the layout fight the width we set and log an override warning.
-	_combo_fill.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_combo_fill.size = Vector2(150, 8)
-	_combo_track.add_child(_combo_fill)
-
-	_set_combo_visible(false)
-
-
 func _build_pause() -> void:
 	_pause = Control.new()
 	_pause.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -304,10 +293,10 @@ func _build_pause() -> void:
 	var card := UIStyle.card(UIStyle.Elev.MODAL, UIStyle.RADIUS_LG, UIStyle.SPACE_XL)
 	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	card.offset_left = -320.0
-	card.offset_right = 320.0
-	card.offset_top = -160.0
-	card.offset_bottom = 160.0
+	card.offset_left = -400.0
+	card.offset_right = 400.0
+	card.offset_top = -170.0
+	card.offset_bottom = 170.0
 	_pause.add_child(card)
 
 	var col := VBoxContainer.new()
@@ -322,11 +311,59 @@ func _build_pause() -> void:
 	col.add_child(UIStyle.divider(3, 0.20))
 
 	# A pause screen is the one moment the player has time to read the controls,
-	# so this is where the full reference lives rather than the menu footer.
-	var grid := UIStyle.hint_row([["WASD", "Move"], ["SPACE", "Jump"], ["SHIFT", "Sprint"]], UIStyle.SPACE_LG)
-	col.add_child(grid)
-	var grid2 := UIStyle.hint_row([["LMB", "Attack"], ["RMB", "Special"], ["ESC", "Resume"]], UIStyle.SPACE_LG)
-	col.add_child(grid2)
+	# so this is where the reference lives rather than the menu footer. Filled in
+	# by _rebuild_pause_hints(), because the bindings depend on the roster.
+	_pause_hints = VBoxContainer.new()
+	_pause_hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pause_hints.add_theme_constant_override("separation", UIStyle.SPACE_SM)
+	col.add_child(_pause_hints)
+	_rebuild_pause_hints()
+
+
+## One hint row per hero on the roster, read live out of the Input Map.
+##
+## CO-OP HAS TWO BINDING SETS AND THEY SHARE NOTHING. Slot one is WASD and the
+## mouse; slot two is a pad, or the IJKL cluster on a pad-less couch. A pause
+## screen that shows WASD to both players is telling player two something that is
+## simply false, and a hard-coded list is a lie the moment anyone rebinds
+## anything — so every glyph here comes from
+## `InputManager.action_name(player, action)` through the live InputMap.
+func _rebuild_pause_hints() -> void:
+	if _pause_hints == null:
+		return
+	for c in _pause_hints.get_children():
+		_pause_hints.remove_child(c)
+		c.queue_free()
+
+	var roster := GameManager.active_player_ids()
+	for pid in roster:
+		var row := HBoxContainer.new()
+		row.alignment = BoxContainer.ALIGNMENT_CENTER
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_theme_constant_override("separation", UIStyle.SPACE_MD)
+		# Only label the rows when there is more than one; a solo player does not
+		# need to be told which of the one players they are.
+		if roster.size() > 1:
+			var actor := UIStyle.actor_for_player(pid)
+			row.add_child(UIStyle.pill("P%d" % pid, UIStyle.actor_color(actor), UIStyle.BASE))
+		# One cap per direction for Move, one apiece for the rest: a pause overlay
+		# is a reminder, not the full controls table, and slot two's pad bindings
+		# would otherwise run the row off the card.
+		row.add_child(UIStyle.binding_pair("MOVE",
+			UIStyle.binding_caps(pid, ["move_up", "move_left", "move_down", "move_right"], 1)))
+		row.add_child(UIStyle.binding_pair("JUMP", UIStyle.binding_caps(pid, ["jump"], 1)))
+		row.add_child(UIStyle.binding_pair("HIT", UIStyle.binding_caps(pid, ["attack"], 1)))
+		row.add_child(UIStyle.binding_pair("SPECIAL", UIStyle.binding_caps(pid, ["ability"], 1)))
+		_pause_hints.add_child(row)
+
+	# Pause is not a per-slot action — either player's Esc resumes — so it sits on
+	# its own line rather than being repeated in both rows.
+	var resume := HBoxContainer.new()
+	resume.alignment = BoxContainer.ALIGNMENT_CENTER
+	resume.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	resume.add_theme_constant_override("separation", UIStyle.SPACE_MD)
+	resume.add_child(UIStyle.binding_pair("RESUME", UIStyle.binding_caps(1, ["ui_pause"], 2)))
+	_pause_hints.add_child(resume)
 
 
 func _place(ctrl: Control, preset: int, pos: Vector2, dims: Vector2) -> Control:
@@ -345,7 +382,6 @@ func _process(delta: float) -> void:
 	if not visible:
 		return
 	_tick_score(delta)
-	_tick_combo(delta)
 	_tick_heroes()
 
 
@@ -370,30 +406,6 @@ func _tick_score(delta: float) -> void:
 	_score_value.text = UIProgress.format_score(int(round(_score_shown)))
 
 
-func _tick_combo(delta: float) -> void:
-	if _combo_shake > 0.0:
-		_combo_shake_phase += delta
-		_combo_shake = maxf(0.0, _combo_shake - _combo_shake * COMBO_SHAKE_LAMBDA * delta
-			- delta * 0.5)
-		# Two out-of-phase sinusoids rather than random offsets: it reads as a
-		# struck object ringing down, and it is identical on every run, which
-		# `randf()` here would not be.
-		var swing := _combo_shake * COMBO_SHAKE
-		_combo_count.position = Vector2(
-			sin(_combo_shake_phase * COMBO_SHAKE_HZ) * swing,
-			sin(_combo_shake_phase * COMBO_SHAKE_HZ * 0.73) * swing * 0.6)
-	elif _combo_count.position != Vector2.ZERO:
-		_combo_count.position = Vector2.ZERO
-
-	if _combo_value < 2:
-		return
-	_combo_left = maxf(0.0, _combo_left - delta)
-	var frac := _combo_left / GameManager.COMBO_TIMEOUT
-	_combo_fill.size.x = _combo_track.size.x * frac
-	if _combo_left <= 0.0:
-		_end_combo()
-
-
 ## Ability cooldowns and i-frames are STATE, not events — there is no signal for
 ## them — so they are read once a frame off the `players` group, which is the
 ## documented runtime-lookup contract. Only `player_id` and the two public
@@ -413,6 +425,12 @@ func _tick_heroes() -> void:
 # --- Signals ------------------------------------------------------------------
 
 func _on_game_started() -> void:
+	# The roster is chosen in the menu, long after this scene was built, so this
+	# is the only hook that can see it. Panels first: the health and combo sync
+	# GameManager pushes immediately after `game_started` has to land on the
+	# panels this run actually fields.
+	_sync_roster()
+	_rebuild_pause_hints()
 	for panel: HeroPanel in _heroes.values():
 		panel.reset()
 	_boss_bar.reset_to(float(GameManager.MAX_BOSS_HEALTH))
@@ -425,7 +443,6 @@ func _on_game_started() -> void:
 	_timer_value.text = "0:00"
 	_fx.set_danger(0.0)
 	_pops.clear_all()
-	_end_combo()
 	_set_phase(1)
 
 
@@ -515,56 +532,19 @@ func _on_score_changed(new_score: int) -> void:
 	_score_glow = 1.0
 
 
+## Route a chain to the hero who owns it.
+##
+## `combo_changed`'s player_id is meaningful now — each hero keeps an independent
+## chain with its own timeout — so this is a lookup, not a display. A single
+## widget fed by both heroes would flicker between two unrelated counts, which is
+## why the counter lives in the panel; see hero_panel.gd.
+##
+## An id with no panel (a hero not on this session's roster) is dropped rather
+## than coerced onto player one's readout.
 func _on_combo_changed(player_id: int, combo: int) -> void:
-	if combo < 2:
-		_end_combo()
-		return
-	_combo_value = combo
-	_combo_left = GameManager.COMBO_TIMEOUT
-	# Digits only in the display face — Bangers is a decorative Latin set and a
-	# missing glyph there falls back to the engine default, which looks broken.
-	_combo_count.text = str(combo)
-	# In co-op the chain is shared, so the splash names whose blow extended it.
-	# Without that, two players both see the same "7" and neither knows who
-	# earned it. Plain ASCII: a middot or an en dash is a tofu box on the web
-	# export, where there is no system font to fall back to.
-	_combo_word.text = ("P%d HIT COMBO" % player_id) if _heroes.size() > 1 else "HIT COMBO"
-	_set_combo_visible(true)
-
-	# Higher combos run hotter: the chain starts in the hero's own colour and
-	# climbs through gold to ember, so a long chain is visibly a different thing
-	# from a two-hit one.
-	var heat := clampf((combo - 2) / 8.0, 0.0, 1.0)
-	var start := UIStyle.actor_color(UIStyle.actor_for_player(player_id)).lerp(UIStyle.GOLD, 0.72)
-	var tint := start.lerp(UIStyle.EMBER, heat)
-	_combo_count.add_theme_color_override("font_color", tint)
-	_combo_word.add_theme_color_override("font_color", tint.darkened(0.15))
-	(_combo_fill.get_theme_stylebox("panel") as StyleBoxFlat).bg_color = tint
-
-	# Pop AND shake. The pop says "this went up"; the shake says "you hit
-	# something". A counter that only scales reads as a UI transition.
-	_combo_count.pivot_offset = Vector2(_combo_count.size.x, _combo_count.size.y * 0.5)
-	var pop := 1.34 - 0.12 * heat
-	_combo_count.scale = Vector2(pop, pop)
-	_combo_shake = 1.0
-	_combo_shake_phase = 0.0
-	var t := create_tween()
-	t.tween_property(_combo_count, "scale", Vector2.ONE, 0.26) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
-
-func _end_combo() -> void:
-	_combo_value = 0
-	_combo_left = 0.0
-	_combo_shake = 0.0
-	_combo_count.position = Vector2.ZERO
-	_set_combo_visible(false)
-
-
-func _set_combo_visible(on: bool) -> void:
-	for n in [_combo_slot, _combo_word, _combo_track]:
-		if n:
-			(n as CanvasItem).visible = on
+	var panel: HeroPanel = _heroes.get(player_id)
+	if panel != null:
+		panel.set_combo(combo)
 
 
 func _on_timer_updated(seconds: float) -> void:

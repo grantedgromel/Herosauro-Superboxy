@@ -183,15 +183,18 @@ const COMPAT_FOG_DENSITY := 0.94
 
 ## Compatibility extracts glow after tonemapping, so nothing ever exceeds ~1.0 and
 ## an HDR threshold above it would stop the sun and the water's glint blooming
-## entirely. 0.82 -> 0.86 because the daylight grade lifts the whole upper mid-range:
-## at 0.82 ordinary sunlit plaster would now cross it, and screen-blending that is a
-## mid-tone lift across the frame rather than a bloom.
-const COMPAT_GLOW_THRESHOLD := 0.86
+## entirely. 0.82 -> 0.80, measured rather than reasoned: a render of the daylight
+## grade put the 99th percentile of frame luminance at 0.82, so a Compatibility
+## threshold at 0.86 would have selected nothing at all and the web build would have
+## had no bloom on anything, sun included. 0.80 catches roughly the top 1.5% — the sun
+## disk, the water's glint path and the glazed azulejo highlights — which is the same
+## population Forward+ selects at its own (HDR, and therefore quite different) 1.00.
+const COMPAT_GLOW_THRESHOLD := 0.80
 
 ## Buys back the indirect that SSIL and SDFGI were providing. 1.7 -> 1.8 because both
 ## of those went up with the brighter sky (sdfgi_energy 0.85 -> 0.95, ssil_intensity
 ## 0.55 -> 0.60), so Compatibility is now missing slightly more than it was.
-## 0.45 * 1.8 = 0.81, i.e. roughly where Forward+ sits with SDFGI and SSIL folded back
+## 0.32 * 1.8 = 0.58, i.e. roughly where Forward+ sits with SDFGI and SSIL folded back
 ## into a single directionless term.
 const COMPAT_AMBIENT_SCALE := 1.8
 
@@ -235,7 +238,7 @@ const MOVING_DECOR := ["Clouds", "Gulls", "Rabelos"]
 @export var sun: DirectionalLight3D
 ## Fill energies, exposed because they are the three numbers most likely to want a
 ## nudge once someone has actually looked at a frame. As ratios to the key (2.0):
-## sky fill 19%, quay bounce 10%, Ribeira bounce 7%.
+## sky fill 16%, quay bounce 10%, Ribeira bounce 7%.
 ##
 ## The sky fill is by far the largest and that is not a stylistic choice — on a clear
 ## day the illuminance a vertical surface receives from the open dome really is on the

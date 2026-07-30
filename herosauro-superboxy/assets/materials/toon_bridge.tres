@@ -15,18 +15,24 @@
 ; exposure range from every angle.
 ;
 ; Everything below is written by hand rather than through ToonFactory because this is
-; a .tscn ext_resource, but it has to track what the factory does or the deck -- the
-; single most-looked-at surface in the game, and shots 01 and 04 -- would be the one
-; surface in frame without the close-range detail layer. Keep the two in step: the
-; factory's stone() is granite, roughness 0.92, normal_scale 1.15, ao_light_affect
-; 0.52, plus the shared fine pair at a 0.28 m tile.
+; a .tscn ext_resource, but it has to carry the same LAYERS the factory does or the
+; deck -- the single most-looked-at surface in the game, and shots 01 and 04 -- would
+; be the one surface in frame without the close-range detail layer.
+;
+; The layers match stone() exactly: granite normal + mask on a coarse triplanar tile,
+; the shared fine pair on a 0.28 m one, dielectric, AO on the mask green. The VALUES
+; deliberately do not, and the two that differ are the two that are about scale rather
+; than about material: stone() runs roughness 0.92 / normal_scale 1.15 against this
+; 0.88 / 0.34, because stone() dresses metre-scale masonry seen from any angle and
+; this dresses a 100 m plane the player stands on. Anything above ~0.5 of normal here
+; reads as loose gravel rather than as paving.
 
 [resource]
 resource_name = "BridgeGranite"
-; 0.283 -> 0.312. The fine albedo layer multiplies by about 0.88 on average, so the
+; 0.283 -> 0.320. The fine albedo layer multiplies by about 0.88 on average, so the
 ; authored value has to be pre-divided by that or the deck quietly goes 12% darker
 ; than the number says. Same correction the factory applies as DETAIL_ALBEDO_GAIN.
-albedo_color = Color(0.312, 0.307, 0.298, 1)
+albedo_color = Color(0.32, 0.315, 0.306, 1)
 metallic = 0.0
 ; 0.35 -> 0.5 (F0 4%). 0.35 was suppressing the dielectric response below what any
 ; real mineral surface has, which under a low sun was invisible and under a high one
@@ -41,11 +47,11 @@ normal_enabled = true
 normal_scale = 0.34
 normal_texture = ExtResource("1_normal")
 roughness_texture = ExtResource("2_mask")
-; ao_light_affect 0.3 -> 0.5, matching stone(). A 51-degree sun reaches into the joints
+; ao_light_affect 0.3 -> 0.52, matching stone() exactly. A 51-degree sun reaches into the joints
 ; that an 11.5 degree one left inside its own shadow, so crevice darkening now has to
 ; be carried by the AO term rather than by the key missing them.
 ao_enabled = true
-ao_light_affect = 0.5
+ao_light_affect = 0.52
 ao_texture = ExtResource("2_mask")
 ao_texture_channel = 1
 ; 0.34 = one granite tile per 2.94 m of deck.

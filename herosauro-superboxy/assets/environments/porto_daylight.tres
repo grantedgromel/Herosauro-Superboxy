@@ -16,13 +16,13 @@
 shader = ExtResource("1_porto_sky")
 shader_parameter/zenith_color = Color(0.125, 0.325, 0.69, 1)
 shader_parameter/upper_color = Color(0.322, 0.541, 0.804, 1)
-shader_parameter/horizon_color = Color(0.741, 0.831, 0.898, 1)
+shader_parameter/horizon_color = Color(0.66, 0.76, 0.85, 1)
 shader_parameter/horizon_band = 0.3
 shader_parameter/horizon_shape = 0.7
 shader_parameter/zenith_shape = 0.9
-shader_parameter/haze_color = Color(0.827, 0.878, 0.925, 1)
+shader_parameter/haze_color = Color(0.76, 0.828, 0.888, 1)
 shader_parameter/haze_tight_falloff = 18.0
-shader_parameter/haze_tight_energy = 0.42
+shader_parameter/haze_tight_energy = 0.34
 shader_parameter/haze_broad_falloff = 4.5
 shader_parameter/haze_broad_energy = 0.26
 shader_parameter/ground_color = Color(0.263, 0.275, 0.235, 1)
@@ -68,7 +68,7 @@ radiance_size = 3
 ; exact histogram the RUBRIC describes as "muddy" and "uniform flat illumination".
 ; The fix is not exposure (that only slides the whole thing) but RANGE: an S-curve
 ; with a real toe and a real shoulder, cutting the bottom fifth down and pulling the
-; top fifth up to white.
+; top fifth up toward white.
 ;
 ; Read the stops as (input -> R, G, B), with slopes in the margin:
 ;   0.000  (0, 0.002, 0.008)  — a hair of lift, and the only stop with real channel
@@ -86,9 +86,17 @@ radiance_size = 3
 ;          warm clip the old curve carried was the single most golden-hour thing left
 ;          in the frame after the light itself.
 ;
-; Against the measured distribution that maps p5 0.21 -> 0.14, p50 0.61 -> 0.65 and
-; p99 0.87 -> 0.94, which combined with the exposure and white-point change below
-; lands the median near 0.50 and puts the top percentile at white.
+; Re-measured after it shipped, over the same three shots: p1 0.11 -> 0.03,
+; p5 0.23 -> 0.10, p50 0.65 -> 0.53, and 2.8% of the frame now below 0.06 against
+; 0.4% before. That is the toe working.
+;
+; The shoulder is a more honest story. The 99th percentile moved 0.87 -> 0.82, i.e.
+; DOWN, and no amount of curve puts it at white — because in a shot with no cloud, no
+; sun and no water glint in frame there is nothing in the arena brighter than a sunlit
+; white kerb, and a sunlit white kerb is not white. Shot 07, which has cloud in it,
+; reaches 0.90 at p99 and that is the correct answer for both. Forcing the rest of the
+; way would mean +0.7 EV, which puts the median straight back where it started. The
+; curve is left honest and the frame simply does not contain a white object.
 ;
 ; Every channel is monotonic, so no tonal inversion is possible whatever the input
 ; encoding turns out to be.
@@ -147,9 +155,10 @@ reflected_light_source = 2
 ; belongs. The net is the same mid-tone with more range above and below it, which is
 ; the definition of contrast and the thing the frame was missing.
 ;
-; What that leaves: sunlit deck granite at 0.32 scene-referred, sunlit plaster near
-; 0.9, the sun disk at 44 and the water's glint above it. The last two clip, which is
-; correct — they are the two things in a midday frame that are allowed to.
+; What that leaves, all quoted AFTER exposure so they can be compared with each other
+; and with the glow threshold below: sunlit deck granite 0.32, sunlit cream plaster
+; 0.59, a sunlit white kerb 0.88, the sun disk 32. Only the last clips, which is
+; correct — it is the one thing in a midday frame that has to.
 ; agx_contrast 1.42 -> 1.62 buys further punch inside the tonemapper's own S-curve,
 ; which is better behaved than doing it afterwards with adjustment_contrast because it
 ; happens before the display transform rather than on top of it.
@@ -219,14 +228,22 @@ sdfgi_normal_bias = 1.4
 sdfgi_probe_bias = 1.4
 
 ; --- Glow ---
-; threshold 1.15 -> 1.25. Everything got brighter, so a threshold that used to pick out
-; only the sun and the lamps now picks out ordinary sunlit plaster as well, and
-; screen-blending that is a mid-tone lift across the whole frame — the fastest way to
-; turn a bright day into a hazy one. Raised until it again selects only what should
-; bloom: the sun disk, the water's glint path, the glazed azulejo highlights.
-; intensity 0.38 -> 0.34 for the same reason.
-; luminance_cap 8 stops the sun disk (44 scene-referred) from smearing the upper frame
-; through the widest blur levels.
+; threshold 1.15 -> 1.00, chosen against the post-exposure list in the tonemap block
+; rather than by feel. The brightest ordinary lit surface in the arena is a sunlit
+; white kerb at 0.88; the brightest thing that is not a surface is the sun disk at 32,
+; with the water's specular and the azulejo glaze between them. 1.00 is the only value
+; that separates those two populations cleanly, and separating them is the whole job:
+; below it, glow starts screen-blending ordinary sunlit stone, which is a mid-tone lift
+; across the frame and the fastest way to turn a bright day into a hazy one.
+;
+; This pass first tried 1.25 on the reasoning that "everything got brighter". That was
+; true of the render it was written against and stopped being true when exposure came
+; down to 0.72 four paragraphs above — at 1.25 nothing in the arena except the sun disk
+; could reach the glow pass at all, which is a bloom that never fires.
+; intensity 0.38 -> 0.34: with the threshold doing the selecting properly, the strength
+; only has to carry the sun and the glints.
+; luminance_cap 8 stops the sun disk from smearing the upper frame through the widest
+; blur levels.
 glow_enabled = true
 glow_levels/1 = 0.0
 glow_levels/2 = 0.3
@@ -239,7 +256,7 @@ glow_normalized = true
 glow_intensity = 0.34
 glow_bloom = 0.02
 glow_blend_mode = 1
-glow_hdr_threshold = 1.25
+glow_hdr_threshold = 1.0
 glow_hdr_luminance_cap = 8.0
 
 ; --- Depth fog: the aerial perspective ---
@@ -301,8 +318,8 @@ fog_depth_end = 640.0
 ; albedo, warm cream -> cool white. Volumetric fog is airborne water and dust
 ; scattering *sky*, and under a blue dome that scatter is blue-white. Cream here was
 ; the sunset showing through the one channel that is pure additive light.
-; anisotropy 0.75 -> 0.70. The Henyey-Greenstein phase function at g = 0.70 is ~2.9x
-; isotropic at 30 degrees off the sun and ~0.17x at 120, still a 17:1 ratio, so the
+; anisotropy 0.75 -> 0.70. The Henyey-Greenstein phase function at g = 0.70 is ~3.5x
+; isotropic at 30 degrees off the sun and ~0.16x at 120, still a 22:1 ratio, so the
 ; shafts stay where the shafts are. Slightly wider than before because a high sun's
 ; shafts are seen from the side rather than looked along.
 ; length 80 keeps the 64 depth slices landing finely over the 10-40 m where the lattice

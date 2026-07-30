@@ -1,4 +1,4 @@
-extends SceneTree
+extends Node
 ## Headless diagnostics for the title screen. Nothing in the game loads this; it
 ## exists so the three things about the menu that cannot be eyeballed without a
 ## GPU can at least be measured:
@@ -9,8 +9,14 @@ extends SceneTree
 ##      the single most visible element on the screen);
 ##   3. that the cinematic camera path stays inside the modelled world.
 ##
+## It runs as a SCENE, not with --script, for the same reason _ui_probe does:
+## autoload singletons are only instantiated on the normal startup path, and the
+## controls panel it dumps reads BOTH heroes' bindings through InputManager and
+## the roster through GameManager. Under --script neither identifier resolves at
+## parse time and the preloads below fail to compile.
+##
 ## Run:
-##   godot --headless --path . --script res://scripts/ui/menu/_menu_probe.gd
+##   godot --headless --path . scripts/ui/menu/_menu_probe.tscn
 
 const CameraPath := preload("res://scripts/ui/menu/menu_camera_path.gd")
 const TitleLogo := preload("res://scripts/ui/menu/title_logo.gd")
@@ -32,13 +38,24 @@ const CHANNEL_HALF_X := 50.0
 const GLYPH_CHECK := "—–·×•▶◀‹›«»↑↓↵⏎©íúãç"
 
 
-func _initialize() -> void:
+func _ready() -> void:
+	# Yield one frame before touching the tree. _probe_world_cost() adds the
+	# arena under get_tree().root, and during _ready() the root is still setting
+	# up its own children, so the add_child() is refused outright — the probe
+	# then measured a _ready cascade of 0.1 ms for a scene that was never in the
+	# tree, and reported 9 nodes for a backdrop that has hundreds.
+	#
+	# call_deferred() would also silence the error but would break the
+	# measurement this function exists for: the whole point is timing the
+	# SYNCHRONOUS _ready cascade between t1 and t2, which a deferred add moves
+	# outside the window being timed.
+	await get_tree().process_frame
 	_probe_world_cost()
 	_probe_fonts()
 	_probe_logo_shader()
 	_probe_camera_path()
 	_probe_panels()
-	quit()
+	get_tree().quit()
 
 
 # --- CONTROLS / CREDITS ------------------------------------------------------
@@ -90,7 +107,7 @@ func _probe_world_cost() -> void:
 	var t0 := Time.get_ticks_usec()
 	var world: Node = scene.instantiate()
 	var t1 := Time.get_ticks_usec()
-	root.add_child(world)
+	get_tree().root.add_child(world)
 	var t2 := Time.get_ticks_usec()
 	print("[probe] bridge_arena instantiate %.1f ms, _ready cascade %.1f ms, total %.1f ms"
 			% [(t1 - t0) / 1000.0, (t2 - t1) / 1000.0, (t2 - t0) / 1000.0])
