@@ -27,13 +27,21 @@ extends RefCounted
 ## GameManager.active_player_ids() (never from an assumed [1, 2]) rather than
 ## simply being made bigger:
 ##
-##   * CADENCE. `_pressure` = 1 + ROSTER_CADENCE * (n - 1), and every GAP in the
-##     fight is divided by it: the decision interval, the slam gap and the
-##     retreat. At n = 2 that is 1.45, so the pair together face 45% more attacks
-##     and each of them — if the giant split his attention evenly — faces 72% of
-##     the solo rate instead of 50%. Wind-ups are pointedly NOT divided by it:
-##     the wind-up is the tell, and a tell that shrinks because your friend
-##     turned up is a tell that lies.
+##   * CADENCE. `_pressure` = 1 + ROSTER_CADENCE * (n - 1), and the gaps that are
+##     the GIANT'S OWN HESITATION are divided by it: the decision interval and
+##     the slam gap. At n = 2 that is 1.45, so the pair together face 45% more
+##     decisions and each of them — if he split his attention evenly — faces 72%
+##     of the solo rate instead of 50%.
+##
+##     The two gaps that belong to the PLAYER are pointedly not divided by it.
+##     The wind-up is the tell, and a tell that shrinks because your friend
+##     turned up is a tell that lies. The retreat is the punish window, and in
+##     co-op it is a SHARED one — the giant backing off is the moment both heroes
+##     get to swing, so shortening it takes time away from two people at once.
+##     Measured: dividing the retreat as well raised the slam rate 16% and cost
+##     the heroes enough ground that the co-op stream's own melee assertions
+##     started failing three runs in five. The rule that came out of it is worth
+##     more than the number — a gap the player acts in is not the giant's to take.
 ##
 ##   * COVERAGE. A volley is one rock per hero still standing, so flanking is no
 ##     longer free; the giant can only slam one of them, and the volley is the
@@ -236,7 +244,10 @@ func reset() -> void:
 	_decide_interval = clampf(DECIDE_BASE / (ds * _pressure), DECIDE_MIN, DECIDE_MAX)
 	_decide_timer = _decide_interval
 	_slam_gap = SLAM_GAP / _pressure
-	_retreat_time = RETREAT_TIME / _pressure
+	# NOT divided by _pressure. See the ROSTER TUNING note: the retreat is the
+	# heroes' punish window, and in co-op it is a SHARED one, so shortening it
+	# takes time away from both of them at once.
+	_retreat_time = RETREAT_TIME
 	_escalated = false
 	_busy = false
 	_retreat_timer = 0.0

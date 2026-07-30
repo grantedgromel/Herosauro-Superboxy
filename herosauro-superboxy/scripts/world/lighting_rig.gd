@@ -175,6 +175,45 @@ const RIBEIRA_BOUNCE_COLOR := Color(1.00, 0.68, 0.42)
 ## future debug gizmo sit outside the geometry.
 const FILL_DISTANCE := 90.0
 
+# --- Corridor reflection probe -----------------------------------------------
+#
+# One ReflectionProbe over the playable deck, and it exists for a specific measured
+# failure: the tram rails.
+#
+# ToonFactory snaps metallic to 0 or 1, which is right, and a railhead asks for 0.85
+# so it is bare steel. A metal has NO DIFFUSE TERM — every photon it returns is a
+# reflection — so a rail crown is exactly as bright as whatever the renderer can tell
+# it is reflecting, and nothing else. What the renderer could tell it, before this,
+# was: screen-space reflections, and then the sky cubemap where those miss.
+#
+# Neither answers the question a rail asks. SSR at a grazing view down a hundred
+# metres of deck marches along the deck and either leaves the screen or lands on more
+# dark granite; the sky cubemap is the only fallback and it is the *whole dome* with
+# no idea that this rail is lying in a trough between two dark parapets. Round 1's
+# critics named the rails as the single tell that gave the frame away in a blind test,
+# and the world stream has since rebuilt them as real grooved track — running head,
+# gauge face, flangeway, check rail — and reports they still read near-black.
+#
+# A box-projected probe is the missing term. It gives every metal in the corridor a
+# LOCAL environment with the parapets, the deck, the abutments and the sky in it, at
+# the right parallax, so a rail crown returns the bright sky where it faces up and the
+# dark parapet where it faces sideways — which is what makes a burnished rail read as
+# a line of light rather than a painted stripe. It also helps every other bare metal
+# on the bridge (rivet plates, barrel hoops, lamp castings), and it takes the edge off
+# a second problem: at grazing angles the deck granite and the calçada were mirroring
+# nothing but blue sky, which is part of why the footway measured blue.
+#
+# It costs one cubemap, rendered ONCE at load (UPDATE_ONCE) and never again, because
+# nothing in this arena's static set moves.
+const PROBE_CENTER := Vector3(0.0, 4.2, 0.0)
+## Full box size, not extents. Covers the deck (x in [-52, 52]) with a little margin
+## past both abutments, from under the soffit to well over the parapet, and 20 units
+## across so both parapets and the air outside them are inside the projection box.
+const PROBE_SIZE := Vector3(104.0, 14.0, 20.0)
+## How far the probe's own render reaches. 160 takes in the Ribeira terraces and the
+## Gaia bank, which is what a rail at the middle of the bridge can actually see.
+const PROBE_MAX_DISTANCE := 160.0
+
 # --- Practical lamps ---------------------------------------------------------
 #
 # Kept whole and kept working, but no longer spawned by default: see
@@ -294,6 +333,10 @@ const MOVING_DECOR := ["Clouds", "Rabelos"]
 ## stream's to dim, and it is noted in this pass's report.)
 @export var spawn_lamp_lights: bool = false
 @export var spawn_fill_lights: bool = true
+## The corridor reflection probe. See PROBE_CENTER for what it is for; single switch
+## because it is the one thing here that can be judged only in a render, and a bad
+## bake is easier to rule out than to reason about.
+@export var spawn_corridor_probe: bool = true
 ## Leave null to find the scene's shadow-casting DirectionalLight3D automatically.
 @export var sun: DirectionalLight3D
 ## Fill energies, exposed because they are the three numbers most likely to want a
@@ -433,6 +476,8 @@ func _build_light_rig(env: Environment) -> void:
 		sun.light_volumetric_fog_energy = SUN_FOG_ENERGY
 	if spawn_fill_lights:
 		_spawn_fill_lights()
+	if spawn_corridor_probe:
+		_spawn_corridor_probe()
 
 
 ## The brightest shadow-casting DirectionalLight3D in the scene. Matching on
@@ -515,6 +560,40 @@ func _fill_light(parent: Node3D, node_name: String, from_dir: Vector3, color: Co
 
 	var dir := from_dir.normalized()
 	light.global_transform = Transform3D(Basis.looking_at(-dir, up), dir * FILL_DISTANCE)
+
+
+## The probe itself. Two settings carry all the meaning:
+##
+##   box_projection — a plain cubemap is sampled as if it were infinitely far away,
+##     which is wrong for a 104 m corridor by exactly the amount that matters: a rail
+##     twenty metres down the deck would reflect the same thing as a rail at the
+##     camera's feet. Box projection re-projects the sample against the box, so the
+##     reflection slides correctly as the eye moves down the rail. That sliding IS the
+##     read — a highlight that does not travel is a painted stripe.
+##
+##   ambient_mode = DISABLED — and this one is load-bearing. A ReflectionProbe's
+##     default is to supply AMBIENT as well as reflection inside its box, which would
+##     quietly replace the ambient term this whole file has just spent a round
+##     rebalancing (0.32 -> 0.20, with the difference moved into a directional fill)
+##     across the entire playable deck. The probe is here to answer "what is this
+##     metal reflecting", nothing else.
+func _spawn_corridor_probe() -> void:
+	var probe := ReflectionProbe.new()
+	probe.name = "CorridorReflection"
+	probe.size = PROBE_SIZE
+	probe.max_distance = PROBE_MAX_DISTANCE
+	probe.box_projection = true
+	probe.interior = false
+	probe.ambient_mode = ReflectionProbe.AMBIENT_DISABLED
+	# Baked once at load and never updated: nothing in the static set moves, and the
+	# things that do (clouds, gulls, boats) are decor that must not be smeared into a
+	# reflection anyway.
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	probe.enable_shadows = true
+	add_child(probe)
+	# global, not local: this node sits under SkyBackground, which is instanced into
+	# the arena, and the corridor is defined in the arena's coordinates.
+	probe.global_position = PROBE_CENTER
 
 
 # --- Practical lamps ---------------------------------------------------------

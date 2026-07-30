@@ -434,11 +434,42 @@ func _build_clouds() -> void:
 		_clouds.append(cloud)
 
 
-## One cluster. Puffs are laid along a shallow arc with a FLAT BASE — every puff's
-## centre is lifted by enough of its own radius that none of them hangs below the
-## cluster's base plane. That flat base is the single most recognisable thing about
-## fair-weather cumulus and the old spherical blobs had none of it.
+## One cluster, BAKED INTO ONE SURFACE. Puffs are laid along a shallow arc with a
+## FLAT BASE — every puff's centre is lifted by enough of its own radius that none of
+## them hangs below the cluster's base plane. That flat base is the single most
+## recognisable thing about fair-weather cumulus and the old spherical blobs had none
+## of it.
+##
+## --- Why this bakes, and why not through MeshBaker ------------------------
+##
+## The first version of this function left every puff as its own MeshInstance3D, which
+## put 90 nodes and 90 draw calls in the sky for twelve clouds — 37% of the whole
+## scene's draw calls, and a straight violation of ARCHITECTURE.md rule 6. Nothing in
+## a cloud needs its own transform at draw time: the field is animated by moving the
+## twelve PARENT nodes, so everything inside one cluster is rigid with respect to it.
+## One surface per cluster is 12 draw calls for the same twelve varied clusters.
+##
+## It bakes with SurfaceTool.append_from() rather than with MeshBaker, and that is
+## deliberate rather than lazy. MeshBaker derives its shading normals from the winding
+## as +RH(a, b, c), which is the negative of the convention Godot's own primitives use
+## — see scripts/world/landmarks/_winding_probe.gd, where the world stream has the
+## same finding written up. Every surface it bakes is currently lit as though it faced
+## inward. This shader reads NORMAL directly to decide which side of the puff the sun
+## is on, so baking through MeshBaker would flip every cloud's shading: caps in shadow,
+## undersides in sun. append_from() carries SphereMesh's own (correct) normals through
+## the transform untouched, so the clouds are right today and stay right when
+## mesh_baker.gd is fixed. Working around that bug in a caller is exactly what its own
+## write-up asks nobody to do.
+##
+## One consequence worth stating: within a baked cluster the puffs no longer sort
+## against each other, they blend in buffer order. For an alpha-blended body whose
+## every fragment is within a few percent of the same near-white, that is invisible —
+## and it was never right before either, since Godot sorted those 90 objects by origin
+## rather than per fragment.
 func _build_cloud_puffs(cloud: Node3D, rng: RandomNumberGenerator) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+
 	var count := rng.randi_range(5, 9)
 	var span := rng.randf_range(5.0, 9.0)
 	for p in count:
@@ -448,34 +479,39 @@ func _build_cloud_puffs(cloud: Node3D, rng: RandomNumberGenerator) -> void:
 		var crown := 1.0 - u * u
 		var radius := rng.randf_range(2.2, 3.4) * (0.62 + 0.55 * crown)
 
-		var puff := MeshInstance3D.new()
 		var mesh := SphereMesh.new()
 		mesh.radius = radius
 		mesh.height = radius * 2.0
-		# 16 x 8 rather than 12 x 6: the alpha falls off as |dot(normal, view)|, so a
-		# coarse sphere shows its facets in the fade rather than only in the shading.
-		mesh.radial_segments = 16
-		mesh.rings = 8
-		puff.mesh = mesh
-		puff.material_override = _cloud_material
-		# Transparent, unshaded, and 100 m up. It has no business in a shadow map or
-		# in the SDFGI voxelisation; LightingRig excludes the group from GI as well.
-		puff.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		puff.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+		# 14 x 7 rather than 12 x 6: the alpha falls off as |dot(normal, view)|, so a
+		# coarse sphere shows its facets in the fade and not only in the shading. It is
+		# also 12 x 7 x 196 triangles across the whole field baked, which is a third of
+		# what the ironwork costs and now arrives in twelve draw calls rather than 90.
+		mesh.radial_segments = 14
+		mesh.rings = 7
 
 		var squash := rng.randf_range(0.48, 0.68)
-		puff.position = Vector3(
-			u * span,
-			radius * squash * rng.randf_range(0.55, 0.95),
-			rng.randf_range(-2.2, 2.2)
-		)
-		puff.scale = Vector3(rng.randf_range(0.9, 1.25), squash, rng.randf_range(0.85, 1.15))
-		puff.rotation = Vector3(
+		var basis := Basis.from_euler(Vector3(
 			rng.randf_range(-0.12, 0.12),
 			rng.randf_range(0.0, TAU),
-			rng.randf_range(-0.18, 0.18)
-		)
-		cloud.add_child(puff)
+			rng.randf_range(-0.18, 0.18)))
+		basis = basis.scaled(Vector3(
+			rng.randf_range(0.9, 1.25), squash, rng.randf_range(0.85, 1.15)))
+		var origin := Vector3(
+			u * span,
+			radius * squash * rng.randf_range(0.55, 0.95),
+			rng.randf_range(-2.2, 2.2))
+		st.append_from(mesh, 0, Transform3D(basis, origin))
+
+	st.index()
+	var mi := MeshInstance3D.new()
+	mi.name = "Puffs"
+	mi.mesh = st.commit()
+	mi.material_override = _cloud_material
+	# Transparent, unshaded, and a hundred metres up. It has no business in a shadow
+	# map or in the SDFGI voxelisation; LightingRig excludes the group from GI too.
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	cloud.add_child(mi)
 
 
 ## Point the cloud shader at the scene's real key light.

@@ -96,9 +96,9 @@ func _check_tuning_ladder() -> void:
 	print("  -- decide interval (s): solo %.2f/%.2f/%.2f  co-op %.2f/%.2f/%.2f  (easy/normal/hard)"
 		% [solo[0]["decide_interval"], solo[1]["decide_interval"], solo[2]["decide_interval"],
 			duo[0]["decide_interval"], duo[1]["decide_interval"], duo[2]["decide_interval"]])
-	print("  -- slam gap (s):        solo %.2f  co-op %.2f    retreat: solo %.2f  co-op %.2f"
-		% [solo[1]["slam_gap"], duo[1]["slam_gap"],
-			solo[1]["retreat_time"], duo[1]["retreat_time"]])
+	print("  -- slam gap (s):        solo %.2f  co-op %.2f    retreat (fixed): %.2f    speed: solo %.2f  co-op %.2f"
+		% [solo[1]["slam_gap"], duo[1]["slam_gap"], solo[1]["retreat_time"],
+			solo[1]["move_speed"], duo[1]["move_speed"]])
 
 	_ok(solo[0]["decide_interval"] > solo[1]["decide_interval"]
 		and solo[1]["decide_interval"] > solo[2]["decide_interval"],
@@ -110,12 +110,18 @@ func _check_tuning_ladder() -> void:
 		_ok(duo[d]["decide_interval"] < solo[d]["decide_interval"],
 			"a second hero raises the cadence at difficulty %d (%.2f < %.2f)"
 				% [d, duo[d]["decide_interval"], solo[d]["decide_interval"]])
-	_ok(duo[1]["slam_gap"] < solo[1]["slam_gap"] and duo[1]["retreat_time"] < solo[1]["retreat_time"],
-		"a second hero shortens the slam gap and the retreat")
+	_ok(duo[1]["slam_gap"] < solo[1]["slam_gap"],
+		"a second hero shortens the giant's own hesitation between slams")
 
-	# The tell is the one thing the roster must NOT shrink.
+	# The two gaps the roster must NOT shrink, because they belong to the player:
+	# the wind-up is the tell and the retreat is the punish window. Dividing the
+	# retreat by the roster cost the heroes enough ground that the co-op stream's
+	# melee assertions failed three runs in five — this is the regression test for
+	# that, and it is why the retreat is measured here at all.
 	_ok(is_equal_approx(duo[1]["slam_windup"], solo[1]["slam_windup"]),
 		"the slam wind-up is roster-independent (%.3f s either way)" % solo[1]["slam_windup"])
+	_ok(is_equal_approx(duo[1]["retreat_time"], solo[1]["retreat_time"]),
+		"the retreat window is roster-independent (%.3f s either way)" % solo[1]["retreat_time"])
 
 	# ...and he must never match a hero's sprint, even at his angriest, or running
 	# away stops being an answer to anything. HARD co-op phase two is the corner
