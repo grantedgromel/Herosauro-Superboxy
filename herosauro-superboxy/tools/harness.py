@@ -15,7 +15,7 @@ container has no GPU, so this drives Mesa's lavapipe software Vulkan under Xvfb;
 that is slow — budget ~3 min per shot at 1280x720 — but it is the real Forward+
 pipeline, not a fallback, so what the critic sees is what ships.
 
-Because it is slow, shots run concurrently, one Xvfb display each. Concurrency
+Because it is slow, shots run concurrently, each on its own Xvfb display. Concurrency
 defaults to cores-1: lavapipe is itself threaded, so oversubscribing makes the
 whole set slower rather than faster.
 """
@@ -69,15 +69,19 @@ def godot_bin() -> str:
 
 # --- capture -----------------------------------------------------------------
 
-def _render(shot: dict, out: Path, tier: str, display: int, timeout: int) -> dict:
+def _render(shot: dict, out: Path, tier: str, timeout: int) -> dict:
     w, h, _ = TIERS[tier]
     env = dict(os.environ)
     if Path(LAVAPIPE).exists():
         env["VK_ICD_FILENAMES"] = LAVAPIPE
-    env["DISPLAY"] = f":{display}"
 
+    # `-a` (auto-pick a free display), NOT `-n <fixed number>`. Fixed numbers
+    # were chosen for reproducibility, which was a mistake twice over: the X
+    # display number cannot reach a pixel, and hard-coding it means two harness
+    # invocations running at once — a capture sweep and an agent's own spot
+    # check, say — both grab :90 and the second dies with "Xvfb failed to start".
     cmd = [
-        "xvfb-run", "-n", str(display), "-s", f"-screen 0 {w}x{h}x24",
+        "xvfb-run", "-a", "-s", f"-screen 0 {w}x{h}x24",
         godot_bin(), "--path", str(ROOT), "tools/baseline.tscn",
         "--rendering-driver", "vulkan",
         "--fixed-fps", "60",
@@ -115,8 +119,8 @@ def cmd_capture(args) -> int:
     results: list[dict] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(_render, s, out, args.tier, 90 + i, args.timeout): s
-            for i, s in enumerate(todo)
+            pool.submit(_render, s, out, args.tier, args.timeout): s
+            for s in todo
         }
         for fut in concurrent.futures.as_completed(futures):
             r = fut.result()
@@ -290,7 +294,7 @@ def cmd_check(args) -> int:
     out = Path(args.workdir).resolve() / "check"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True, exist_ok=True)
-    res = _render(shots(["01_deck_mid"])[0], out, "fast", 99, args.timeout)
+    res = _render(shots(["01_deck_mid"])[0], out, "fast", args.timeout)
     if not res["ok"]:
         print("check: render FAILED")
         for ln in res["log"]:

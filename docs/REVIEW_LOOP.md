@@ -53,6 +53,24 @@ python3 tools/harness.py diff /tmp/shots/r1 /tmp/shots/r2 --heatmaps /tmp/shots/
   is the whole value: a performance change that is provably pixel-neutral needs
   no visual re-review, so the expensive part of the loop is skipped entirely.
 
+## Running a stream's probe
+
+Each stream ships a `_*probe.gd` self-test. There are two kinds and they launch
+differently — running one the other's way does not error, it reports nonsense:
+
+```bash
+godot --headless --path . --script scripts/world/_atmosphere_probe.gd   # extends SceneTree
+godot --headless --path . scripts/ui/_ui_probe.tscn                     # needs a scene tree
+```
+
+A probe that needs a scene tree **must** be launched as a scene. On the
+`--script` path Godot instantiates no autoloads, so every reference to
+`GameManager`, `AudioManager` or `InputManager` fails to resolve and the probe
+dies before it asserts anything. The same trap makes
+`godot --check-only --script <file>` useless for validating a single file here:
+untouched, correct scripts fail it identically. Whole-project `--import` is the
+only single-file-level check that means anything, and CI runs it.
+
 ## This container has no GPU
 
 Rendering runs on Mesa's lavapipe (software Vulkan) under Xvfb. Two consequences,

@@ -86,7 +86,18 @@ camera **react to the signals**. Nothing else is a legitimate cross-stream path.
 
 Mutators: `start_game()`, `change_state()`, `go_to_menu()`, `toggle_pause()`,
 `damage_player()`, `damage_boss()`, `add_score()`, `hit_stop()`, `request_shake()`,
-`notify_player_respawned()`, `difficulty_scalar()`.
+`notify_player_respawned()`, `revive_player()`, `difficulty_scalar()`.
+
+Readers: `active_player_ids()` — **the single roster authority.** Never assume
+the roster is `[1, 2]` or `range(1, player_count + 1)`; a solo run driven as
+hero 2 has a roster of `[2]`, and iterating a range spawns a panel, a camera
+target or a controller for a hero who does not exist. `combo_for(id)` gives the
+per-hero combo chain, and `player_score` the per-hero split under the shared
+team score.
+
+`combo_changed`'s `player_id` is meaningful — each hero keeps an independent
+chain. A single combo widget driven by both heroes at once will flicker between
+two unrelated counts.
 
 If you need a signal that is not listed, add a row here in the same commit and
 say so in your report — the lead adds it to `game_manager.gd`.
