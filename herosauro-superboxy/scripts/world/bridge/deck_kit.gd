@@ -361,10 +361,16 @@ static func catenary_run(b: MeshBaker, x0: float, x1: float, base_y: float,
 ## and then stopped".
 const FRAY_COUNT := 3
 const FRAY_LENGTH := 0.22
-## Cable gauges, matching catenary_run's so a fallen wire is the same wire.
-const MESSENGER_GAUGE := 0.024
-const CONTACT_GAUGE := 0.030
-const DROPPER_GAUGE := 0.015
+## Cable gauges. Heavier than catenary_run's 24/30 mm on purpose: a run that has
+## come down is its messenger, its contact wire and forty free droppers wound
+## together and dragged, not a tensioned single wire — and, measured on a render,
+## 24 mm at the 30 m the fallen line is mostly seen from is under one pixel, so
+## the swags dissolved into the facades behind them. This is the same trick the
+## rail crown uses next door: exaggerate the geometry until the material response
+## survives minification.
+const MESSENGER_GAUGE := 0.032
+const CONTACT_GAUGE := 0.040
+const DROPPER_GAUGE := 0.018
 
 
 ## Where a swag hangs at parameter `t`. A cable between two supports is a
@@ -388,7 +394,12 @@ static func torn_cross_span(b: MeshBaker, x: float, z_mast: float, y: float,
 	for sz: float in [-1.0, 1.0]:
 		var lug := Vector3(x, y, sz * (z_mast - 0.10))
 		var over := Vector3(x + sz * 0.06, y - 0.70, sz * hang_z)
-		var tip := Vector3(x - 0.14, tip_y, sz * (hang_z + 0.02))
+		# The tip lands off the mast's own X, and the two halves of a station lean
+		# opposite ways: a half that hangs plumb under its bracket reads as a
+		# deliberate downlead, and a matched pair reads as one either side of a
+		# mirror. The offset also keeps the +Z half off the lamp standard two
+		# metres inboard of it, which from deck level they otherwise superimpose on.
+		var tip := Vector3(x + sz * 0.42, tip_y, sz * (hang_z + 0.02))
 		b.add_beam(lug, over, 0.028)
 		b.add_beam(over, tip, 0.028)
 		# The section insulator that used to sit a third of the way across, now
@@ -396,7 +407,7 @@ static func torn_cross_span(b: MeshBaker, x: float, z_mast: float, y: float,
 		# cross_span's, drawn as a fat length of the wire it interrupts so it
 		# stays aligned with a member that is no longer horizontal.
 		b.add_beam(over.lerp(tip, 0.34), over.lerp(tip, 0.50), 0.088)
-		_fray(b, tip, (tip - over).normalized(), x)
+		_fray(b, tip, (tip - over).normalized(), x + sz)
 
 
 ## One swag of the dead run, hanging outboard between two things it is caught on:

@@ -48,12 +48,13 @@ extends RefCounted
 ## *object* space and a scaled node would smear the texel density.
 ##
 ## WINDING. Faces are wound so a triangle's right-hand normal points the way the
-## surface should be seen — the convention facade_geo.gd states and MeshBaker's
-## stored normals follow. Godot's rasteriser wants the opposite (front faces are
-## clockwise, so the front normal is -RH). That mismatch is in MeshBaker, it
-## affects every baked mesh in the project equally, and the fix belongs there;
-## nothing in this file compensates for it locally, because a local compensation
-## would break the moment the central one lands.
+## surface should be seen. That is MeshBaker's contract, stated in full at the top
+## of mesh_baker.gd, and it is now honoured: MeshBaker reverses the vertex order
+## on the way into the surface, because Godot's front face is the clockwise one.
+## It did not used to, and until it was fixed every face in this file was
+## back-facing — the tiled church flank, the lodge roofs and the arcades were
+## simply absent from any camera in front of them. Nothing here compensates
+## locally, which is why nothing here had to change.
 
 const Geo := preload("res://scripts/world/landmarks/landmark_geo.gd")
 const Batch := preload("res://scripts/world/landmarks/landmark_batch.gd")

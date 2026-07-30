@@ -153,7 +153,18 @@ static func hillside_sign(board: MeshBaker, iron: MeshBaker, face: MeshBaker, at
 	var chars := maxi(1, text.length())
 	var text_w := float(chars) * cell * 6.0
 	var hw := text_w * 0.5 + cell * 1.6
-	var sill := cell * 1.0
+	# SIX CELLS OF LEG, not one, and it is the difference between a sign and a
+	# sign you can read. Measured off 07_ribeira: the glyphs themselves resolve
+	# fine at this size — a 4.3 m cap at 90 m subtends about 28 px and C, O and R
+	# are individually identifiable at 1:1 — but the boards were standing with
+	# their sills less than a metre off the terrace, behind a row of lodges whose
+	# ridges are 6-9 m up, so the roofline ate the bottom two thirds of every
+	# letter and the words truncated to shapes. Raising the sill to cell * 6
+	# (3.7 m at cell 0.62) lifts the whole cap band clear of the ridges in front.
+	# It is also what the real hoardings are: block letters on long lattice legs
+	# standing ABOVE the lodge roofs, which is why they are visible from the
+	# river at all.
+	var sill := cell * 6.0
 	var top := sill + cell * 9.0
 	var legs := maxi(2, int(hw * 2.0 / 4.5))
 

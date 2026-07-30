@@ -44,13 +44,26 @@ static func _ring(center: Vector3, radius: Vector3, sides: int, seed: int, ragge
 
 
 ## An open tapered drum between two rings — trunks, cypress tiers, hedge bodies.
+##
+## `_ring` runs anticlockwise seen from +Y, so a face walked bottom-then-round
+## has a right-hand normal pointing at the axis. Every quad here therefore starts
+## on the TOP ring and walks down, which is what MeshBaker's contract wants: the
+## right-hand normal of the vertex order is the direction the surface faces.
+##
+## This whole file used to walk the other way — the only family in `scripts/world/`
+## that did, which is why it happened to render while everything wound to the
+## contract was being culled. It rendered inside out: every canopy, every trunk
+## and every cypress was shaded as though the sun were inside it, which is most
+## of why the planting read as flat dark blobs rather than as masses with a lit
+## side. Reversing it here and reversing the emitter in MeshBaker cancel for
+## visibility and compound for shading, so nothing moved and everything lit.
 static func taper(b: MeshBaker, base: Vector3, top: Vector3, r_base: float, r_top: float,
 		sides: int = 5, seed: int = 0, ragged: float = 0.16) -> void:
 	var lo := _ring(base, Vector3(r_base, 0, r_base), sides, seed, ragged)
 	var hi := _ring(top, Vector3(r_top, 0, r_top), sides, seed + 1, ragged)
 	for i in sides:
 		var j := (i + 1) % sides
-		b.add_quad(lo[i], lo[j], hi[j], hi[i], Vector2(r_base, top.y - base.y))
+		b.add_quad(hi[i], hi[j], lo[j], lo[i], Vector2(r_base, top.y - base.y))
 
 
 ## A closed low-poly clump: two rings capped with an apex at each end.
@@ -65,11 +78,14 @@ static func blob(b: MeshBaker, center: Vector3, radius: Vector3, sides: int = 5,
 			MK.hash_sym(seed, 11) * radius.z * 0.3)
 	for i in sides:
 		var j := (i + 1) % sides
-		b.add_quad(lo[i], lo[j], hi[j], hi[i], Vector2(radius.x, radius.y))
+		# Same rule as `taper`: walk each face so its right-hand normal leaves the
+		# clump, which for the ring means top-to-bottom, and for the two apex fans
+		# means backwards around the ring.
+		b.add_quad(hi[i], hi[j], lo[j], lo[i], Vector2(radius.x, radius.y))
 		# Degenerate fourth corner: MeshBaker skips the zero-area triangle, so
 		# this is a fan tri at the cost of writing one.
-		b.add_quad(hi[i], hi[j], top, top, Vector2(radius.x, radius.y))
-		b.add_quad(lo[j], lo[i], bottom, bottom, Vector2(radius.x, radius.y))
+		b.add_quad(hi[j], hi[i], top, top, Vector2(radius.x, radius.y))
+		b.add_quad(lo[i], lo[j], bottom, bottom, Vector2(radius.x, radius.y))
 
 
 # --- Trees --------------------------------------------------------------------
@@ -98,7 +114,8 @@ static func cypress(b: MeshBaker, base: Vector3, height: float, seed: int = 0) -
 	var tip := prev + Vector3(0, height * 0.10, 0)
 	var ring := _ring(prev, Vector3(r0 * 0.28, 0, r0 * 0.28), 5, seed + 71, 0.2)
 	for i in 5:
-		b.add_quad(ring[i], ring[(i + 1) % 5], tip, tip, Vector2(r0, height * 0.1))
+		# Backwards around the ring, so the cone's normals point out and up.
+		b.add_quad(ring[(i + 1) % 5], ring[i], tip, tip, Vector2(r0, height * 0.1))
 
 
 ## A broadleaf — plane, jacaranda, the big shade trees on the cais. Trunk in the
