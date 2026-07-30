@@ -12,9 +12,11 @@ extends RefCounted
 ##     splash. Its all-caps rhythm and hand-inked weight make it unreadable as
 ##     body copy and unscannable as a tabular readout, so score, timers, health
 ##     and every sentence use Fredoka instead. It is chosen for impact, not text.
-##   * Every piece of text carries BOTH a dark outline and a soft drop shadow,
-##     because the UI now sits over a live golden-hour sky that is brighter than
-##     any of our text colours.
+##   * Every piece of text carries BOTH a hard ink outline and a soft drop
+##     shadow, because the UI sits over a live BRIGHT DAYLIGHT Porto — blue sky,
+##     sunlit granite, white-hot river highlights. There is no backdrop tone we
+##     can assume, and every one of them is brighter than our text, so the glyph
+##     has to carry its own contrast with it.
 
 # --- Fonts -------------------------------------------------------------------
 
@@ -44,9 +46,16 @@ enum Scale { DISPLAY, TITLE, HEADING, SUBHEAD, READOUT, BODY, LABEL, CAPTION, MI
 ## older pixel-size call sites keep working untouched.
 const RAW_PX := 9
 
-const _SIZE := [88, 56, 28, 21, 26, 17, 14, 13, 11]
+## Sizes are a step up from a web scale on purpose. This is a console action game
+## read from a sofa over a busy 3D frame, not a document read at 60 cm — MICRO is
+## the smallest thing on screen and it still has to survive a sunlit granite
+## parapet scrolling behind it.
+const _SIZE := [92, 60, 32, 24, 30, 18, 15, 14, 12]
 const _TRACK := [3, 2, 1, 1, 1, 0, 2, 0, 2]
-const _OUTLINE := [9, 7, 5, 4, 5, 4, 3, 3, 2]
+## Outlines are roughly 12% of the cap height at every step. Over bright daylight
+## a 2 px rim is a suggestion; this is the ink line a comic letterform is drawn
+## with, and it is what lets cream text cross a white river highlight.
+const _OUTLINE := [11, 9, 7, 6, 7, 5, 4, 4, 3]
 const _LEAD := [-8, -5, 0, 0, 0, 3, 1, 2, 1]
 ## 0 = display face, 1 = UI bold, 2 = UI regular.
 const _FACE := [0, 0, 1, 1, 1, 2, 1, 2, 1]
@@ -54,44 +63,73 @@ const _FACE := [0, 0, 1, 1, 1, 2, 1, 2, 1]
 
 # --- Palette -----------------------------------------------------------------
 #
-# Porto at golden hour: a warm plum ink lit from above by a low orange sun.
-# Surfaces climb in lightness as they climb in elevation.
+# PORTO AT MIDDAY. The golden-hour treatment is gone: the world behind this UI is
+# now bright, saturated, high-key daylight — blue sky, sunlit granite, terracotta
+# roofs, white glare off the Douro. The palette this system used to carry (a warm
+# plum ink chosen to sit under a low orange sun) reads over that as a dark
+# generic UI kit pasted onto a colourful game, so the ink has been re-grounded.
+#
+# THE INK IS THE RIVER. Everything dark here is the deep blue-green the Douro
+# goes in the bridge's own shadow at noon. Three reasons that specific dark and
+# not a neutral one:
+#   * it is a colour the daylight scene actually contains, so the chrome reads as
+#     an object cut from the same world rather than a UI layer floating over it;
+#   * it is the complement of the sunlit terracotta and granite that fill most of
+#     the frame, which is what buys separation without buying brightness;
+#   * a SATURATED dark reads as moulded plastic. A neutral one reads as a web
+#     dashboard, and that is the single fastest way to fail this brief.
+#
+# PLATES ARE NEAR-OPAQUE, NOT GLASS. The old surfaces let the world ghost through
+# by 4-5%, which worked over a dim sunset and does not work over noon: the thing
+# ghosting through is now the brightest thing in the frame and it eats the text.
+# The answer a first-party console game uses is the opposite one — a thick opaque
+# plate with a hard keyline — and it is also cheaper to read at a glance. The
+# scene is never dimmed to make the UI legible; the UI is made solid instead.
+const BASE := Color("071320")              # furthest back — curtains, veils, ink
+const SURFACE := Color("13273ffa")         # standard panel
+const SURFACE_RAISED := Color("1b3550fc")  # card sitting on a panel
+const SURFACE_HIGH := Color("24476bfd")    # popovers, selected states
+const OVERLAY := Color(0.016, 0.043, 0.078, 0.72)   # dim behind a modal
 
-## Surfaces keep a few percent of transparency on purpose. Every screen now sits
-## over a live 3D Porto rather than a flat backdrop, and a fully opaque panel
-## punches a dead rectangle in it; letting the world ghost through by 4-5% keeps
-## the UI reading as glass laid over the scene. Not enough to cost contrast — see
-## the ratios asserted in _ui_probe.gd.
-const BASE := Color("100c18")              # furthest back — full-screen scrims
-const SURFACE := Color("1d1526f2")         # standard panel
-const SURFACE_RAISED := Color("281e34f5")  # card sitting on a panel
-const SURFACE_HIGH := Color("342847f7")    # popovers, selected states
-const OVERLAY := Color(0.035, 0.025, 0.055, 0.74)   # dim behind a modal
+## The hard outer stroke every physical UI object is drawn with. Chunky comic art
+## is defined by its keyline, and a panel that has one reads as a moulded object
+## at any size; one edged with a 1 px 10% rim reads as a CSS border.
+const KEYLINE := Color(0.016, 0.043, 0.078, 0.94)
 
-## Hairlines are warm, never neutral — a cold 1 px white rim is the fastest way
-## to make a warm scene look like a generic dark UI kit.
-const HAIRLINE := Color(1.0, 0.88, 0.72, 0.10)
-const HAIRLINE_STRONG := Color(1.0, 0.88, 0.72, 0.20)
-const SHADOW := Color(0.02, 0.01, 0.03, 0.80)
+## Bevel highlights — the warm key light landing on the top edge of a plate.
+## These are warm even though the ink is cool, and deliberately so: the sun is the
+## warm source and the sky is the cool fill, so a neutral or cold top rim would
+## light the UI from the wrong place and immediately look like a stock widget kit.
+const HAIRLINE := Color(1.0, 0.94, 0.82, 0.16)
+const HAIRLINE_STRONG := Color(1.0, 0.94, 0.82, 0.34)
+const SHADOW := Color(0.012, 0.031, 0.055, 0.85)
 
-const TEXT_PRIMARY := Color("fbf1df")
-const TEXT_SECONDARY := Color("bcae9e")
-const TEXT_DISABLED := Color("7a6f7f")
+const TEXT_PRIMARY := Color("fff3df")
+const TEXT_SECONDARY := Color("bfd2e4")
+const TEXT_DISABLED := Color("7d93ab")
 
-const GOLD := Color("ffc64d")
-const GOLD_DEEP := Color("ef8f2c")
-const EMBER := Color("ff7a3c")
+## Identity gold. Pushed hotter and more saturated than the sunset version: a
+## soft ochre that read as "lit" against a dim plum plate reads as "muddy"
+## against daylight, and the accent has to stay the loudest colour on screen.
+const GOLD := Color("ffc12b")
+const GOLD_DEEP := Color("ef8f1c")
+const EMBER := Color("ff6a2c")
 
-const SUCCESS := Color("6fd06a")
-const DANGER := Color("e8483c")
-const WARNING := Color("ffb03a")
-const INFO := Color("59b6e8")
+const SUCCESS := Color("5ed65c")
+const DANGER := Color("f04437")
+const WARNING := Color("ffb02e")
+## The sky's own blue, reused as the informational accent so the one cool signal
+## colour in the kit belongs to the same world as the backdrop.
+const INFO := Color("3fb4f0")
 
-# Character identity.
-const HERO_GREEN := Color("57c25c")      # Herosauro
-const BOXY_RED := Color("ef5a52")        # Super Boxy
-const BOSS_AMBER := Color("d98a3a")      # Adamastor, phase 1
-const BOSS_RAGE := Color("e0392f")       # Adamastor, phase 2
+# Character identity. The hues are unchanged — these three are the game's
+# signature and re-grounding the ink is not licence to repaint the cast — but
+# each is pushed up in chroma so it still reads as ITS colour when it is sitting
+# next to a saturated daylight render instead of a dim one.
+const HERO_GREEN := Color("4fc94e")      # Herosauro
+const BOXY_RED := Color("f2564a")        # Super Boxy
+const BOSS_AMBER := Color("e8902f")      # Adamastor, phase 1
+const BOSS_RAGE := Color("e83226")       # Adamastor, phase 2
 
 # Legacy aliases. Kept so existing screens keep compiling while they migrate to
 # the semantic names above.
@@ -118,23 +156,29 @@ const SPACE_XXL := 48
 ## Every screen keeps this clear of the viewport edge.
 const SCREEN_MARGIN := 28
 
-const RADIUS_SM := 8
-const RADIUS_MD := 14
-const RADIUS_LG := 22
+## Radii are generous on purpose. A 4 px corner is a web control; a corner you
+## can see the curve of at a glance is a moulded one, and the whole kit is
+## supposed to look injection-moulded.
+const RADIUS_SM := 10
+const RADIUS_MD := 18
+const RADIUS_LG := 28
 
 
 # --- Elevation ---------------------------------------------------------------
 #
-# Depth is fill + hairline + shadow moving together. A panel that only changes
+# Depth is fill + keyline + shadow moving together. A panel that only changes
 # colour reads as a flat rectangle; one that also gains a shadow reads as an
 # object above the scene.
 
 enum Elev { FLAT, LOW, MEDIUM, HIGH, MODAL }
 
 const _ELEV_FILL := [SURFACE, SURFACE, SURFACE_RAISED, SURFACE_RAISED, SURFACE_HIGH]
-const _ELEV_SHADOW := [0, 8, 16, 26, 40]
-const _ELEV_DROP := [0, 3, 6, 10, 16]
-const _ELEV_BORDER := [1, 1, 1, 2, 2]
+const _ELEV_SHADOW := [0, 10, 20, 32, 48]
+const _ELEV_DROP := [0, 4, 8, 13, 20]
+## Borders are the keyline, so they are measured in whole visible pixels rather
+## than in hairlines. Three is the floor at which a stroke still reads as drawn
+## rather than as an anti-aliasing artefact once the panel is scaled.
+const _ELEV_BORDER := [3, 3, 3, 4, 5]
 
 
 # --- Character actors --------------------------------------------------------
@@ -223,14 +267,19 @@ static func _make_label(body: String, scale_or_px: int, color: Color, force_bold
 	return l
 
 
-## Outline + drop shadow. Both, always: the outline holds the glyph apart from a
-## bright sky, the shadow keeps it from floating when the backdrop is mid-tone.
+## Outline + drop shadow. Both, always, and both heavier than they were.
+##
+## The outline is a near-opaque ink keyline, not a soft dark halo: over daylight
+## a translucent rim just blends the glyph edge into whatever is behind it, which
+## is exactly the failure it was supposed to prevent. The shadow then sits under
+## the whole ink-outlined shape and gives it thickness, which is what turns a
+## label into a drawn object rather than a colour laid on glass.
 static func _legible(l: Label, outline: int) -> void:
-	l.add_theme_color_override("font_outline_color", SHADOW)
+	l.add_theme_color_override("font_outline_color", KEYLINE)
 	l.add_theme_constant_override("outline_size", outline)
-	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.45))
+	l.add_theme_color_override("font_shadow_color", Color(0.01, 0.03, 0.05, 0.55))
 	l.add_theme_constant_override("shadow_offset_x", 0)
-	l.add_theme_constant_override("shadow_offset_y", maxi(2, outline / 2))
+	l.add_theme_constant_override("shadow_offset_y", maxi(3, outline * 2 / 3))
 
 
 static func _face(role: int, force_bold: bool, force_display: bool) -> Font:
@@ -275,24 +324,105 @@ static func font_of(scale: int) -> Font:
 
 ## The elevation-aware panel box. Everything that needs to read as a physical
 ## layer goes through here rather than hand-rolling a StyleBoxFlat.
+##
+## Corner detail is high (16 segments) because the radii are now large enough
+## that Godot's default segment count is visible as flats on the curve, and a
+## faceted corner on a 28 px radius is the tell that gives away a hand-rolled UI.
 static func surface(elev: int = Elev.MEDIUM, radius: int = RADIUS_MD, pad: int = SPACE_LG,
 		fill: Color = Color(0, 0, 0, 0)) -> StyleBoxFlat:
 	var e := clampi(elev, 0, _ELEV_FILL.size() - 1)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = fill if fill.a > 0.0 else _ELEV_FILL[e]
 	sb.set_corner_radius_all(radius)
-	sb.corner_detail = 12
+	sb.corner_detail = 16
 	sb.set_border_width_all(_ELEV_BORDER[e])
-	sb.border_color = HAIRLINE_STRONG if e >= Elev.HIGH else HAIRLINE
+	sb.border_color = KEYLINE
 	sb.content_margin_left = pad
 	sb.content_margin_right = pad
 	sb.content_margin_top = pad
 	sb.content_margin_bottom = pad
 	if _ELEV_SHADOW[e] > 0:
-		sb.shadow_color = Color(0.01, 0.005, 0.02, 0.55)
+		sb.shadow_color = SHADOW
 		sb.shadow_size = _ELEV_SHADOW[e]
 		sb.shadow_offset = Vector2(0, _ELEV_DROP[e])
 	return sb
+
+
+## A chunky HUD plate: keyline shell, tinted face, warm top bevel, drop shadow.
+##
+## This is the piece `surface()` cannot express. A StyleBoxFlat has ONE border
+## colour, and moulded plastic needs two — a dark keyline around the outside and
+## a light bevel catching the sun along the top — so the plate is built as two
+## stacked Panels plus a gradient strip instead. Everything in the HUD that has
+## to stay readable over a bright, moving, high-contrast 3D frame is one of
+## these, which is why the HUD needs no full-screen scrim.
+##
+## `tint` is mixed into the face at `tint_amount` so a hero's plate carries his
+## colour without the fill ever leaving the ink family and losing its contrast.
+static func plate(tint: Color = SURFACE, tint_amount: float = 0.0,
+		radius: int = RADIUS_LG, elev: int = Elev.HIGH) -> Panel:
+	var e := clampi(elev, 0, _ELEV_FILL.size() - 1)
+	var shell := Panel.new()
+	shell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shell.clip_contents = true
+
+	var outer := StyleBoxFlat.new()
+	outer.bg_color = _ELEV_FILL[e].lerp(tint, tint_amount * 0.55)
+	outer.bg_color.a = maxf(_ELEV_FILL[e].a, 0.97)
+	outer.set_corner_radius_all(radius)
+	outer.corner_detail = 16
+	outer.set_border_width_all(_ELEV_BORDER[e])
+	outer.border_color = KEYLINE
+	outer.shadow_color = SHADOW
+	outer.shadow_size = _ELEV_SHADOW[e]
+	outer.shadow_offset = Vector2(0, _ELEV_DROP[e])
+	shell.add_theme_stylebox_override("panel", outer)
+
+	# Inner face, inset by the keyline. Lighter than the shell so the keyline
+	# reads as a raised lip around a recessed face rather than as a drawn line.
+	var face := Panel.new()
+	face.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	face.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var inset := float(_ELEV_BORDER[e])
+	face.offset_left = inset
+	face.offset_top = inset
+	face.offset_right = -inset
+	face.offset_bottom = -inset
+	var inner := StyleBoxFlat.new()
+	inner.bg_color = _ELEV_FILL[e].lightened(0.05).lerp(tint, tint_amount)
+	inner.bg_color.a = maxf(_ELEV_FILL[e].a, 0.97)
+	inner.set_corner_radius_all(maxi(2, radius - _ELEV_BORDER[e]))
+	inner.corner_detail = 16
+	face.add_theme_stylebox_override("panel", inner)
+	shell.add_child(face)
+
+	# The bevel: a short warm gradient down from the top edge. Height is a third
+	# of the radius rather than a fixed number so it stays in proportion when the
+	# same factory is used for a 40 px pill and a 140 px hero panel.
+	var bevel := _bevel_strip(maxf(6.0, float(radius) * 0.75))
+	shell.add_child(bevel)
+	return shell
+
+
+## The warm top-light band used by `plate()`. Separate so a hand-built widget
+## that cannot use the whole plate can still get the same lighting.
+static func _bevel_strip(height: float) -> TextureRect:
+	var grad := Gradient.new()
+	grad.offsets = PackedFloat32Array([0.0, 1.0])
+	grad.colors = PackedColorArray([HAIRLINE_STRONG, Color(1.0, 0.94, 0.82, 0.0)])
+	var gt := GradientTexture2D.new()
+	gt.gradient = grad
+	gt.width = 4
+	gt.height = 64
+	gt.fill_from = Vector2(0, 0)
+	gt.fill_to = Vector2(0, 1)
+	var tr := TextureRect.new()
+	tr.texture = gt
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tr.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	tr.offset_bottom = height
+	return tr
 
 
 ## Legacy shape of `surface()`. Kept for screens that still pass a raw colour.
@@ -307,20 +437,27 @@ static func card(elev: int = Elev.HIGH, radius: int = RADIUS_LG, pad: int = SPAC
 	return p
 
 
-## Thin rule used to separate stat rows and card sections.
-static func divider(thickness: int = 2, alpha: float = 0.12) -> Panel:
+## Rule used to separate stat rows and card sections. Deliberately a solid warm
+## bar rather than a 1 px tint: a hairline rule inside a chunky kit is the one
+## piece that gives away that the chunkiness is a skin.
+static func divider(thickness: int = 3, alpha: float = 0.22) -> Panel:
 	var p := Panel.new()
 	p.custom_minimum_size = Vector2(0, thickness)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(1.0, 0.9, 0.78, alpha)
+	sb.bg_color = Color(1.0, 0.92, 0.80, alpha)
 	sb.set_corner_radius_all(thickness)
 	p.add_theme_stylebox_override("panel", sb)
 	return p
 
 
-## Edge scrim — a soft dark fade so text at the top or bottom of the screen stays
-## readable over whatever the 3D camera happens to be pointing at.
+## Edge scrim — a soft dark fade closing the frame edge.
+##
+## THIS IS A COMPOSITION TOOL, NOT A LEGIBILITY TOOL. The title screen uses it to
+## close its corners and to seat the cast's feet, which is a photographic device
+## and belongs there. The HUD does not: dimming a bright, saturated game to make
+## chrome readable throws away the exact thing the art direction is buying, so
+## every in-game readout sits on its own opaque `plate()` instead.
 static func scrim(from_top: bool, height: float, strength: float = 0.66) -> TextureRect:
 	var grad := Gradient.new()
 	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
@@ -370,19 +507,25 @@ static func vignette_texture(edge: Color, inner_stop: float = 0.42) -> GradientT
 
 # --- Controls ----------------------------------------------------------------
 
-static func _btn_box(fill: Color, border: Color, lift: float, radius: int) -> StyleBoxFlat:
+## `lift` is BOTH the drop shadow's offset and its blur, so a button that lifts on
+## hover casts a longer, softer shadow exactly the way a real key would. The dark
+## keyline is constant across every state — a physical object does not lose its
+## outline when you look at it — and only the fill moves. The top-light bevel is
+## a child gradient strip added by `button()`, because a StyleBoxFlat has one
+## border colour and moulded plastic needs a dark one and a light one at once.
+static func _btn_box(fill: Color, lift: float, radius: int) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = fill
 	sb.set_corner_radius_all(radius)
-	sb.corner_detail = 10
-	sb.set_border_width_all(2)
-	sb.border_color = border
+	sb.corner_detail = 16
+	sb.set_border_width_all(4)
+	sb.border_color = KEYLINE
 	sb.content_margin_left = SPACE_LG
 	sb.content_margin_right = SPACE_LG
-	sb.content_margin_top = SPACE_MD
-	sb.content_margin_bottom = SPACE_MD
-	sb.shadow_color = Color(0.01, 0.005, 0.02, 0.45)
-	sb.shadow_size = int(lift * 2.0)
+	sb.content_margin_top = SPACE_MD + 2
+	sb.content_margin_bottom = SPACE_MD + 2
+	sb.shadow_color = SHADOW
+	sb.shadow_size = int(lift * 2.2)
 	sb.shadow_offset = Vector2(0, lift)
 	return sb
 
@@ -391,40 +534,51 @@ static func _btn_box(fill: Color, border: Color, lift: float, radius: int) -> St
 ## Hover and focus both lift the button and warm its rim, so keyboard and mouse
 ## get the same affordance.
 static func button(body: String, primary: bool = false,
-		min_size: Vector2 = Vector2(300, 60)) -> Button:
+		min_size: Vector2 = Vector2(300, 64)) -> Button:
 	var b := Button.new()
 	b.text = body
 	b.custom_minimum_size = min_size
 	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	b.add_theme_font_override("font", _tracked(UI_BOLD, 2))
-	b.add_theme_font_size_override("font_size", 24)
+	b.add_theme_font_size_override("font_size", 26)
+	b.clip_contents = false
 
 	var fg := BASE if primary else TEXT_PRIMARY
 	var base_fill := GOLD if primary else SURFACE_RAISED
-	var hover_fill := GOLD.lightened(0.12) if primary else SURFACE_HIGH
-	var rim := Color(1, 1, 1, 0.35) if primary else HAIRLINE_STRONG
-	var rim_hot := Color(1, 1, 1, 0.55) if primary else GOLD
+	var hover_fill := GOLD.lightened(0.14) if primary else SURFACE_HIGH
 
 	b.add_theme_color_override("font_color", fg)
 	b.add_theme_color_override("font_hover_color", fg)
 	b.add_theme_color_override("font_pressed_color", fg)
 	b.add_theme_color_override("font_focus_color", fg)
 	b.add_theme_color_override("font_disabled_color", TEXT_DISABLED)
-	b.add_theme_constant_override("outline_size", 0 if primary else 3)
-	b.add_theme_color_override("font_outline_color", SHADOW)
+	# Ink text on a gold chip already has 11:1 and an outline there only muddies
+	# the counters; cream text on an ink chip needs the same keyline as every
+	# other label in the kit.
+	b.add_theme_constant_override("outline_size", 0 if primary else 5)
+	b.add_theme_color_override("font_outline_color", KEYLINE)
 
-	b.add_theme_stylebox_override("normal", _btn_box(base_fill, rim, 3.0, RADIUS_MD))
-	b.add_theme_stylebox_override("hover", _btn_box(hover_fill, rim_hot, 6.0, RADIUS_MD))
-	b.add_theme_stylebox_override("pressed", _btn_box(base_fill.darkened(0.16), rim, 1.0, RADIUS_MD))
-	b.add_theme_stylebox_override("focus", _btn_box(hover_fill, GOLD, 5.0, RADIUS_MD))
-	b.add_theme_stylebox_override("disabled", _btn_box(SURFACE, HAIRLINE, 0.0, RADIUS_MD))
+	b.add_theme_stylebox_override("normal", _btn_box(base_fill, 4.0, RADIUS_MD))
+	b.add_theme_stylebox_override("hover", _btn_box(hover_fill, 8.0, RADIUS_MD))
+	b.add_theme_stylebox_override("pressed", _btn_box(base_fill.darkened(0.18), 1.0, RADIUS_MD))
+	b.add_theme_stylebox_override("focus", _btn_box(hover_fill, 7.0, RADIUS_MD))
+	b.add_theme_stylebox_override("disabled", _btn_box(SURFACE, 0.0, RADIUS_MD))
+
+	# The top-light band. Added as a child rather than as a border so it can be a
+	# gradient — a flat 2 px light line along the top reads as a stroke, and a
+	# gradient reads as a curved surface catching the sun.
+	var bevel := _bevel_strip(float(RADIUS_MD))
+	bevel.offset_left = 4.0
+	bevel.offset_right = -4.0
+	bevel.offset_top = 4.0
+	b.add_child(bevel)
 
 	_add_hover_lift(b)
 	return b
 
 
-## A 3% scale pop on hover/focus. Scale is visual only, so it never disturbs the
-## container that laid the button out.
+## A 5% scale pop on hover/focus with a back-eased overshoot. Scale is visual
+## only, so it never disturbs the container that laid the button out.
 static func _add_hover_lift(b: Button) -> void:
 	var recentre := func() -> void:
 		b.pivot_offset = b.size * 0.5
@@ -435,43 +589,82 @@ static func _add_hover_lift(b: Button) -> void:
 		b.pivot_offset = b.size * 0.5
 		var t := b.create_tween()
 		t.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		t.tween_property(b, "scale", Vector2(target, target), 0.14)
-	b.mouse_entered.connect(func() -> void: to.call(1.03))
+		t.tween_property(b, "scale", Vector2(target, target), 0.18)
+	b.mouse_entered.connect(func() -> void: to.call(1.05))
 	b.mouse_exited.connect(func() -> void: to.call(1.0))
-	b.focus_entered.connect(func() -> void: to.call(1.03))
+	b.focus_entered.connect(func() -> void: to.call(1.05))
 	b.focus_exited.connect(func() -> void: to.call(1.0))
 
 
-## A small rounded colour chip — a clean stand-in for an icon.
-static func chip(color: Color, diameter: float = 14.0) -> Panel:
+## A small solid status pill — "P1", "INVINCIBLE", "DOWN". Filled rather than
+## outlined: a status the player has to notice mid-fight cannot be a thin badge.
+static func pill(body: String, fill: Color, fg: Color = BASE,
+		scale: int = Scale.MICRO) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.set_corner_radius_all(RADIUS_SM)
+	sb.corner_detail = 12
+	sb.set_border_width_all(3)
+	sb.border_color = KEYLINE
+	sb.content_margin_left = SPACE_SM
+	sb.content_margin_right = SPACE_SM
+	sb.content_margin_top = 2
+	sb.content_margin_bottom = 2
+	p.add_theme_stylebox_override("panel", sb)
+	var l := label(body, scale, fg, true, HORIZONTAL_ALIGNMENT_CENTER)
+	# No outline on a filled pill: the fill already separates the glyph from the
+	# world, and an ink rim inside a 15 px badge closes the counters up.
+	l.add_theme_constant_override("outline_size", 0)
+	l.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0))
+	p.add_child(l)
+	return p
+
+
+## A small rounded colour chip — a clean stand-in for an icon. Keylined like
+## everything else, so a 12 px dot still reads as a moulded bead rather than as
+## an anti-aliased blob when it lands over a bright facade.
+static func chip(color: Color, diameter: float = 16.0) -> Panel:
 	var p := Panel.new()
 	p.custom_minimum_size = Vector2(diameter, diameter)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = color
 	sb.set_corner_radius_all(int(diameter / 2.0))
-	sb.corner_detail = 8
+	sb.corner_detail = 12
+	sb.set_border_width_all(2)
+	sb.border_color = KEYLINE
 	p.add_theme_stylebox_override("panel", sb)
 	return p
 
 
 ## A keyboard key badge, for control hints that should read as keys not prose.
+## Solid ink rather than a 10% white wash: a translucent cap over a sunlit quay
+## is a rectangle of noise with a letter somewhere in it.
 static func key_cap(key: String) -> PanelContainer:
 	var p := PanelContainer.new()
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(1.0, 0.95, 0.88, 0.10)
+	sb.bg_color = SURFACE_RAISED
+	sb.bg_color.a = 0.95
 	sb.set_corner_radius_all(RADIUS_SM)
-	sb.corner_detail = 8
-	sb.set_border_width_all(1)
-	sb.border_color = HAIRLINE_STRONG
+	sb.corner_detail = 12
+	sb.set_border_width_all(3)
+	sb.border_color = KEYLINE
 	sb.content_margin_left = SPACE_SM
 	sb.content_margin_right = SPACE_SM
-	sb.content_margin_top = 3
-	sb.content_margin_bottom = 3
+	sb.content_margin_top = 4
+	sb.content_margin_bottom = 4
+	# A key cap is the one control that is literally a physical object, so it
+	# gets the largest drop for its size in the kit.
+	sb.shadow_color = SHADOW
+	sb.shadow_size = 6
+	sb.shadow_offset = Vector2(0, 3)
 	p.add_theme_stylebox_override("panel", sb)
 	var l := text(key.to_upper(), Scale.MICRO, TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_CENTER)
-	l.custom_minimum_size = Vector2(18, 0)
+	l.add_theme_constant_override("outline_size", 0)
+	l.custom_minimum_size = Vector2(20, 0)
 	p.add_child(l)
 	return p
 
@@ -521,6 +714,13 @@ static func actor_epithet(actor: int) -> String:
 
 static func actor_color(actor: int) -> Color:
 	return _ACTOR_COLOR[clampi(actor, 0, 2)]
+
+
+## GameManager keys every hero by `player_id` (1 or 2); the UI names them by
+## Actor. One place owns that mapping so no screen has to remember which hero is
+## which number, and adding a third hero would be a change here and nowhere else.
+static func actor_for_player(player_id: int) -> int:
+	return Actor.SUPERBOXY if player_id == 2 else Actor.HEROSAURO
 
 
 static func portrait_full(actor: int) -> Texture2D:
@@ -605,10 +805,10 @@ static func bar(fill: Color, max_val: float = 100.0) -> ProgressBar:
 	pb.value = max_val
 	pb.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var bg := StyleBoxFlat.new()
-	bg.bg_color = Color(0.03, 0.025, 0.05, 0.92)
+	bg.bg_color = BASE
 	bg.set_corner_radius_all(RADIUS_SM)
-	bg.set_border_width_all(2)
-	bg.border_color = HAIRLINE
+	bg.set_border_width_all(3)
+	bg.border_color = KEYLINE
 	bg.content_margin_left = 2.0
 	bg.content_margin_right = 2.0
 	bg.content_margin_top = 2.0
