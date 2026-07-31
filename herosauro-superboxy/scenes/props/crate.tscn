@@ -1,9 +1,6 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/props/breakable_prop.gd" id="1_crate"]
-
-[sub_resource type="BoxMesh" id="Mesh_crate"]
-size = Vector3(0.9, 0.9, 0.9)
 
 [sub_resource type="BoxShape3D" id="Shape_crate"]
 size = Vector3(0.9, 0.9, 0.9)
@@ -11,18 +8,19 @@ size = Vector3(0.9, 0.9, 0.9)
 [node name="Crate" type="RigidBody3D" groups=["props"]]
 script = ExtResource("1_crate")
 surface = "wood"
+body_kind = "crate"
 tint = Color(0.45, 0.33, 0.2, 1)
 trim_color = Color(0.26, 0.27, 0.3, 1)
 prop_mass = 26.0
 prop_friction = 0.9
 prop_bounce = 0.03
-break_impulse = 12.0
-break_delta_v = 6.0
-piece_count = 5
+break_impulse = 6.0
+toughness = 1
+shatter_impulse = 6.0
+break_delta_v = 7.0
+piece_count = 11
 piece_scale = 0.36
-
-[node name="Mesh" type="MeshInstance3D" parent="."]
-mesh = SubResource("Mesh_crate")
+break_score = 15
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 shape = SubResource("Shape_crate")
