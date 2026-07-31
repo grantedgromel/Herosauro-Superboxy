@@ -32,11 +32,15 @@ const PAD_RIGHT := 20.0
 # --- Colour ------------------------------------------------------------------
 #
 # Every row is a PHYSICAL PLATE, not a word with a hover wash behind it. The
-# backdrop is now bright saturated daylight and the menu column runs straight
-# down the middle of it, so an 11% tint that read as a highlight over a dim
-# sunset reads over noon as nothing at all. Idle rows carry a substantial ink
-# slab; the focused one goes solid and gold-lit and gains a heavier keyline, so
-# the selection is a change of material rather than a change of opacity.
+# column runs down the left of a full-bleed daylight image — a graded ground
+# today, cinematic key art the moment it lands — so an 11% tint that read as a
+# highlight over a dim sunset reads over that as nothing at all. Idle rows carry
+# a substantial ink slab; the focused one goes solid and gold-lit and gains a
+# heavier keyline, so the selection is a change of material rather than a change
+# of opacity.
+#
+# These are what make the column independent of whatever is behind it, which is
+# what lets the key art drop in as one line with no second tuning pass.
 
 const IDLE_TEXT := Color(0.80, 0.86, 0.93, 0.92)
 const IDLE_FILL := Color(0.055, 0.118, 0.192, 0.80)

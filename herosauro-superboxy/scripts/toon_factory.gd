@@ -66,6 +66,15 @@ extends RefCounted
 ##    own tile size. Granite, cobble, iron and plaster carry one on albedo_texture;
 ##    see _ALBEDO_MAPS below.
 ##
+## b2) AND — since Round 4 — THE PLAYABLE GROUND MAY NOT BE THE DARKEST THING IN FRAME.
+##    Two critics reviewing five frames with no knowledge of each other independently
+##    measured the deck as the darkest region in every shot, against a RUBRIC that
+##    requires the playable corridor to be the brightest. It is albedo and not light:
+##    top quartile against top quartile, the carriageway returns 52% of the footway
+##    thirty pixels behind it, and the authored constants say the same (0.235 and 0.325
+##    against 0.545 and 0.580). PORTO_STONE_FLOOR is the guard; see it for why 0.44,
+##    why a knee rather than a clamp, and why it tests the colour's chroma first.
+##
 ## c) METALS ARE 0 OR 1. Call sites currently ask for 0.20, 0.28, 0.30, 0.35, 0.42,
 ##    0.45, 0.55, 0.60, 0.65 and 0.85. Every value strictly between is
 ##    unphysical — it desaturates the diffuse term and tints the specular at the
@@ -73,6 +82,13 @@ extends RefCounted
 ##    it is a specific RUBRIC failure. build() snaps at 0.6 and gives the dielectric
 ##    side a raised metallic_specular instead, which is the thing the half-metal was
 ##    actually faking: painted ironwork catching the sky.
+##
+##    Round 4 added the other half, because "metals are 0 or 1" turned out to be a
+##    rule with a trap in it: a surface that is honestly metallic 1 and also honestly
+##    smooth returns nothing but its environment, and this environment is a sky. The
+##    bare-metal side now gets METAL_ROUGHNESS_FLOOR and its own mask, whose blue
+##    channel is a per-texel metal/oxide split — so the rail crown is 0-or-1 metal at
+##    every texel and is not a mirror at any of them. See both constants below.
 
 # --- Surfaces ---------------------------------------------------------------
 
@@ -123,6 +139,23 @@ const _ALBEDO_MAPS := {
 	Surface.IRON: preload("res://assets/textures/detail_iron_albedo.tres"),
 	Surface.COBBLE: preload("res://assets/textures/detail_cobble_albedo.tres"),
 	Surface.PLASTER: preload("res://assets/textures/detail_plaster_albedo.tres"),
+}
+
+## The mask a BARE METAL wears instead of its family's own. One entry, and one entry is
+## the point: iron is the only family any call site asks for metallic 1 on.
+##
+## Same three channels in the same order, plus a fourth thing the painted mask does not
+## carry — B is the bare-metal fraction, which build() wires to metallic_texture. So a
+## bare-metal material's roughness, its AO and its metal/oxide split all come off ONE
+## texture registered to ONE noise field, which is what makes the oxide land exactly
+## where the surface is rough and where the iron albedo map's rust bloom already is.
+##
+## Its ranges and the arithmetic behind them are in the `steel` recipe in
+## generate_detail_maps.gd. The short version: 0.72-1.00 roughness rather than the
+## painted mask's 0.22-1.00, because a rail head is satin and gloss paint is not, and
+## about 38% of the surface stops being metal at all.
+const _METAL_MASK_MAPS := {
+	Surface.IRON: preload("res://assets/textures/detail_steel_mask.tres"),
 }
 
 ## The shared close-range layer, one pair for every surface. See rule (a) above and
@@ -187,6 +220,92 @@ const DEFAULT_ROUGHNESS := 0.80
 ## — but now for the reason stated on the tin.
 const ALBEDO_CEILING := 0.90
 const ALBEDO_FLOOR := 0.02
+
+## --- The Porto stone floor -------------------------------------------------
+##
+## A second, much higher floor that applies ONLY to the two stone surface families,
+## and only to colours authored near-neutral. It is the answer to the strongest
+## converging finding this project has had: two critics, reviewing five different
+## frames with no knowledge of each other, independently measured the PLAYABLE
+## GROUND as the darkest region in every frame they were given.
+##
+## THE MEASUREMENT. In 03_rail_macro the footway flags sit at L 130.1 (top quartile
+## 146.1) and the carriageway thirty pixels in front of them at L 52.5 (top quartile
+## 76.3). Comparing top quartile against top quartile removes the parapet's shadow
+## bands from both populations, and the ratio is still 0.52 — so this is albedo, not
+## light, and the authored values say so: ROADWAY_COLOR 0.325 and TRAMBED_COLOR 0.235
+## against FLAG_COLOR 0.545 and KERB_COLOR 0.580. The other critic put the same
+## numbers on two other shots: 02_deck_eye's deck at rgb (102, 98, 105) and
+## 07_ribeira's cobble at (73, 65, 68), "roughly half where sunlit stone should sit".
+##
+## The RUBRIC requires the playable corridor to be the BRIGHTEST, highest-contrast
+## thing in frame. It is currently the darkest thing in frame, in every frame.
+##
+## WHY A FLOOR AND NOT A REPAINT. The dark values are deliberate — the palette they
+## come from is commented "near-black roadway ... values run low on purpose" — and
+## they are a value-contrast trick: darken the road so the pale kerb reads. That is
+## the backwards correction a critic warned about by name ("if a previous round
+## reported the corridor does not read and someone responded by darkening it, that
+## correction is backwards"), and it will be reached for again by the next stream
+## that wants separation. A guard in the factory is the thing that cannot be reached
+## for twice.
+##
+## WHY 0.44 IS THE NUMBER. This is not a claim that no stone is dark — black granite
+## and basalt exist. It is a claim about THESE stones. Every stone surface in this
+## game is one of two rocks: the pale two-mica granite the whole city is quarried
+## from (0.35-0.50 dry), and the cream limestone of the calcada (0.45-0.65). There is
+## no basalt, no slate and no bluestone on this bridge. So a near-neutral stone
+## authored below 0.44 is not making a Porto claim, and 0.44 is the bottom of the
+## band the real material occupies.
+##
+## WHY A KNEE AND NOT A CLAMP. A hard clamp would collapse the tram bed, the mortar
+## bed and the carriageway (0.235 / 0.300 / 0.325) onto one identical value and throw
+## away a tonal ordering another stream authored on purpose. The knee is a linear
+## remap of [0, KNEE] onto [FLOOR, KNEE]: monotone, so the ordering survives; exactly
+## the identity at and above KNEE, so nothing already inside the Porto band moves at
+## all (the kerbs, the flags, every dressed granite in the game); and self-limiting,
+## so if the stream that owns those constants raises them itself, this stops doing
+## anything rather than doubling up. Delivered: 0.235 -> 0.476, 0.325 -> 0.490 against
+## the flags' unchanged 0.545, i.e. 13% and 10% below the walkway instead of 40%.
+##
+## WHY A CHROMA TEST. `stone()` is also how the terrain stream dresses bare EARTH
+## (0.33, 0.28, 0.21) and river ROCK (0.47, 0.43, 0.37), and dry earth really does
+## reflect 0.20-0.35 — lifting it would be inventing a claim rather than enforcing
+## one. Every grey stone in the game measures a chroma of (max-min)/max <= 0.128 and
+## those two measure 0.36 and 0.21, so the populations separate cleanly and 0.18 sits
+## in the gap. Read it as: this guard applies to stone authored as STONE-COLOURED.
+const PORTO_STONE_FLOOR := 0.44
+const PORTO_STONE_KNEE := 0.52
+const PORTO_STONE_CHROMA := 0.18
+
+## Surface families the floor applies to. Not IRON, not PLASTER (a limewash really can
+## be any value its owner painted it), not TERRACOTTA, not WOOD.
+const _STONE_SURFACES := [Surface.GRANITE, Surface.COBBLE]
+
+## Nothing on this bridge is a mirror, and the tram rail head has spent three rounds
+## proving what happens when a material claims to be one.
+##
+## A metal has no diffuse term, so every photon it returns is a reflection. At the
+## call site's authored roughness of 0.30 — multiplied down to 0.088 by the iron
+## mask's smooth end — the crown's specular lobe is about four degrees wide, and at a
+## grazing view down the deck the only thing inside four degrees of the mirror
+## direction is sky. Measured at 03_rail_macro y 603-604: RGB (32, 64, 109) and
+## (16, 44, 98), saturation 0.70 and 0.83, against immediate neighbours at 0.19-0.33
+## and warm grey. Round 1 named the flat blue rails as the single tell that gave the
+## frame away in a blind test; Round 2 rebuilt the geometry as real Ri60 grooved track
+## and added a ReflectionProbe, and the crown got brighter and stayed pure blue.
+##
+## 0.45 is a fact about rail steel rather than a fudge. A rail head is ground once on
+## installation and then abraded by steel wheels for the rest of its life, so its
+## finish is directional wear scoring — satin, not polish. Nothing else in the frame
+## is smoother: the lattice is painted, the castings are oxidised, the barrel hoops
+## are salt-weathered. Against the steel mask's 0.72-1.00 this lands the crown at
+## 0.32-0.45, a lobe wide enough to integrate most of the upper hemisphere, so it
+## returns the deck and the parapet mixed into the sky instead of the sky verbatim.
+##
+## Applied BEFORE the cache key, like the metallic snap, so two call sites asking for
+## 0.26 and 0.30 on a bare metal collapse onto one material instead of two.
+const METAL_ROUGHNESS_FLOOR := 0.45
 
 ## Below this, `metallic` means "dielectric"; at or above it, "bare metal". Nothing
 ## in between survives — see rule (c) in the header. 0.6 is where the call sites
@@ -434,6 +553,11 @@ static func build(color: Color, surface: Surface = Surface.FLAT,
 	# instead of two identical ones under different names.
 	var bare_metal := metallic >= METALLIC_SNAP
 	var metal := 1.0 if bare_metal else 0.0
+	if bare_metal:
+		# See METAL_ROUGHNESS_FLOOR. A metal has no diffuse term, so a smooth one in a
+		# scene whose only reflection source is the sky reports the sky and nothing
+		# else — which is the tram rail head, three rounds running.
+		roughness = maxf(roughness, METAL_ROUGHNESS_FLOOR)
 	var f0 := specular
 	if not bare_metal and metallic > 0.0:
 		# The caller asked for a metal and got a dielectric. Give it back the sky
@@ -487,6 +611,14 @@ static func build(color: Color, surface: Surface = Surface.FLAT,
 			m.albedo_texture = _ALBEDO_MAPS[surface]
 
 		var mask: Texture2D = _MASK_MAPS[surface]
+		if bare_metal and _METAL_MASK_MAPS.has(surface):
+			# Bare metal swaps the whole mask, and picks up a metallic map with it.
+			# metallic_texture MULTIPLIES `metallic`, so this only ever reaches a
+			# material that already asked to be metal: the split turns 1 into 0 or 1
+			# per texel and can never manufacture a half-metal out of a dielectric.
+			mask = _METAL_MASK_MAPS[surface]
+			m.metallic_texture = mask
+			m.metallic_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_BLUE
 		m.roughness_texture = mask
 		m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
 		if ao_strength > 0.0:
@@ -559,6 +691,7 @@ static func _physical_albedo(color: Color, surface: Surface, has_fine_detail: bo
 	var peak := maxf(c.r, maxf(c.g, c.b))
 	if peak > ALBEDO_CEILING and peak > 0.0:
 		c *= ALBEDO_CEILING / peak
+	c = _porto_stone_albedo(c, surface)
 	# A floor as well as a ceiling: nothing in the real world reflects less than a
 	# couple of percent, and a near-black albedo is a surface that can only ever be
 	# a silhouette. Applied to the darkest channel so window reveals and void caps
@@ -571,6 +704,32 @@ static func _physical_albedo(color: Color, surface: Surface, has_fine_detail: bo
 		c = Color(c.r * DETAIL_ALBEDO_GAIN, c.g * DETAIL_ALBEDO_GAIN, c.b * DETAIL_ALBEDO_GAIN)
 	var map := _albedo_map_gain(surface)
 	return Color(c.r * map.r, c.g * map.g, c.b * map.b)
+
+
+## Lift a near-neutral stone colour into the range Porto's own two rocks occupy.
+## See PORTO_STONE_FLOOR above for the measurement, the number and the two guards.
+##
+## Scales the whole colour rather than clamping per channel, exactly as the ceiling
+## does and for the same reason: clamping channel-wise would pull the darkest channel
+## up on its own and desaturate the surface, and this is a statement about VALUE.
+##
+## Runs after the ceiling and before the floor, so the three guards compose in the
+## order they constrain: nothing may exceed 0.90, no Porto stone may sit under 0.44,
+## and nothing at all may go to black. The knee's output can never breach the ceiling
+## because PORTO_STONE_KNEE is well under it and the map is the identity above it.
+static func _porto_stone_albedo(c: Color, surface: Surface) -> Color:
+	if not _STONE_SURFACES.has(surface):
+		return c
+	var peak := maxf(c.r, maxf(c.g, c.b))
+	if peak <= 0.0 or peak >= PORTO_STONE_KNEE:
+		return c
+	# The chroma test: this guard is about grey quarried stone, and stone() is also how
+	# the terrain stream dresses earth and river rock, which are legitimately darker.
+	var dim := minf(c.r, minf(c.g, c.b))
+	if (peak - dim) / peak > PORTO_STONE_CHROMA:
+		return c
+	var lifted := PORTO_STONE_FLOOR + (PORTO_STONE_KNEE - PORTO_STONE_FLOOR) * (peak / PORTO_STONE_KNEE)
+	return c * (lifted / peak)
 
 
 ## The reciprocal of a surface albedo map's own mean, per channel — what

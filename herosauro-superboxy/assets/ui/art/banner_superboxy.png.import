@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://br30lmoh4cx2o"
-path.s3tc="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex"
-path.etc2="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"
+uid="uid://di07lownhowy"
+path.s3tc="res://.godot/imported/banner_superboxy.png-fb18737e9b0de8ef837049bfa27955f5.s3tc.ctex"
+path.etc2="res://.godot/imported/banner_superboxy.png-fb18737e9b0de8ef837049bfa27955f5.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/ui/portraits/herosauro.png"
-dest_files=["res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex", "res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"]
+source_file="res://assets/ui/art/banner_superboxy.png"
+dest_files=["res://.godot/imported/banner_superboxy.png-fb18737e9b0de8ef837049bfa27955f5.s3tc.ctex", "res://.godot/imported/banner_superboxy.png-fb18737e9b0de8ef837049bfa27955f5.etc2.ctex"]
 
 [params]
 

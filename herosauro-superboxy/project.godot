@@ -225,6 +225,12 @@ textures/vram_compression/import_etc2_astc=true
 textures/vram_compression/import_s3tc_bptc=true
 environment/defaults/default_clear_color=Color(0.53, 0.81, 0.92, 1)
 anti_aliasing/quality/msaa_3d=2
+; 4x MSAA resolves 3.7 million samples a frame, which a desktop GPU absorbs and
+; WebGL2 does not — it was the largest remaining per-pixel cost on the web tier
+; once the geometry tier landed. Off on web only; the Compatibility renderer
+; still gets FXAA below, which is nearly free and is what that tier should be
+; leaning on anyway.
+anti_aliasing/quality/msaa_3d.web=0
 ; FXAA and FSR1 are Forward+/Mobile only — the web build warns and ignores them,
 ; so it is told explicitly to use neither.
 anti_aliasing/quality/screen_space_aa=1
@@ -232,6 +238,11 @@ anti_aliasing/quality/screen_space_aa.web=0
 scaling_3d/mode=1
 scaling_3d/mode.web=0
 lights_and_shadows/directional_shadow/size=4096
+; A 4096 directional map is a 64 MiB depth texture. Desktop spends it across
+; four cascades over 260 m and gets its money's worth; the web tier runs two
+; cascades over 96 m, so the same map is four times the texel density it can
+; use and 48 MiB it cannot afford — against a 52 MiB world.
+lights_and_shadows/directional_shadow/size.web=2048
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
 occlusion_culling/use_occlusion_culling=true
 ; 64 (default) smears shafts cast by 0.2 m lattice members at 10-40 m.

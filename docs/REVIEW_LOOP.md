@@ -19,6 +19,8 @@ critic whose job is to find the frame amateur.
 | `tools/harness.py sheet` | Contact sheet — the whole set as one image a critic can read in one look. |
 | `tools/harness.py verify` | Captures twice and diffs the two runs. Proves the gate is real. |
 | `tools/harness.py check` | Fast pre-commit smoke: import clean, boot, render one frame. |
+| `tools/parsecheck.tscn` | Every `.gd` in the project compiles. Three seconds. Run it. |
+| `tools/budget.tscn` | Static-world cost at every canonical vantage, per tier. |
 | `tools/profile.tscn` | Frame-cost **distribution** over a live fight, plus the budget gate. |
 | `tools/playtest.tscn` | Scripted playthrough; asserts the fight actually functions. |
 | `tools/critic/RUBRIC.md` | What the critic scores against, and the rules it must follow. |
@@ -68,8 +70,40 @@ A probe that needs a scene tree **must** be launched as a scene. On the
 `GameManager`, `AudioManager` or `InputManager` fails to resolve and the probe
 dies before it asserts anything. The same trap makes
 `godot --check-only --script <file>` useless for validating a single file here:
-untouched, correct scripts fail it identically. Whole-project `--import` is the
-only single-file-level check that means anything, and CI runs it.
+untouched, correct scripts fail it identically.
+
+For "does everything still compile", use `tools/parsecheck.tscn` — three seconds
+for the whole project, and it exists because `--import` is *not* the check it
+looks like. Godot compiles the scripts reachable from the resources it imports,
+so a script referenced only by a `.tscn` that no import step loads is never
+compiled and the import log stays clean. `tools/profile.gd` sat unparseable that
+way for its entire life.
+
+## Gates
+
+A gate does not exist until you have watched it fail. Write the check, put the
+fault back, confirm it goes red, then keep it.
+
+This is not a formality. Four tools in this project have reported a clean result
+while measuring nothing:
+
+| tool | reported | actually |
+|---|---|---|
+| `_menu_probe` | 0.1 ms, 9 nodes | measured a scene it had failed to add to the tree — really 3062 ms, 268 nodes |
+| `tools/budget.gd` | 0 objects, 0 draw calls, 0 primitives | its scene had no `Camera3D`, so nothing rendered 3D |
+| `tools/profile.gd` | nothing, and the budget "kept passing" | did not parse; had never run; and `quit(0)` was unconditional so it could not have failed |
+| `tools/parsecheck.gd` | PASS | tested `load() == null`; Godot returns a Script object for a file that did not compile |
+
+Three of those four were written by this loop, to check this loop. The failure
+mode is structural, not careless: **a tool that does not run looks exactly like a
+tool that runs and finds nothing wrong.** Only a demonstrated failure tells them
+apart.
+
+The same applies to a *number* as to a gate. Plausible reasoning is routinely
+backwards — the case for compressing the UI art ("painterly plates, nothing
+crisp for block artifacts to chew on") had the failure mode of block compression
+precisely inverted, and only a render showed it. If a change alters what reaches
+the screen, it goes through `diff` against a baseline before it is defended.
 
 ## This container has no GPU
 
@@ -106,6 +140,40 @@ All three are enforced in `ARCHITECTURE.md` and all three were found the hard wa
 3. **One process per shot.** Sharing a process leaks auto-exposure, particle age
    and tween phase forward, so shot 7 depends on shot 6 and the set stops being
    reproducible even with 1 and 2 fixed.
+
+## The rubric is a proxy. Do not optimise the proxy.
+
+The critics score **frames**, because frames are the only thing an agent can be
+shown. A frame-scoring loop will therefore always ask for more *in the frame* —
+and past a certain point that stops being the same thing as a better game.
+
+This project walked into it. Three rounds of review kept reporting that the wide
+establishing shots were empty: *"across 2.76 million pixels of one of Europe's
+busiest riverfronts, at most two or three ambiguous specks that might be
+people"*. All true. It became a brief to populate Porto — crowds, market stalls,
+café patrons — and that brief was wrong, and the project owner was right to kill
+it.
+
+The game is a two-player fight on a bridge deck. The player spends effectively
+all of it looking at a nine-metre giant from about ten metres. The far banks are
+backdrop nobody studies. A crowd at 60–200 m resolves to 6–10 px specks and
+costs real geometry, real draw calls and real review time.
+
+So every critic finding gets a second question before it becomes work:
+
+> **Does a player ever look at this, and for how long?**
+
+Set dressing on a far bank fails that test. A wall tiling visibly fifteen metres
+from the camera passes it. The paving the hero runs across for the entire game
+passes it emphatically — which is why "the playable ground is half as bright as
+sunlit stone" was worth a stream and "nobody lives in Porto" was not.
+
+This is the same trap as briefing off an unverified critic diagnosis, one level
+up. There, the fix is to measure the cause before acting. Here, the fix is to
+weigh the finding against what the game actually is before acting. The rubric
+cannot do that for you: it does not know the deck is where the game happens, and
+writing that into the rubric would only teach the critics to under-report the
+background, which is not the same as knowing it matters less.
 
 ## Process findings worth keeping
 

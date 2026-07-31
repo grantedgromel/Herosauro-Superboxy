@@ -34,6 +34,12 @@ scripts/**/_scratch_*.gd
 scripts/**/_scratch_*.gd.uid
 scripts/**/_render_tmp.gd
 scripts/**/_render_tmp.gd.uid
+# Throwaway measurement scripts land at the project root rather than under
+# scripts/, because they are not part of any stream. Same rule: local only.
+/_*_probe.gd
+/_*_probe.gd.uid
+/_tmp_*.gd
+/_tmp_*.gd.uid
 
 # OS cruft
 .DS_Store

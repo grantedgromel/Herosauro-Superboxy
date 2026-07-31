@@ -2,22 +2,20 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://br30lmoh4cx2o"
-path.s3tc="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex"
-path.etc2="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"
+uid="uid://fsgbxmmhbt26"
+path="res://.godot/imported/key_art.png-29b9775f287dcac268ba725cbb1a3907.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc", "etc2_astc"],
-"vram_texture": true
+"vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/ui/portraits/herosauro.png"
-dest_files=["res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex", "res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"]
+source_file="res://assets/ui/key_art.png"
+dest_files=["res://.godot/imported/key_art.png-29b9775f287dcac268ba725cbb1a3907.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=0
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0

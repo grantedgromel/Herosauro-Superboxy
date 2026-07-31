@@ -285,8 +285,44 @@ static func build_row(specs: Array[Spec], rng: RandomNumberGenerator,
 
 ## Add one building to a caller-owned batch, for mixing rows, quays and one-offs
 ## into a single commit.
+##
+## Two things happen here that do not happen inside `_assemble`, and both are
+## about the tier rather than about architecture.
+##
+## `batch.locate()` puts everything this building emits into the world cell it
+## stands in, so the committed surfaces have tight AABBs instead of one spanning
+## both banks. It is a no-op on desktop.
+##
+## `_reduce_detail` is the reduced tier's single biggest triangle lever. It
+## MUTATES the spec, which is deliberate and safe: a Spec is built per building by
+## `random_spec` or `_spec_from_plot` and discarded after this call, and every
+## emitter below reads `spec.detail` rather than taking it as a parameter, so
+## clamping it here is the one place that reaches all of them. It is also honest
+## about what it is doing — the caller asked for FULL and got FULL on the tier
+## that can afford it.
 static func add_to_batch(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> void:
+	batch.locate(spec.position)
+	if WorldTier.is_reduced():
+		_reduce_detail(spec)
 	_assemble(batch, spec, rng)
+
+
+## Clamp a building's detail to what its distance from the arena earns on the web
+## tier. See WorldTier for the two ranges and why they are where they are.
+##
+## Nothing here touches massing, roofline, colour or position, so the skyline the
+## player actually reads at 50-130 m is unchanged; what goes is the sub-pixel
+## half — shutter leaves, balcony balusters, string courses, tile panels, washing,
+## window reveals — plus the flank and rear elevations of anything deep enough in
+## a terrace that no camera in tools/shots.json can see them.
+static func _reduce_detail(spec: Spec) -> void:
+	var d := WorldTier.plan_distance(spec.position)
+	if d > WorldTier.FACADE_LOW_RANGE:
+		spec.detail = Detail.LOW
+	elif d > WorldTier.FACADE_MEDIUM_RANGE and spec.detail == Detail.FULL:
+		spec.detail = Detail.MEDIUM
+	if d > WorldTier.FACADE_RETURN_RANGE:
+		spec.laundry = false
 
 
 # --- Spec generation ---------------------------------------------------------
@@ -515,11 +551,22 @@ static func _assemble(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> v
 
 	# Returns and rear, for every building that is not pure silhouette. No longer
 	# gated on `spec.side`; see the note over _emit_returns().
-	if detailed:
+	#
+	# The reduced tier drops them past WorldTier.FACADE_RETURN_RANGE. A return is
+	# only ever seen obliquely, and at ninety metres in a terrace it is seen by
+	# nothing at all — the neighbour's party wall is five centimetres away.
+	if detailed and _wants_returns(spec):
 		_emit_returns(batch, base, spec, rng, lines, wall_h)
 
-	if spec.laundry and spec.detail == Detail.FULL and spec.floors >= 3:
+	if _hangs_washing(spec, rng):
 		_emit_laundry(batch, front, spec, rng, lines)
+
+
+## Does this building get its flank and rear elevations? Always, on desktop.
+static func _wants_returns(spec: Spec) -> bool:
+	if not WorldTier.is_reduced():
+		return true
+	return WorldTier.plan_distance(spec.position) <= WorldTier.FACADE_RETURN_RANGE
 
 
 static func _wall_material(spec: Spec) -> StandardMaterial3D:
@@ -1396,17 +1443,88 @@ static func _emit_return_window(batch: Batch, face: Transform3D, spec: Spec,
 
 # --- Washing -----------------------------------------------------------------
 
-## A line of washing strung across the front, sagging between two hooks.
+## Whether this house has washing out.
 ##
-## Three straight segments rather than a real catenary: the eye reads the sag,
-## not the curve, and each extra segment is a whole box. Only ever switched on
-## for waterfront rows — hung laundry is specifically a Ribeira sight.
+## THE GATE MOVED, AND THAT IS THE POINT OF THIS PASS. `spec.laundry` is set by
+## the placement stream, which flips a 45% coin on the Porto waterfront row and
+## nothing else, and the FULL-detail requirement then removed most of what was
+## left: `detail` drops to MEDIUM past the shadow range, which is precisely the
+## reach of quay two of the three establishing shots spend most of their pixels
+## on. Between them the two conditions put washing on a handful of buildings in
+## the near field and none at all on the stretch of terrace the camera actually
+## looks down, which is why two independent critics reported "no laundry, no
+## washing on balconies" on a terrace that already had the code to hang it.
+##
+## What replaces it is the placement stream's own statement of which houses front
+## the water: a quay-level ground floor — an arcade or a shopfront — rather than
+## a plain street door. That is exactly the Ribeira row and nothing else. The
+## Gaia lodges carry SHOPFRONT ground floors too and are excluded by the storey
+## count, since a one- or two-storey shed has no upper window to string a line
+## from and nobody hangs washing over a working port yard.
+##
+## MEDIUM is now allowed. A line plus five quads is fourteen triangles and no new
+## material, so the reason to withhold it at distance would have to be that it
+## does not read — and it is the opposite: colour flecks against a flat painted
+## wall survive minification far better than the shutters and balusters MEDIUM
+## already drops.
+##
+## The 0.7 is a real coin flip on the shared RNG rather than a hash, in keeping
+## with the rest of this file. It shifts the draw sequence for every building
+## after the first one that consults it, so the whole terrace re-dices — that is
+## expected and deterministic, not a regression.
+static func _hangs_washing(spec: Spec, rng: RandomNumberGenerator) -> bool:
+	if spec.detail == Detail.LOW or spec.floors < 3:
+		return false
+	if spec.laundry:
+		return true
+	if spec.ground == Ground.DOOR:
+		return false
+	return rng.randf() < 0.7
+
+
+## Lines of washing strung across the front, sagging between their hooks.
+##
+## Three straight segments per line rather than a real catenary: the eye reads
+## the sag, not the curve, and each extra segment is a whole box.
+##
+## WHAT MAKES IT READ AT A HUNDRED METRES. Not the line — a 22 mm cable at 110 m
+## is a fifth of a pixel and never resolves. It is the CLOTH: four to seven
+## rectangles of 0.3 x 0.6 m, which is 3 x 6 px, hung at two different floor
+## levels in three tones. Three tones matter more than the count. A row of
+## identical white flecks reads as speckle on the render — as noise, which is the
+## RUBRIC's own word for a failed detail layer — while white against a laundered
+## blue against a faded red reads as objects, because noise does not come in
+## three values and cloth does.
+##
+## The pieces are also bigger than they were (0.30-0.52 wide, 0.40-0.85 tall,
+## against 0.24-0.42 and 0.32-0.62). A bath towel on a Ribeira line is a metre
+## long; the old sizes were handkerchiefs, and at this range the difference is
+## whether a piece is four pixels or two.
 static func _emit_laundry(batch: Batch, front: Transform3D, spec: Spec,
 		rng: RandomNumberGenerator, lines: PackedFloat32Array) -> void:
-	var f := rng.randi_range(1, maxi(spec.floors - 2, 1))
-	var y := lines[f] + (lines[f + 1] - lines[f]) * 0.62
-	var x0 := -spec.width * 0.5 + 0.16
-	var x1 := spec.width * 0.5 - 0.16
+	var top_floor := maxi(spec.floors - 2, 1)
+	var f := rng.randi_range(1, top_floor)
+	_laundry_line(batch, front, spec, rng, lines, f)
+	# A second line, two floors apart where the building is tall enough to have
+	# two. One line across one storey reads as a decoration somebody hung; two,
+	# at different heights and different lengths, read as a building people live
+	# in — which is the whole finding this is answering.
+	if rng.randf() < 0.55:
+		var g := f + 2 if f + 2 <= top_floor else f - 2
+		if g >= 1 and g <= top_floor:
+			_laundry_line(batch, front, spec, rng, lines, g)
+
+
+## One line and its cloth, on floor `f`.
+static func _laundry_line(batch: Batch, front: Transform3D, spec: Spec,
+		rng: RandomNumberGenerator, lines: PackedFloat32Array, f: int) -> void:
+	var y := lines[f] + (lines[f + 1] - lines[f]) * (0.58 + rng.randf() * 0.10)
+	# Short of the party walls, and not by the same amount at both ends: a line is
+	# hooked to whatever was handy, never centred on the facade.
+	var x0 := -spec.width * 0.5 + 0.14 + rng.randf() * 0.22
+	var x1 := spec.width * 0.5 - 0.14 - rng.randf() * 0.22
+	if x1 - x0 < 0.8:
+		return
 	var z := BALCONY_PROJECT + rng.randf_range(0.10, 0.28)
 	var sag := rng.randf_range(0.16, 0.30)
 
@@ -1420,13 +1538,23 @@ static func _emit_laundry(batch: Batch, front: Transform3D, spec: Spec,
 		Geo.beam(iron_b, front, last, next, 0.022)
 		last = next
 
-	var linen_b := batch.baker(Batch.linen_thin())
-	var pieces := rng.randi_range(3, 6)
+	var pieces := rng.randi_range(4, 7)
 	for i in pieces:
-		var t := (float(i) + 0.5) / float(pieces)
+		# Jittered along the line, because pegged washing bunches: a piece sits
+		# where the last one left room, not on a grid.
+		var t := (float(i) + 0.25 + rng.randf() * 0.5) / float(pieces)
 		var hang_x := x0 + span * t
 		var hang_y := y - sag * 4.0 * t * (1.0 - t) - 0.02
-		var w := rng.randf_range(0.24, 0.42)
-		var h := rng.randf_range(0.32, 0.62)
-		Geo.rect(linen_b, front, hang_x - w * 0.5, hang_y - h, hang_x + w * 0.5, hang_y,
+		var w := rng.randf_range(0.30, 0.52)
+		var h := rng.randf_range(0.40, 0.85)
+		# White is the common one; the two accents are what stop a row of these
+		# reading as one flat stripe. Same reasoning as the quay's parasols.
+		var roll := rng.randf()
+		var tone := Batch.LINEN_WHITE
+		if roll > 0.82:
+			tone = Batch.LINEN_RED
+		elif roll > 0.58:
+			tone = Batch.LINEN_BLUE
+		Geo.rect(batch.baker(Batch.linen_thin(tone)), front,
+				hang_x - w * 0.5, hang_y - h, hang_x + w * 0.5, hang_y,
 				z + rng.randf_range(-0.02, 0.02))

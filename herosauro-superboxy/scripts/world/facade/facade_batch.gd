@@ -30,6 +30,18 @@ const TIMBER_BROWN := Color(0.34, 0.23, 0.15)
 const ROOF_TERRACOTTA := Color(0.60, 0.30, 0.21)
 const LIT_AMBER := Color(1.0, 0.80, 0.44)
 const LINEN_WHITE := Color(0.90, 0.88, 0.83)
+## Washing is not all white, and the colour is the point of hanging it here at
+## all: at 80-120 m a line of sheets is a row of 3-5 px flecks, and three tones
+## on one line is what makes those flecks read as cloth rather than as noise on
+## the render. Kept to two accents beside the white — a whole rainbow across
+## fifty facades reads as bunting, which is a different city.
+##
+## Both are pitched to sit INSIDE the wall palette's value range rather than
+## above it. A pure-white sheet on a mid-ochre wall at this distance is a
+## specular-looking blob; a laundered blue and a faded red are what is actually
+## on those lines and they land where the eye expects cloth.
+const LINEN_BLUE := Color(0.575, 0.655, 0.745)
+const LINEN_RED := Color(0.720, 0.435, 0.375)
 const AZULEJO_PALE := Color(0.83, 0.88, 0.92)
 ## The third tile value. A tiled front is a pale field, a coloured ground and a
 ## near-navy border, and two of those three read as one flat blue at 80 m —
@@ -58,66 +70,127 @@ const LINEN_TILE := 0.4
 const LIT_ENERGY := 1.7
 
 static var _iron_thin: StandardMaterial3D
-static var _linen_thin: StandardMaterial3D
+## Keyed by colour, so the three washing tones cost three materials for the whole
+## city rather than three per terrace. Same shape as the single cached copy this
+## replaces; see linen_thin().
+static var _linen_thin: Dictionary = {}
 
 ## Distant terraces cast a shadow the eye reads as a blob, and shadow passes are
 ## the one cost baking does not remove. The placement stream turns this off for
 ## the far hillside rows.
 var cast_shadows := true
 
+## --- SPATIAL SPLIT -----------------------------------------------------------
+##
+## Grouping per terrace is what makes the detail affordable, and past a point it
+## is also what makes the scene uncullable. `_build_city()` hands every house on
+## both banks to ONE batch, so `Ribeira_1` came out as 169,936 triangles in a
+## single instance whose world AABB spans (-136, -9, -126) .. (100, 31, 32).
+## Godot culls and shadow-maps an instance against that AABB as a unit, so a
+## surface that size is in every frustum and every shadow cascade for as long as
+## any part of the city is on screen. Probing the shot cameras put 98.6% of all
+## shadow-casting geometry in cascade 0 — the 26 m box around the player.
+##
+## So the registry keys on (material, cell) rather than on material alone, and
+## `locate()` moves the cell as each building is added. Cutting on rings of
+## distance from the arena turns one world-spanning surface into two — inside the
+## shadow radius and outside it — which is what the shadow decision needs in order
+## to be made at all.
+##
+## `split_bakes` false restores the old one-surface-per-material behaviour
+## exactly, and that is the desktop path — see WorldTier, which owns both the
+## switch and the ring boundaries the cells are cut on.
+var split_bakes := false
+
+var _cell := Vector2i.ZERO
+## Material -> { cell: MeshBaker }.
 var _bakers: Dictionary = {}
-## Insertion order, so the committed child nodes come out identical run to run.
-## A Dictionary preserves order in GDScript, but leaning on that for scene
-## structure is the kind of assumption that breaks quietly.
-var _order: Array[Material] = []
+## Insertion order as [Material, cell] pairs, so the committed child nodes come
+## out identical run to run. A Dictionary preserves order in GDScript, but leaning
+## on that for scene structure is the kind of assumption that breaks quietly.
+var _order: Array[Array] = []
+
+
+func _init() -> void:
+	split_bakes = WorldTier.split_bakes()
 
 
 # --- Registry ----------------------------------------------------------------
 
-## The baker accumulating geometry for `mat`, created on first ask.
+## Point the registry at the cell `pos` falls in. Everything added after this call
+## lands in that cell's bakers. A no-op when the split is off.
+func locate(pos: Vector3) -> void:
+	if split_bakes:
+		_cell = WorldTier.cell_for(pos)
+
+
+## The baker accumulating geometry for `mat` in the current cell, created on first
+## ask.
 func baker(mat: Material) -> MeshBaker:
-	var b: MeshBaker = _bakers.get(mat)
+	# has()/[] rather than get(): a Dictionary is a built-in Variant type and is
+	# therefore NOT nullable, so `var cells: Dictionary = _bakers.get(mat)` on a
+	# miss does not yield null — it raises "Trying to assign value of type 'Nil'"
+	# and leaves the variable unusable, which silently drops every surface the
+	# batch was about to build.
+	if not _bakers.has(mat):
+		_bakers[mat] = {}
+	var cells: Dictionary = _bakers[mat]
+	var b: MeshBaker = cells.get(_cell)
 	if b == null:
 		b = MeshBaker.new()
-		_bakers[mat] = b
-		_order.append(mat)
+		cells[_cell] = b
+		_order.append([mat, _cell])
 	return b
 
 
 func triangle_count() -> int:
 	var total := 0
-	for mat in _order:
-		total += (_bakers[mat] as MeshBaker).triangle_count()
+	for key in _order:
+		total += _baker_for(key).triangle_count()
 	return total
 
 
-## How many draw calls this batch will cost — one per material that got used.
+## How many draw calls this batch will cost — one per (material, cell) that got
+## used. With the split off that is one per material, as it always was.
 func surface_count() -> int:
 	var used := 0
-	for mat in _order:
-		if (_bakers[mat] as MeshBaker).triangle_count() > 0:
+	for key in _order:
+		if _baker_for(key).triangle_count() > 0:
 			used += 1
 	return used
 
 
-## Weld everything and return a Node3D holding one MeshInstance3D per material.
+func _baker_for(key: Array) -> MeshBaker:
+	return (_bakers[key[0]] as Dictionary)[key[1]] as MeshBaker
+
+
+## Weld everything and return a Node3D holding one MeshInstance3D per material,
+## or per (material, cell) when the spatial split is on.
 ##
 ## The node is left at the origin: geometry is baked at each Spec's own
-## position, so moving the returned node moves the whole row.
+## position, so moving the returned node moves the whole row. That is also what
+## keeps the split free — every chunk keeps the identity transform, so a
+## world-mapped or object-space triplanar material samples exactly the same texel
+## it did before the mesh was cut.
 func commit(node_name: String = "Facades") -> Node3D:
 	var root := Node3D.new()
 	root.name = node_name
 	var index := 0
-	for mat in _order:
-		var b: MeshBaker = _bakers[mat]
+	for key in _order:
+		var b := _baker_for(key)
 		if b.triangle_count() == 0:
 			continue
-		var mi := b.commit(mat, "%s_%d" % [node_name, index])
-		if not cast_shadows:
+		var mi := b.commit(key[0] as Material, "%s_%d" % [node_name, index])
+		# Two independent reasons to leave the shadow pass: the caller's
+		# all-or-nothing switch, and this chunk's own distance ring on the reduced
+		# tier. See WorldTier.cell_casts_shadow for why the ring answers it and an
+		# AABB cannot.
+		if not cast_shadows or not WorldTier.cell_casts_shadow(key[1] as Vector2i):
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mi)
 		index += 1
 	return root
+
 
 
 # --- Materials ---------------------------------------------------------------
@@ -190,8 +263,17 @@ static func lit() -> StandardMaterial3D:
 
 
 ## Hung washing and shopfront awnings — single quads, so culling off.
-static func linen_thin() -> StandardMaterial3D:
-	if _linen_thin == null:
-		_linen_thin = ToonFactory.cloth(LINEN_WHITE, LINEN_TILE).duplicate()
-		_linen_thin.cull_mode = BaseMaterial3D.CULL_DISABLED
-	return _linen_thin
+##
+## A sheet on a line is seen from both sides over the course of a fight and from
+## behind in half the shot vantages, so a back-face-culled one disappears exactly
+## when it is doing its job. The duplicate is mandatory — factory materials are
+## shared and cached project-wide — and the result is memoised per colour so the
+## whole city still shares one material per tone.
+static func linen_thin(color: Color = LINEN_WHITE) -> StandardMaterial3D:
+	var cached: StandardMaterial3D = _linen_thin.get(color)
+	if cached != null:
+		return cached
+	var m: StandardMaterial3D = ToonFactory.cloth(color, LINEN_TILE).duplicate()
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_linen_thin[color] = m
+	return m

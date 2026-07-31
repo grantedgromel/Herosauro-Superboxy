@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://br30lmoh4cx2o"
-path.s3tc="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex"
-path.etc2="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"
+uid="uid://cndct5bi56fdo"
+path.s3tc="res://.godot/imported/figure_adamastor.png-dabdae73a7d95904e4581e27b6d8c8a6.s3tc.ctex"
+path.etc2="res://.godot/imported/figure_adamastor.png-dabdae73a7d95904e4581e27b6d8c8a6.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/ui/portraits/herosauro.png"
-dest_files=["res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex", "res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"]
+source_file="res://assets/ui/art/figure_adamastor.png"
+dest_files=["res://.godot/imported/figure_adamastor.png-dabdae73a7d95904e4581e27b6d8c8a6.s3tc.ctex", "res://.godot/imported/figure_adamastor.png-dabdae73a7d95904e4581e27b6d8c8a6.etc2.ctex"]
 
 [params]
 

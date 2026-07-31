@@ -10,11 +10,25 @@ extends SceneTree
 ## after tweaking a recipe:
 ##   godot --headless --path . --script res://assets/textures/generate_detail_maps.gd
 ##
-## Each surface writes two maps, and four of the six write a third:
+## Each surface writes two maps, and five of the eight write a third:
 ##   detail_<name>_normal.tres   tangent-space normal, bump-converted from the noise
-##   detail_<name>_mask.tres     R = roughness multiplier, G = ambient occlusion
+##   detail_<name>_mask.tres     R = roughness multiplier, G = ambient occlusion,
+##                               B = bare-metal fraction (steel only; see below)
 ##   detail_<name>_albedo.tres   surface-scale COLOUR variation
-##                               (granite, iron, cobble, plaster)
+##                               (granite, iron, cobble, plaster, masonry)
+##
+## Two of the eight are not ToonFactory.Surface families and deliberately are not:
+##
+##   steel    a MASK ONLY, riding the iron normal and the iron albedo. ToonFactory
+##            swaps it in for the iron mask when a call site clears METALLIC_SNAP,
+##            i.e. on the three bare-metal surfaces in the game. See its recipe.
+##   masonry  a normal / mask / albedo trio used by ONE hand-written material,
+##            assets/materials/toon_bridge.tres. See its recipe for why the deck
+##            fascia could not be dressed with the granite set.
+##
+## Neither adds a Surface enum value, and that is on purpose: ARCHITECTURE.md makes
+## a new Surface a three-stream change (fx impact table, audio footstep table) and
+## neither of these is a thing a hero can stand on or a rock can chip.
 ##
 ## Packing roughness and AO into one texture is deliberate: the scenery samples
 ## everything triplanar (3 taps per map), so halving the map count halves the
@@ -207,11 +221,30 @@ func _recipes() -> Array[Dictionary]:
 		# where the surface is rough and proud. That registration is the whole effect —
 		# an oxide patch that is smooth, or that is not where the bump is, reads as a
 		# stain printed on the paint rather than as the paint having failed.
+		#
+		# ROUND 4 moved the roughness low end, 0.34 -> 0.22, and that single number is
+		# this round's answer to "ironwork still has no specular return: the top rail's
+		# 99th-percentile luminance is 92/255 in direct sun" (measured here at 62.6 over
+		# the round-2 region, x 0-380 of 03_rail_macro).
+		#
+		# The reasoning is that 0.34 was never a gloss. iron()'s base is 0.62 and the
+		# mask MULTIPLIES it, so the smoothest texel on a painted member was 0.21 — and
+		# a 0.21-roughness GGX lobe at F0 6.2% spreads its highlight over roughly 12
+		# degrees, which on a 40 mm rail seen at 20 m is a highlight wider than the rail.
+		# It integrates to a faint even lift rather than to a specular EVENT, which is
+		# exactly what "no specular return" describes. Fresh gloss enamel over steel is
+		# genuinely 0.10-0.15; 0.22 x 0.62 = 0.136 puts the intact-paint end there and
+		# leaves the oxide end untouched at 1.00 x 0.62 = 0.62.
+		#
+		# What this does NOT fix, and is reported rather than papered over: in
+		# 03_rail_macro the camera looks along -z and the sun comes FROM +z, so the
+		# parapet face in shot is the anti-sun face. No material makes a shaded face
+		# return a sun highlight. The lever there is the shot or the key, not this file.
 		{
 			"name": "iron",
 			"noise": _fbm(FastNoiseLite.TYPE_VALUE_CUBIC, 0.030, 4, 0.60, 2.0, 2207),
 			"bump": 3.2,
-			"rough": Vector2(0.34, 1.00),
+			"rough": Vector2(0.22, 1.00),
 			"ao": Vector2(0.78, 1.00),
 			"albedo_ramp": [
 				[0.00, Color(1.000, 1.000, 1.000)],
@@ -219,6 +252,69 @@ func _recipes() -> Array[Dictionary]:
 				[0.84, Color(0.955, 0.885, 0.815)],
 				[1.00, Color(0.860, 0.690, 0.575)],
 			],
+		},
+		# BARE METAL. A mask only — it rides the iron normal and the iron albedo map,
+		# on the SAME field (same type, frequency, octaves, gain, lacunarity and seed as
+		# the iron recipe above, so it is bit-for-bit the same noise), and ToonFactory
+		# swaps it in for the iron mask on any material that clears METALLIC_SNAP.
+		#
+		# It exists because of the single defect that has survived three rounds. The
+		# tram rail head is `metallic = 1` at a call-site roughness of 0.26, and the iron
+		# mask multiplies that down to 0.088 at its smooth end. A metal has no diffuse
+		# term, so every photon a 0.088-roughness crown returns is a mirror reflection,
+		# and at a grazing view down the deck the only thing in that mirror is sky.
+		# Measured at 03_rail_macro y 603-604: RGB (32, 64, 109) and (16, 44, 98) at
+		# saturation 0.70 and 0.83, against neighbours at 0.19-0.33 and warm grey. Round
+		# 1 named the flat blue rails as the tell that gave the frame away; Round 2
+		# rebuilt them as real Ri60 grooved track and added a ReflectionProbe; the crown
+		# got brighter and stayed pure blue, because none of that changed the two things
+		# that make it a mirror.
+		#
+		# So this changes both, and each one is a fact about rail steel rather than a
+		# dodge:
+		#
+		#   ROUGHNESS 0.72-1.00, not the iron mask's 0.22-1.00. Against the roughness
+		#   floor ToonFactory now applies to bare metal (0.45) that lands the crown at
+		#   0.32-0.45 instead of 0.088-0.26. A rail head is SATIN, not chrome: it is
+		#   ground on installation and then abraded by steel wheels, so its finish is
+		#   directional wear scoring, not polish. A 0.4-roughness lobe integrates most
+		#   of the upper hemisphere, so the crown returns the deck and the parapet
+		#   mixed with the sky instead of the sky verbatim.
+		#
+		#   METAL, in the B channel, 1 below t = 0.52 and 0 above t = 0.56. This is the
+		#   "enough non-metal in the crown" half. A rail head is bare steel only where a
+		#   wheel flange actually runs; everywhere else it carries mill scale and iron
+		#   oxide, and OXIDE IS A DIELECTRIC. So metallic becomes a texture, and because
+		#   it rides the same field as the roughness above, the non-metal texels are
+		#   exactly the rough ones — which is the correct registration and the reason
+		#   this is one mask and not two. Those texels get a diffuse term in the call
+		#   site's own colour (RAILHEAD_COLOR, a warm pale grey), which is precisely
+		#   "its own iron colour instead of the sky".
+		#
+		#   t = 0.52..0.56 is the 60th-to-70th percentile of this field's measured
+		#   histogram (deciles 0.00 .26 .33 .38 .44 .48 .52 .56 .62 .69 .99), so about
+		#   62% of the crown stays bare steel and 38% goes to oxide. Chosen off the
+		#   histogram rather than by eye for the same reason every other stop here is.
+		#
+		#   The transition is 0.04 wide rather than a hard step because a hard step
+		#   aliases: the mip chain averages it anyway, so a binary map only ever
+		#   produces intermediate metallic values at distance. Four percent of the ramp
+		#   is about two percent of the texels, which is narrower than one mip level
+		#   already makes it. "Metals are 0 or 1" is asserted on the material's SCALAR
+		#   in _atmosphere_probe.gd, which is the thing a call site controls; a metallic
+		#   MAP that is 0 or 1 per texel obeys the same rule at the only resolution it
+		#   can be obeyed at.
+		#
+		# AO 0.86-1.00, shallower than the iron mask's 0.78: these are small proud
+		# members with nothing above them to occlude, and the deep AO on iron is there
+		# for the lattice's inside corners.
+		{
+			"name": "steel",
+			"noise": _fbm(FastNoiseLite.TYPE_VALUE_CUBIC, 0.030, 4, 0.60, 2.0, 2207),
+			"mask_only": true,
+			"rough": Vector2(0.72, 1.00),
+			"ao": Vector2(0.86, 1.00),
+			"metal": Vector2(0.52, 0.56),
 		},
 		# Cell borders become the grout between setts; interiors stay smooth.
 		# The grout is also where the moss lives, hence the deepest AO of the six.
@@ -350,6 +446,139 @@ func _recipes() -> Array[Dictionary]:
 				[1.00, Color(0.955, 0.991, 0.997)],
 			],
 		},
+		# COURSED GRANITE ASHLAR, for the deck slab's outer fascia and nothing else.
+		#
+		# WHAT IT IS FOR. The fascia is the largest single surface in 01_deck_mid — the
+		# band at y 478-600, 16.9% of the frame — and it was dressed with the granite
+		# set at a 2.94 m square tile. Measured on that band, in this tree, before this
+		# recipe existed:
+		#
+		#   row autocorrelation of G/R  peak at lag 214 px, r = 0.849
+		#   the same on luminance       peak at lag 214 px, r = 0.747
+		#   (R-G) sd 8.08 against L sd 10.74, a hue/value ratio of 0.75
+		#
+		# Six visible repeats across the frame, and the thing that repeats is COLOUR
+		# rather than FORM. Both numbers have the same cause and it is not the ramp:
+		# granite's albedo field is a 3-octave simplex at frequency 0.011, i.e. metre-
+		# scale blobs, and its NORMAL is a separate field at 0.060 — 19 cm speckle,
+		# which at the 14 m this fascia sits from the camera is a quarter of a pixel and
+		# contributes nothing. So the surface presented one square tile of soft coloured
+		# blotch, thirty-four times along a hundred metres, with no relief underneath
+		# it. A critic called it a camouflage pattern and that is exactly what it is.
+		#
+		# The granite set cannot be fixed into this. It is authored for metre-scale
+		# masonry seen from any angle and it is right for that; what a 100 m x 1.96 m
+		# spandrel needs is COURSES AND BLOCK JOINTS, which is form at 0.5 m, and no
+		# amount of hue on a blotch field becomes a joint.
+		#
+		# THE FIELD. Cellular, DISTANCE2_SUB, so the value is 0 exactly on a cell border
+		# and rises into the cell — the borders become the mortar joints, the interiors
+		# the block faces, and the bump conversion cuts the joints in as real grooves.
+		# Frequency 0.03125 over a 256-px map is a 32-texel cell, i.e. 8 x 8 = 64 blocks
+		# per tile. Sixty-four is chosen against the repeat rather than by eye: fewer
+		# blocks means a shorter tile in metres for the same block size, and the tile
+		# length in metres IS the repeat period.
+		#
+		# The block PROPORTION comes from the material rather than from here, and that
+		# is the second half of the fix. toon_bridge.tres tiles this ANISOTROPICALLY —
+		# uv1_scale (0.125, 0.25, 0.125), i.e. 8.0 m across and 4.0 m up — so a square
+		# 32-texel cell lands as a block 1.00 m long and 0.50 m high. That is coursed
+		# granite ashlar at the size a real bridge spandrel is built from, and it is
+		# only reachable because BaseMaterial3D's uv1_scale is a Vector3 and triplanar
+		# forms a z-facing surface's UV out of (x * scale.x, y * scale.y).
+		#
+		# The same anisotropy is what kills the 214 px repeat: the horizontal period
+		# goes 2.94 m to 8.00 m, and the fascia images at 72.8 px per metre in that
+		# shot, so the repeat lands near 580 px instead of 214 and the frame holds 2.2
+		# of them instead of 6. Vertically the tile is 4.0 m against a 1.96 m fascia, so
+		# the band shows HALF a tile and has no vertical repeat at all.
+		#
+		# The one cost of the anisotropy, stated rather than hidden: a tangent-space
+		# normal stretched 2:1 encodes a slope that is twice as steep across the long
+		# axis as it should be, so the vertical perpend joints read a little deeper and
+		# about twice as wide (9 cm against the bed joints' 5 cm) as a mason would cut
+		# them. On raked granite rubble that is inside the range of the real thing, and
+		# it buys a repeat period nobody can find.
+		#
+		# JITTER 0.42, not the cobble's 0.90 and not zero. Zero gives a perfect lattice,
+		# which is the RUBRIC's "nothing perfectly straight, clean or repeated" failure
+		# written as a texture; 0.90 gives fully random Voronoi, which reads as crazy
+		# paving rather than as coursed work. 0.42 keeps the courses recognisable while
+		# every block differs in length — which is what random ashlar, the way Portuguese
+		# granite bridgework is actually laid, looks like.
+		#
+		# ROUGHNESS 0.55 at the joint to 1.00 on the face, and AO 0.50 to 1.00: the same
+		# reading as granite (this stone is two metres above a tidal river, the joints
+		# are where the damp and the moss sit, damp stone is glossier stone) but with
+		# the deepest AO of the eight recipes after cobble, because a raked mortar joint
+		# is a real 3 cm recess and the 34-degree sun rakes along it rather than into it.
+		#
+		# THE ALBEDO is per-BLOCK, not per-blotch: RETURN_CELL_VALUE on the same
+		# frequency, jitter and seed, so its cells ARE the mask's cells, with CONSTANT
+		# interpolation so each block takes one flat colour and the colour boundaries
+		# land exactly on the joints the normal is grooving. That is the cobble recipe's
+		# construction and it is here for the same reason — it is the only way a single
+		# scalar noise field produces per-object identity rather than a wash.
+		#
+		# Six stops on THREE orthogonal axes rather than the cobble's two, and the third
+		# one is here because this surface has a second measurement to answer. The
+		# fascia's variation was already 75% hue by the (R-G) sd / L sd ratio, so this
+		# recipe must NOT buy its channel decorrelation with more colour — the colour is
+		# the thing being complained about. It buys it with an extra AXIS instead:
+		#
+		#   value        v = 0.80 +- 0.075 linear   V = [-1 -1  0  0 +1 +1]
+		#   warm / cool  +-0.075 on r against b     S = [+1 -1 +1 -1 +1 -1]
+		#   green / mag  +-0.040 on g against both  P = [+1 -1  0  0 -1 +1]
+		#
+		# All three sum to zero and are mutually orthogonal over equal shares, which is
+		# what drives the correlations down (predicted r-g +0.38, r-b -0.08 against the
+		# +0.83 / +0.33 a two-axis version of the same ramp measured). And the total
+		# per-texel chroma is 0.155 linear, LOWER than the granite map it replaces
+		# (0.174) — so the surface ends up less colourful and less monochrome at the
+		# same time, which is only possible because the axes are orthogonal.
+		#
+		# The VALUE variation the surface reads at distance is therefore meant to come
+		# from the joints, not from here: block-to-block value is a 1.21 ratio, while
+		# the mask's AO runs 0.50-1.00 and the normal cuts a real groove. That is the
+		# right split for the "hue rather than form" finding — form is what a joint is.
+		# Read as stone: iron-stained block, damp blue-grey block, buff block, grey
+		# block, lichen-yellowed block, quartz-blue block.
+		{
+			"name": "masonry",
+			"noise": _cellular(0.03125, 0.42, 9137),
+			"bump": 12.0,
+			"rough": Vector2(0.55, 1.00),
+			"ao": Vector2(0.50, 1.00),
+			"albedo_noise": _cellular(0.03125, 0.42, 9137, FastNoiseLite.RETURN_CELL_VALUE),
+			"albedo_constant": true,
+			# STOP OFFSETS ARE THE FIELD'S OWN k/6 QUANTILES, read off the deciles
+			# _report() prints (0.03 .12 .19 .33 .50 .55 .66 .71 .78 .89 1.00). A
+			# cellular RETURN_CELL_VALUE field is only uniform when its jitter is high —
+			# at 0.42 the cells vary in AREA, so cell value is uniform and cell area is
+			# not, and evenly spaced stops give the six stones shares of 22/15/18/17/22/6
+			# per cent instead of a sixth each.
+			#
+			# WHAT THAT ACTUALLY BOUGHT, measured rather than assumed, because the
+			# obvious story is wrong. Three runs on this same field:
+			#   even stops,     two-axis ramp    r-g +0.826  r-b +0.302
+			#   quantile stops, two-axis ramp    r-g +0.838  r-b +0.327
+			#   quantile stops, three-axis ramp  r-g +0.436  r-b -0.064
+			# So the offsets moved the correlation by nothing at all — the third colour
+			# axis did the whole of it. What the quantiles DID buy is the delivered
+			# per-channel MEAN: (0.796, 0.804, 0.796), i.e. neutral to half a percent,
+			# where an uneven split leaves the map with a tint the material has to
+			# divide back out. Both are worth having and they are not the same property,
+			# and writing down which one each change bought is the only way the next
+			# person does not credit the wrong one.
+			"albedo_ramp": [
+				[0.000, Color(0.926, 0.846, 0.849)],
+				[0.167, Color(0.804, 0.889, 0.886)],
+				[0.387, Color(0.943, 0.906, 0.868)],
+				[0.550, Color(0.868, 0.906, 0.943)],
+				[0.693, Color(0.959, 0.962, 0.886)],
+				[0.817, Color(0.926, 0.924, 0.996)],
+			],
+		},
 		# Barrel roof tiles: rounded cells with a gritty clay surface. Rain-polished
 		# on the crowns, gritty and lichenous in the pan between them.
 		{
@@ -424,16 +653,20 @@ func _write_pair(recipe: Dictionary) -> void:
 	var name: String = recipe["name"]
 	var noise: FastNoiseLite = recipe["noise"]
 
-	var normal := _base_texture()
-	normal.as_normal_map = true
-	normal.bump_strength = recipe["bump"]
-	normal.noise = noise
-	_save(normal, "detail_%s_normal.tres" % name)
+	# `mask_only` recipes ride another family's normal and albedo and write nothing but
+	# a mask. Only `steel` does this, and its recipe says why.
+	if not recipe.get("mask_only", false):
+		var normal := _base_texture()
+		normal.as_normal_map = true
+		normal.bump_strength = recipe["bump"]
+		normal.noise = noise
+		_save(normal, "detail_%s_normal.tres" % name)
 
 	# The mask shares the same noise instance intentionally: crevices that bump
 	# inward are the same crevices that read rough and occluded.
 	var mask := _base_texture()
-	mask.color_ramp = _ramp(recipe["rough"], recipe["ao"])
+	mask.color_ramp = _ramp(recipe["rough"], recipe["ao"],
+			recipe.get("metal", Vector2.ZERO))
 	mask.noise = noise
 	_save(mask, "detail_%s_mask.tres" % name)
 
@@ -578,16 +811,38 @@ func _base_texture() -> NoiseTexture2D:
 	return t
 
 
-## R carries the roughness multiplier, G the AO term. B is unused; both channels
-## are data, never colour, so the ramp is authored in linear values.
-func _ramp(rough: Vector2, ao: Vector2) -> Gradient:
+## R carries the roughness multiplier, G the AO term, B the BARE-METAL fraction.
+## All three are data, never colour, so the ramp is authored in linear values and the
+## samplers that read it carry no source_color hint.
+##
+## `metal` is (t_last_metal, t_first_dielectric): B holds 1.0 up to the first, 0.0 from
+## the second, and crosses linearly between them. Vector2.ZERO — the default, and what
+## seven of the eight recipes pass — leaves B at 0 everywhere, which is what it has
+## always been, and no material reads it except the ones ToonFactory hands the steel
+## mask to. See the steel recipe for why the split is a texture at all and why its
+## transition has a width rather than being a step.
+##
+## R and G stay EXACTLY the linear ramp they were: the extra stops are placed on the
+## same line, so lerping R and G to their values at those offsets reproduces the
+## two-stop gradient texel for texel.
+func _ramp(rough: Vector2, ao: Vector2, metal: Vector2 = Vector2.ZERO) -> Gradient:
 	var g := Gradient.new()
 	g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_LINEAR
-	g.offsets = PackedFloat32Array([0.0, 1.0])
-	g.colors = PackedColorArray([
-		Color(rough.x, ao.x, 0.0, 1.0),
-		Color(rough.y, ao.y, 0.0, 1.0),
-	])
+	if metal == Vector2.ZERO:
+		g.offsets = PackedFloat32Array([0.0, 1.0])
+		g.colors = PackedColorArray([
+			Color(rough.x, ao.x, 0.0, 1.0),
+			Color(rough.y, ao.y, 0.0, 1.0),
+		])
+		return g
+	var offsets := PackedFloat32Array([0.0, metal.x, metal.y, 1.0])
+	var colors := PackedColorArray()
+	var b := [1.0, 1.0, 0.0, 0.0]
+	for i in offsets.size():
+		var t: float = offsets[i]
+		colors.append(Color(lerpf(rough.x, rough.y, t), lerpf(ao.x, ao.y, t), b[i], 1.0))
+	g.offsets = offsets
+	g.colors = colors
 	return g
 
 

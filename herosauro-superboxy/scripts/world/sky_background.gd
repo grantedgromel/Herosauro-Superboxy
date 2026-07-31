@@ -32,8 +32,8 @@ const RiverLifeScript := preload("res://scripts/world/river_life.gd")
 const CloudShader: Shader = preload("res://assets/shaders/soft_cloud.gdshader")
 
 const CLOUD_SPEED := 1.4          # world units / second of drift along +X
-const CLOUD_WRAP_MIN := -190.0    # x where a cloud re-appears after wrapping
-const CLOUD_WRAP_MAX := 190.0     # x past which a cloud wraps back
+const CLOUD_WRAP_MIN := -330.0    # x where a cloud re-appears after wrapping
+const CLOUD_WRAP_MAX := 330.0     # x past which a cloud wraps back
 
 # --- Ribeira palette ---------------------------------------------------------
 # Pitched a good 10-15% darker than a photograph of these houses would suggest, with
@@ -97,15 +97,53 @@ const RABELO_SPOTS := [Vector3(-28.0, 0.0, -16.0), Vector3(8.0, 0.0, -24.0), Vec
 const RABELO_YAWS := [-0.35, 0.25, 0.6]
 
 ## Cloud field. Nine identically-scaled clusters at identical tilt read as two
-## copy-pasted objects, which is what Round 1 saw; twelve over a much wider band, each
-## with its own yaw, its own three-axis stretch and its own puff count, do not.
-const CLOUD_COUNT := 12
-## Height band and depth band the field occupies. Both pushed a long way out from the
-## 34-58 / -70..-30 they used to sit in: at that range a 4 m puff scaled 2.2 subtends
-## as much of shot 07 as a building does, which is why the old ones read as objects
-## hanging over the river rather than as weather.
+## copy-pasted objects, which is what Round 1 saw; each of these has its own yaw, its
+## own three-axis stretch and its own puff count, and no two are alike.
+##
+## 12 -> 24, with the band they occupy widened in x and z at the same time.
+##
+## Round 3's reviewers measured cloud content at 0.3% of the sky in 02_deck_eye
+## against 24% in 06_river_wide and read it as a defect. IT WAS FRAMING, and that was
+## established before anything moved rather than after: _atmosphere_probe.gd builds
+## the real field off its real seed and projects every cluster into every vantage in
+## tools/shots.json. The old field put 10 of 12 clusters inside 07_ribeira's frustum
+## and 2 inside 02_deck_eye's, because 07 looks along -z straight at the band and 02
+## looks along +x down the deck, where the band simply was not.
+##
+## Honest framing is still a composition problem when the shot it starves is the
+## game's signature view. Two clusters at the edge of frame is a bare gradient over
+## the whole Ribeira skyline while the frame beside it has weather in it. So the field
+## stops being a slab parked downstream of the bridge and becomes something the arena
+## sits inside: x out to +-330 (from +-190) and z from -235 to +10 (from -210 to -70),
+## which is the part of the dome the +x vantages actually look at.
+##
+## Measured the same way afterwards, clusters inside each world vantage's frustum:
+##
+##     shot            was   now        shot            was   now
+##     01_deck_mid      5     5         06_river_wide    5     9
+##     02_deck_eye      2     6         07_ribeira      10     7
+##     03_rail_macro    5     4         08_gaia_end      4     9
+##     04_cobble_macro  2     6         09_water_close   2     2
+##     05_arch_under   11     9         10_skyline_high  8     8
+##
+## Nine of the ten now see four or more; before, three saw two. 07 gives some back and
+## that is the trade being made deliberately — it had a third of the whole field in one
+## frame. (09 looks up through the arch lattice at the water and has almost no sky in
+## it at all; two is the right answer there.)
+##
+## The count goes up with the volume because spreading twelve clusters over 3.5x the
+## plan area would have thinned every shot in order to fix one. 24 costs 24 draw calls
+## against 12 — the field is still one baked surface per cluster — and about 33k
+## triangles at 100 m and beyond, where nothing resolves a facet.
+const CLOUD_COUNT := 24
+## Height band and depth band the field occupies. The height was pushed a long way out
+## from the 34-58 it used to sit in: at that range a 4 m puff scaled 2.2 subtended as
+## much of shot 07 as a building does, which is why the old ones read as objects
+## hanging over the river rather than as weather. The near end of the depth band stops
+## at z = +10, well short of every vantage in tools/shots.json, so no cloud is ever
+## between a deck camera and the deck.
 const CLOUD_Y := Vector2(58.0, 104.0)
-const CLOUD_Z := Vector2(-210.0, -70.0)
+const CLOUD_Z := Vector2(-235.0, 10.0)
 
 var _clouds: Array[Node3D] = []
 var _rabelos: Array[Node3D] = []

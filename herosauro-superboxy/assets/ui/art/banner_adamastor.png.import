@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://br30lmoh4cx2o"
-path.s3tc="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex"
-path.etc2="res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"
+uid="uid://c7ebdd3ki5ie7"
+path.s3tc="res://.godot/imported/banner_adamastor.png-306dae5e656189e50b0a1081ac3f2580.s3tc.ctex"
+path.etc2="res://.godot/imported/banner_adamastor.png-306dae5e656189e50b0a1081ac3f2580.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/ui/portraits/herosauro.png"
-dest_files=["res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.s3tc.ctex", "res://.godot/imported/herosauro.png-48175ab08e3388b9e6a73cb27685a6cf.etc2.ctex"]
+source_file="res://assets/ui/art/banner_adamastor.png"
+dest_files=["res://.godot/imported/banner_adamastor.png-306dae5e656189e50b0a1081ac3f2580.s3tc.ctex", "res://.godot/imported/banner_adamastor.png-306dae5e656189e50b0a1081ac3f2580.etc2.ctex"]
 
 [params]
 

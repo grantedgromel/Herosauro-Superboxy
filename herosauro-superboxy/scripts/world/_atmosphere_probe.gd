@@ -41,9 +41,47 @@ const ARENA_PATH := "res://scenes/world/bridge_arena.tscn"
 ## The deck surface: the single most-looked-at material in the game, and the one the
 ## tonemap's exposure is graded against.
 const DECK_MATERIAL_PATH := "res://assets/materials/toon_bridge.tres"
+## The surface-scale albedo map that material wears. Named here because it is NOT a
+## ToonFactory.Surface — it is a one-material map set (see the `masonry` recipe in
+## generate_detail_maps.gd), so nothing in the factory can hand the probe its mean and
+## the invariant below has to load the descriptor itself.
+const DECK_ALBEDO_MAP_PATH := "res://assets/textures/detail_masonry_albedo.tres"
+const DECK_NORMAL_MAP_PATH := "res://assets/textures/detail_masonry_normal.tres"
+
+## What the deck fascia's colour is a claim about, before either texture layer
+## multiplies it. Duplicated from the material's own header on purpose, exactly as
+## SUN_FROM is duplicated from the scene: the whole job of this file is to catch a
+## number and the sentence next to it drifting apart.
+const DECK_AUTHORED := Color(0.315, 0.312, 0.305)
+
+## bridge_arena.gd's deck palette, duplicated. The world stream owns those constants and
+## this stream may not preload its script, but the RUBRIC line they violate —
+## "the playable corridor is the brightest, highest-contrast thing in frame" — is a
+## MATERIAL property and the guard that enforces it is ToonFactory's. So the four
+## colours the guard exists for are named here and asserted against each other. If the
+## world stream re-authors them, this check keeps meaning the same thing: it compares
+## what the factory DELIVERS for the corridor against what it delivers for the walkway.
+const ROADWAY_COLOR := Color(0.325, 0.315, 0.300)
+const TRAMBED_COLOR := Color(0.235, 0.225, 0.215)
+const FLAG_COLOR := Color(0.545, 0.525, 0.485)
+const KERB_COLOR := Color(0.580, 0.560, 0.510)
+## How far under the footway the carriageway may sit, as a fraction. Measured in the
+## Round 3 render: the flags' lit top quartile was L 146.1 and the carriageway's L 76.3
+## thirty pixels in front of it, a ratio of 0.52 on surfaces that are both in full sun.
+## 0.85 is the brief's "within about 15% of the slab walkway".
+const CORRIDOR_MIN_RATIO := 0.85
 const WATER_SHADER_PATH := "res://assets/shaders/water_wave.gdshader"
 
 var _fails := 0
+
+## What ToonFactory delivers for the three large playable ground surfaces, filled in
+## by _check_materials() and read by _check_exposure_anchor(). Measured end to end
+## through _presents() there rather than re-derived here, for the reason spelt out
+## above the corridor check: the factory chains a ceiling, a floor, a knee and two
+## per-channel texture gains, and anything that recomputed that chain would agree with
+## a bug in it. The kerb is deliberately absent — it is a 30 cm trim and is SUPPOSED to
+## be the brightest line on the deck.
+var _corridor_presents: Dictionary = {}
 
 
 func _initialize() -> void:
@@ -56,8 +94,18 @@ func _initialize() -> void:
 	_check_env(env)
 	print("=== materials ===")
 	_check_materials()
+	print("=== exposure anchor ===")
+	_check_exposure_anchor(env)
 	print("=== aerial perspective ===")
 	_check_fog(env)
+	print("=== the river reflects ===")
+	_check_reflection(env)
+	print("=== the river meets a bank ===")
+	_check_shoreline()
+	print("=== contact darkening budget ===")
+	_check_occlusion_budget(env)
+	print("=== cloud field framing ===")
+	_check_cloud_framing()
 	print("=== compatibility tier ===")
 	_check_compat_tier(env)
 	print("=== river life budget ===")
@@ -253,12 +301,24 @@ func _check_sun() -> void:
 		var a := deck_mat.albedo_color
 		# albedo_color is the value the BRIGHTEST texel reaches, because it carries the
 		# pre-division for both texture layers' means. Undo both to recover what the
-		# surface actually reflects on average. The second divisor is new this round --
-		# the deck now wears a surface-scale granite albedo map as well as the shared
-		# fine one, and forgetting it here would overstate the deck by 19%.
-		var map_gain := ToonFactory._albedo_map_gain(ToonFactory.Surface.GRANITE)
-		var mean_gain := (map_gain.r + map_gain.g + map_gain.b) / 3.0
-		var albedo := (a.r + a.g + a.b) / 3.0 / ToonFactory.DETAIL_ALBEDO_GAIN / mean_gain
+		# surface actually reflects on average.
+		#
+		# MEASURED off the two descriptors rather than divided by ToonFactory's own
+		# gains, and Round 4 is why: the fascia's surface map is no longer one of the
+		# factory's four, so there is no _albedo_map_gain(GRANITE) to divide by and the
+		# old form would have quietly used the wrong map's mean. The two means are the
+		# same quantity _check_materials() asserts the .tres against, so if this line
+		# and that one disagree, one of them is reading a descriptor that is not on the
+		# surface.
+		var deck_map: Variant = _map_stats(load(DECK_ALBEDO_MAP_PATH))
+		var fine_net: Variant = _fine_net_mean()
+		var albedo := (a.r + a.g + a.b) / 3.0
+		if deck_map != null and fine_net != null:
+			var mm: Color = (deck_map as Dictionary)["mean"]
+			var fn: Color = fine_net
+			albedo = (a.r * mm.r * fn.r + a.g * mm.g * fn.g + a.b * mm.b * fn.b) / 3.0
+		else:
+			_fail("the deck material's texture means could not be measured; its irradiance would be overstated by ~30%")
 		var deck := energy * sin(deg_to_rad(elev)) * albedo
 		print("  sunlit deck  %.3f scene-referred (energy %.2f x sin(%.0f) x albedo %.3f)"
 				% [deck, energy, elev, albedo])
@@ -393,6 +453,172 @@ func _check_fill_rig(sun_color: Color, sun_energy: float, elev: float) -> void:
 
 func _luma(c: Color) -> float:
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+
+
+# --- Exposure anchor ---------------------------------------------------------
+#
+# ROUND 5, and this is the gate for the defect the OWNER found by looking at the
+# running build: "everything is just so bright to the point of being white". The deck
+# fascia — the single largest surface in 01_deck_mid, 16.9% of the frame — rendered at
+# L 187 out of 255, level with the far river's fog band at L 176, so the bridge and the
+# sky read as one white mass. Nothing in the atmosphere had changed: the sky rows of
+# that frame are identical to Round 3's, block for block.
+#
+# WHAT ACTUALLY HAPPENED, because it is a class of failure rather than an incident.
+# Five separate, individually-correct changes raised what the arena reflects — the
+# stone albedo floor (carriageway 0.325 -> 0.490, tram bed 0.235 -> 0.476), the deck
+# fascia's albedo_color climbing 0.283 -> 0.452 over six rounds, new surface maps, the
+# detail-blend fix that made the fascia render at all. Not one of them touched the
+# tonemap. But porto_daylight.tres says in its own first line that the daylight is made
+# in the tonemap and not in any albedo, and the RUBRIC says "exposure-driven, not
+# multiplier-driven" — and the corollary nobody had written down is that an exposure
+# has to be RE-SOLVED when the multipliers move. Six rounds of multipliers moved and
+# the exposure sat at the value that was solved for the first one.
+#
+# So this does not gate a picture, it gates an identity, and it fires on whichever
+# stream breaks it. Two halves:
+#
+#   1. THE GREY CARD. A Lambertian 18% grey card lying flat on the deck, lit by this
+#      rig, must land on the tonemapper's own middle grey. That is the textbook
+#      definition of a correctly exposed frame and it makes tonemap_exposure derived
+#      rather than dialled: exposure = 1 / E_h.
+#
+#   2. THE KNEE. The three large playable ground surfaces, at whatever albedo the
+#      materials stream is currently delivering, must stay off the flat part of the
+#      display transform. Measured through the shipped resource with a full-frame
+#      unshaded quad at known scene-referred values (the table is in the tonemap block
+#      of porto_daylight.tres): the curve carries 64-70 levels per stop below u = 0.18
+#      and only 33-45 above u = 0.5. A surface pushed past the knee pays for its
+#      brightness in its own texture and its own chroma, because both are DIFFERENCES
+#      and the curve has stopped spending levels on differences up there. That is the
+#      measured signature of the regression and not a guess: the near deck in
+#      02_deck_eye lost 41% of its local contrast (CoV 0.199 -> 0.117) and 41% of its
+#      saturation (0.124 -> 0.073) while gaining 55 levels of luminance. Re-solving the
+#      exposure gave both back — CoV 0.142, saturation 0.081 — with no change to any
+#      material, because the surface stopped being asked to live above the knee.
+#
+# Both would have caught this the round it landed. At the shipped exposure of 0.72 the
+# grey card sat +0.50 EV hot and all three ground surfaces sat at u = 0.64-0.74,
+# a third of a stop past the knee.
+#
+# WHY NOT A BLOWN-HIGHLIGHT CEILING, which is the obvious gate to reach for and is the
+# wrong one. Fraction of the frame at or above 250, across all three rounds and both
+# shots: 0.00%, every time, including the round the owner called white. The frame never
+# clipped and a clipping gate would have passed it every round while it went white. A
+# blown frame and a frame whose mid-tones have climbed into the shoulder are different
+# defects and only the second one happened here.
+
+## The tonemapper's own middle grey. Measured, not assumed: a full-frame flat field at
+## u = 0.18 through this exact resource comes back at 125/255, which is where middle
+## grey belongs. So the CURVE is not the problem and never was — only where the scene
+## was being placed on it.
+const AGX_MIDDLE_GREY := 0.18
+## Reflectance of a photographic grey card. The reference surface, chosen because it is
+## the one albedo in photography that means "correctly exposed" rather than "bright".
+const GREY_CARD_ALBEDO := 0.18
+## How far the grey card may drift from middle grey before this is a different picture,
+## in stops. A third of a stop is under half the smallest exposure step anyone would
+## make deliberately, and the fault this gate exists for was half a stop.
+const GREY_CARD_TOLERANCE_EV := 0.33
+## Tonemapper input above which the measured transfer falls under 45 levels per stop.
+## See the table in porto_daylight.tres's tonemap block.
+const TRANSFER_KNEE := 0.55
+
+
+## The total irradiance an up-facing surface on the deck receives, from this stream's
+## own constants and nothing else.
+##
+## The two bounce fills contribute exactly zero here and that is structural rather than
+## incidental — QuayBounce arrives from below and RibeiraBounce is pinned to elevation
+## 0.000 precisely so no warm term can reach a horizontal surface — so this asserts it
+## rather than assuming it.
+##
+## SDFGI and SSIL are deliberately excluded. They are occluded terms that vary across
+## the deck, so exposing for them means exposing for whichever patch of paving happens
+## to be gathering the most bounce. They land on top of everything computed here, which
+## is why the render is still checked rather than trusted.
+func _horizontal_irradiance(env: Environment, sun_color: Color, sun_energy: float,
+		elev: float) -> Dictionary:
+	var key := _luma(sun_color) * sun_energy * sin(deg_to_rad(elev))
+	var fill_total := 0.0
+	var rig: Node3D = RigScript.new()
+	for fill in [
+		[RigScript.SKY_FILL_DIR, RigScript.SKY_FILL_COLOR, rig.sky_fill_energy, "SkyFill"],
+		[RigScript.QUAY_BOUNCE_DIR, RigScript.QUAY_BOUNCE_COLOR, rig.bounce_energy,
+			"QuayBounce"],
+		[RigScript.RIBEIRA_BOUNCE_DIR, RigScript.RIBEIRA_BOUNCE_COLOR,
+			rig.ribeira_bounce_energy, "RibeiraBounce"],
+	]:
+		var dir: Vector3 = (fill[0] as Vector3).normalized()
+		var contribution: float = _luma(fill[1]) * float(fill[2]) * maxf(dir.dot(Vector3.UP), 0.0)
+		if fill[3] != "SkyFill" and contribution > 0.0:
+			_fail("%s reaches a horizontal deck at %.4f; both bounces are aimed so that they cannot"
+					% [fill[3], contribution])
+		fill_total += contribution
+	rig.free()
+	# ambient_light_energy as an upper bound on the flat term: with source SKY it is
+	# that energy times the dome's own average radiance, which is under 1.
+	return {
+		"key": key,
+		"fill": fill_total,
+		"ambient": env.ambient_light_energy,
+		"total": key + fill_total + env.ambient_light_energy,
+	}
+
+
+func _check_exposure_anchor(env: Environment) -> void:
+	var packed: PackedScene = load(ARENA_PATH)
+	if packed == null:
+		_fail("could not load %s to re-derive the exposure anchor" % ARENA_PATH)
+		return
+	var state := packed.get_state()
+	var sun_color := Color.WHITE
+	var sun_energy := 0.0
+	var elev := 0.0
+	for i in state.get_node_count():
+		if state.get_node_name(i) != "SunLight":
+			continue
+		var xf := Transform3D.IDENTITY
+		for p in state.get_node_property_count(i):
+			match state.get_node_property_name(i, p):
+				"transform": xf = state.get_node_property_value(i, p)
+				"light_color": sun_color = state.get_node_property_value(i, p)
+				"light_energy": sun_energy = state.get_node_property_value(i, p)
+		elev = rad_to_deg(asin(clampf(xf.basis.z.normalized().y, -1.0, 1.0)))
+	if sun_energy <= 0.0:
+		_fail("no SunLight energy found; the exposure anchor cannot be derived")
+		return
+
+	var terms := _horizontal_irradiance(env, sun_color, sun_energy, elev)
+	var e_h: float = terms["total"]
+	var solved := 1.0 / maxf(e_h, 1e-4)
+	print("  horizontal E %.3f  (key %.3f + directional fill %.3f + ambient %.3f)"
+			% [e_h, terms["key"], terms["fill"], terms["ambient"]])
+
+	var card := GREY_CARD_ALBEDO * e_h * env.tonemap_exposure
+	var drift := log(card / AGX_MIDDLE_GREY) / log(2.0)
+	print("  grey card    18%% card on the deck lands at u %.3f, want %.3f  (%+.2f EV)"
+			% [card, AGX_MIDDLE_GREY, drift])
+	print("  exposure     %.3f shipped, %.3f solved as 1 / E   (tolerance %.2f EV)"
+			% [env.tonemap_exposure, solved, GREY_CARD_TOLERANCE_EV])
+	if absf(drift) > GREY_CARD_TOLERANCE_EV:
+		_fail(("an 18%% grey card on the deck lands %+.2f EV off the tonemapper's middle "
+				+ "grey. Something raised what the arena reflects and nobody re-solved "
+				+ "tonemap_exposure; it wants %.3f, not %.3f.")
+				% [drift, solved, env.tonemap_exposure])
+
+	if _corridor_presents.is_empty():
+		_fail("the corridor's delivered albedos were not measured; the knee cannot be checked")
+		return
+	for surface in _corridor_presents:
+		var u: float = float(_corridor_presents[surface]) * e_h * env.tonemap_exposure
+		print("  knee         %-12s presents %.3f -> u %.3f  (knee %.2f)"
+				% [surface, _corridor_presents[surface], u, TRANSFER_KNEE])
+		if u > TRANSFER_KNEE:
+			_fail(("the %s sits at u %.3f, past the transfer's knee at %.2f. Above it the "
+					+ "curve carries under 45 levels per stop, so the surface the game is "
+					+ "played on is spending its own texture and chroma on being bright.")
+					% [surface, u, TRANSFER_KNEE])
 
 
 # --- Materials ---------------------------------------------------------------
@@ -554,6 +780,38 @@ func _check_materials() -> void:
 	if deck.albedo_texture == null:
 		_fail("the deck material has no surface-scale albedo map; the fascia is one flat value")
 
+	# (e2) THE TWO NUMBERS THE 214-PIXEL TILE WAS HIDING IN, asserted because both were
+	# invisible to every check this file had.
+	#
+	# The fascia autocorrelated at lag 214 px with r = 0.849 on G/R — six repeats across
+	# 01_deck_mid, on the largest surface in the frame — while carrying a 7% non-monotone
+	# vertical swing, i.e. no normal doing any work at all. Both are properties of THIS
+	# material rather than of the map it wears, and both are one number:
+	#
+	#   uv1_scale must be ANISOTROPIC. The repeat period in metres IS 1/uv1_scale.x, and
+	#   a square tile on a 100 m x 1.96 m band can only be as long as it is tall. Making
+	#   x and y independent is what buys a 8.0 m horizontal period (about 580 px in that
+	#   shot, 2.2 repeats) with 0.5 m courses on a 4.0 m vertical tile the band only
+	#   shows half of.
+	#
+	#   normal_scale must be enough to survive the fine layer stacking at 0.55. The old
+	#   0.34 was correct for the granite normal — 19 cm igneous speckle, which is gravel
+	#   at deck scale — and is nowhere near enough for a masonry joint, which is form.
+	print("  deck tiling  uv1_scale %s -> %.1f m across, %.1f m up   normal_scale %.2f"
+			% [str(deck.uv1_scale), 1.0 / maxf(deck.uv1_scale.x, 0.001),
+				1.0 / maxf(deck.uv1_scale.y, 0.001), deck.normal_scale])
+	if absf(deck.uv1_scale.y / maxf(deck.uv1_scale.x, 0.0001) - 1.0) < 0.2:
+		_fail("the deck fascia tiles isotropically at %.2f m; a square tile on a 100 x 1.96 m band repeats every %.2f m, which measured as a visible 214 px period"
+				% [1.0 / maxf(deck.uv1_scale.x, 0.001), 1.0 / maxf(deck.uv1_scale.x, 0.001)])
+	if 1.0 / maxf(deck.uv1_scale.x, 0.001) < 6.0:
+		_fail("the deck fascia's horizontal tile is %.1f m; the measured visible repeat was at 2.94 m and the frame holds six of them"
+				% (1.0 / maxf(deck.uv1_scale.x, 0.001)))
+	if deck.normal_scale < 0.6:
+		_fail("the deck fascia's normal_scale is %.2f; the fine layer blends over it at 0.55, so the masonry joints do not survive to the frame and the band is a colour wash again"
+				% deck.normal_scale)
+	if deck.normal_texture != load(DECK_NORMAL_MAP_PATH):
+		_fail("the deck fascia is not wearing the masonry normal; its relief is speckle, which is sub-pixel at the 14 m the band sits from the camera")
+
 	# WHAT THIS ASSERTION IS FOR, restated in Round 3 because the old form stopped
 	# being the honest test.
 	#
@@ -585,9 +843,16 @@ func _check_materials() -> void:
 	# rasterisations of different noise fields, and the factory's own gain is measured
 	# at 96, so a couple of percent is sampling noise rather than drift. A real
 	# mistake here is 10% or more -- every one this file has caught was.
-	var authored := Color(0.283, 0.2788, 0.2708)
-	var deck_map: Variant = _map_stats(ToonFactory._ALBEDO_MAPS[ToonFactory.Surface.GRANITE])
+	# ROUND 4 EXTENDS IT TO THE FACTORY PATH, which is the half that was missing and the
+	# half that now carries a guard. The invariant below was only ever asserted on the
+	# ONE hand-written material, so ToonFactory's own arithmetic — three chained
+	# corrections, two of them per-channel — was checked nowhere. That mattered less
+	# when the corrections were only the two texture gains; PORTO_STONE_FLOOR is a third
+	# one that changes the colour a call site gets, so "what does a call site actually
+	# get" has to be a measured quantity rather than a described one. _presents() is the
+	# same end-to-end measurement and both callers use it.
 	var fine_net: Variant = _fine_net_mean()
+	var deck_map: Variant = _map_stats(load(DECK_ALBEDO_MAP_PATH))
 	if deck_map == null or fine_net == null:
 		_fail("the deck material's texture means could not be measured; the check would pass vacuously")
 	else:
@@ -598,15 +863,36 @@ func _check_materials() -> void:
 			deck.albedo_color.g * map_mean.g * fnet.g,
 			deck.albedo_color.b * map_mean.b * fnet.b)
 		print("  deck mean    albedo_color x surface map x fine layer = (%.4f %.4f %.4f)  vs authored (%.4f %.4f %.4f)"
-				% [presented.r, presented.g, presented.b, authored.r, authored.g, authored.b])
-		for pair in [["R", presented.r, authored.r], ["G", presented.g, authored.g],
-				["B", presented.b, authored.b]]:
+				% [presented.r, presented.g, presented.b,
+					DECK_AUTHORED.r, DECK_AUTHORED.g, DECK_AUTHORED.b])
+		for pair in [["R", presented.r, DECK_AUTHORED.r], ["G", presented.g, DECK_AUTHORED.g],
+				["B", presented.b, DECK_AUTHORED.b]]:
 			var got: float = pair[1]
 			var want: float = pair[2]
 			if absf(got - want) > want * 0.03:
 				_fail("the deck fascia presents %s = %.4f where %.4f was authored (%.1f%% off). albedo_color %s no longer carries both texture layers' means."
 						% [pair[0], got, want, 100.0 * (got / want - 1.0),
 							deck.albedo_color.to_html(false)])
+		# The masonry map is a one-material map set, so nothing in the factory's own
+		# table gates it. It is the largest single surface in 01_deck_mid and the round
+		# was partly spent on it, so it gets the same correlation gate the four factory
+		# maps get, at the same limits.
+		var mst: Dictionary = deck_map
+		print("  masonry map  mean (%.3f %.3f %.3f)   corr r-g %+.3f r-b %+.3f   chroma %.3f"
+				% [map_mean.r, map_mean.g, map_mean.b, mst["rg"], mst["rb"], mst["chroma"]])
+		if absf(mst["rg"]) > 0.80 or absf(mst["rb"]) > 0.50:
+			_fail("the deck fascia's masonry map is monochrome: r-g %+.3f r-b %+.3f. Its variation multiplies all three channels together, so it is a grey mask and never becomes colour."
+					% [mst["rg"], mst["rb"]])
+		# ...and the other way round, which is this surface's OWN measurement rather
+		# than Round 3's: the critic measured (R-G) sd 8.08 against L sd 10.74 on this
+		# band and called it a camouflage pattern. Decorrelating the channels must not
+		# be paid for with more colour on the one surface that was already too colourful,
+		# so this map's per-texel chroma is held under the granite map it replaced.
+		var granite_chroma: Variant = _map_stats(
+				ToonFactory._ALBEDO_MAPS[ToonFactory.Surface.GRANITE])
+		if granite_chroma != null and mst["chroma"] > (granite_chroma as Dictionary)["chroma"]:
+			_fail("the masonry map's chroma %.3f now exceeds granite's %.3f; the fascia's variation was already 75%% hue and this makes it more so"
+					% [mst["chroma"], (granite_chroma as Dictionary)["chroma"]])
 
 	# THE FINE LAYER'S THREE CHANNEL MEANS MUST BE EQUAL, and this is new because the
 	# layer is new: Round 3 made it chromatic, and it is SHARED by every textured
@@ -634,6 +920,138 @@ func _check_materials() -> void:
 					% [ToonFactory.DETAIL_ALBEDO_GAIN, ideal,
 						100.0 * (ToonFactory.DETAIL_ALBEDO_GAIN / ideal - 1.0)])
 
+	# (f) THE PLAYABLE CORRIDOR MAY NOT BE THE DARKEST THING IN FRAME, and this is the
+	# gate for the strongest converging finding this project has had: two critics, five
+	# frames, no knowledge of each other, both measuring the deck as the darkest region
+	# in every shot they were given, against a RUBRIC line that requires it to be the
+	# brightest.
+	#
+	# It is albedo and not light. Top quartile against top quartile — which removes the
+	# parapet's shadow bands from both populations — the carriageway returned 52% of the
+	# footway thirty pixels behind it, and the authored constants agree: 0.325 and 0.235
+	# against 0.545 and 0.580.
+	#
+	# Measured END TO END through _presents(), not by reading PORTO_STONE_FLOOR back out
+	# of the factory and doing its arithmetic here. That distinction is the whole value
+	# of the check: the guard is three chained corrections deep (ceiling, then the knee,
+	# then two per-channel texture gains), and a version of this that recomputed the
+	# knee would pass while the gains quietly undid it. This one fails if ANY of the
+	# five stages stops composing.
+	if fine_net != null:
+		var walk := _presents(ToonFactory.cobblestone(FLAG_COLOR), ToonFactory.Surface.COBBLE,
+				fine_net)
+		var kerb := _presents(ToonFactory.stone(KERB_COLOR), ToonFactory.Surface.GRANITE,
+				fine_net)
+		var road := _presents(ToonFactory.stone(ROADWAY_COLOR), ToonFactory.Surface.GRANITE,
+				fine_net)
+		var tram := _presents(ToonFactory.cobblestone(TRAMBED_COLOR),
+				ToonFactory.Surface.COBBLE, fine_net)
+		# THE FOOTWAY is the reference, not the kerb, and the distinction is the
+		# critic's rather than a convenience. What was measured was "the near cobble
+		# apron at L 53.7 against the SLAB PAVING thirty pixels behind it at L 133.4" —
+		# two large coplanar surfaces. The kerbstone is a 30 cm trim on the edge between
+		# them and it is SUPPOSED to be the brightest line on the deck: it is freshly
+		# dressed granite that nothing drives over. Holding a hundred square metres of
+		# carriageway to within 15% of a kerb would be asking for a deck with no tonal
+		# structure left in it at all. Printed anyway, because a kerb that stops leading
+		# is its own defect.
+		var reference := _luma(walk)
+		# Handed to _check_exposure_anchor(): these three are the ground the game is
+		# played on, and what the tonemap has to be solved against.
+		_corridor_presents = {
+			"carriageway": _luma(road),
+			"tram bed": _luma(tram),
+			"footway": reference,
+		}
+		print("  corridor     carriageway %.3f  tram bed %.3f  vs footway %.3f (kerb trim %.3f)"
+				% [_luma(road), _luma(tram), reference, _luma(kerb)])
+		print("               ratios %.2f and %.2f (want >= %.2f; measured 0.52 in the render before the floor)"
+				% [_luma(road) / maxf(reference, 1e-4), _luma(tram) / maxf(reference, 1e-4),
+					CORRIDOR_MIN_RATIO])
+		if _luma(kerb) <= reference:
+			_fail("the kerb presents %.3f against the footway's %.3f; the kerb line is the deck's brightest edge and it has stopped leading"
+					% [_luma(kerb), reference])
+		for pair in [["carriageway", _luma(road)], ["tram bed", _luma(tram)]]:
+			var got: float = pair[1]
+			if got / maxf(reference, 1e-4) < CORRIDOR_MIN_RATIO:
+				_fail("the %s presents %.3f against the walkway's %.3f — %.0f%% of it. The playable corridor is the darkest surface in the frame and the RUBRIC requires it to be the brightest."
+						% [pair[0], got, reference, 100.0 * got / maxf(reference, 1e-4)])
+		# And the guard has to be a FLOOR rather than a repaint: it must leave the
+		# walkway exactly where its author put it, or it is just a global brightness
+		# knob with a physics comment on it.
+		var walk_authored := _presents_target(FLAG_COLOR)
+		if absf(_luma(walk) / maxf(_luma(walk_authored), 1e-4) - 1.0) > 0.03:
+			_fail("the stone floor moved the footway by %.0f%%; it is meant to be exactly the identity at and above PORTO_STONE_KNEE"
+					% (100.0 * (_luma(walk) / maxf(_luma(walk_authored), 1e-4) - 1.0)))
+		# The other side of the same requirement, and the reason for the chroma test:
+		# stone() is also how the terrain stream dresses bare EARTH, which really is
+		# darker than granite. Lifting it would be inventing a claim rather than
+		# enforcing one.
+		var earth := ToonFactory.stone(Color(0.33, 0.28, 0.21))
+		var earth_authored := _presents_target(Color(0.33, 0.28, 0.21))
+		var earth_got := _presents(earth, ToonFactory.Surface.GRANITE, fine_net)
+		print("  earth        presents %.3f vs authored %.3f (the chroma test must exempt it)"
+				% [_luma(earth_got), _luma(earth_authored)])
+		if absf(_luma(earth_got) / maxf(_luma(earth_authored), 1e-4) - 1.0) > 0.03:
+			_fail("the stone floor lifted bare earth by %.0f%%; dry earth reflects 0.20-0.35 and the floor is a claim about quarried grey stone"
+					% (100.0 * (_luma(earth_got) / maxf(_luma(earth_authored), 1e-4) - 1.0)))
+
+	# (g) NOTHING ON THIS BRIDGE IS A MIRROR. The tram rail head has been named as the
+	# frame's single blind-test tell in Round 1, rebuilt as real grooved track in
+	# Round 2, and measured still pure blue in Round 3: RGB (32, 64, 109) at saturation
+	# 0.70 against warm-grey neighbours at 0.19-0.33.
+	#
+	# The cause is two properties of the material and both are asserted here. A metal
+	# has no diffuse term, so a smooth one returns its environment and nothing else, and
+	# the only thing in a rail crown's environment at a grazing view down the deck is
+	# sky. So: bare metal gets a roughness floor, and it gets a per-texel metal/oxide
+	# split so part of the crown is a dielectric with a diffuse term in its own iron
+	# colour. Neither is visible from the scalar `metallic` the old rule (c) checked.
+	var crown := ToonFactory.iron(Color(0.560, 0.545, 0.520), 0.6, 1.0, 0.30)
+	print("  bare metal   rough %.2f (floor %.2f)  metallic map %s ch %d  mask %s"
+			% [crown.roughness, ToonFactory.METAL_ROUGHNESS_FLOOR,
+				"yes" if crown.metallic_texture != null else "NO",
+				crown.metallic_texture_channel,
+				"" if crown.roughness_texture == null
+					else crown.roughness_texture.resource_path.get_file()])
+	if crown.roughness < ToonFactory.METAL_ROUGHNESS_FLOOR - 0.001:
+		_fail("a bare metal came out at roughness %.2f; below %.2f its specular lobe is narrow enough that the only thing in it is sky, which is the rail head defect verbatim"
+				% [crown.roughness, ToonFactory.METAL_ROUGHNESS_FLOOR])
+	if crown.metallic_texture == null:
+		_fail("bare metal has no metal/oxide split; the whole crown is a mirror and a mirror over a deck returns the sky")
+	elif crown.metallic_texture_channel != BaseMaterial3D.TEXTURE_CHANNEL_BLUE:
+		_fail("the metal/oxide split reads channel %d; it is authored into the mask's BLUE channel"
+				% crown.metallic_texture_channel)
+	if crown.roughness_texture == crown.metallic_texture and crown.metallic_texture != null:
+		var steel: NoiseTexture2D = crown.metallic_texture
+		var ramp: Gradient = steel.color_ramp
+		# "Metals are 0 or 1" applies to the MAP as well as to the scalar, at the only
+		# resolution a map can obey it: every stop is 0 or 1, and the crossing is narrow
+		# enough that the mip chain, not the ramp, is what blurs it.
+		var lo := 1.0
+		var hi := 0.0
+		var metal_frac := 0.0
+		for i in ramp.colors.size():
+			var v: float = ramp.colors[i].b
+			if v > 0.001 and v < 0.999:
+				_fail("the metal/oxide ramp has a stop at %.3f; a metallic map is 0 or 1 per texel"
+						% v)
+			if v > 0.5:
+				metal_frac = maxf(metal_frac, ramp.offsets[i])
+			lo = minf(lo, ramp.offsets[i] if v > 0.5 else lo)
+			hi = maxf(hi, v)
+		if hi < 0.999:
+			_fail("the metal/oxide ramp never reaches 1; a bare metal that is nowhere metal is a dielectric with a lie on it")
+		print("  metal split  bare steel below t = %.2f, oxide above; ramp stops %s"
+				% [metal_frac, str(ramp.offsets)])
+	# Painted iron must NOT pick any of this up. It is metallic 0, so the map would be
+	# multiplied by zero anyway, but paying for three triplanar taps to do that is the
+	# kind of thing that is never noticed.
+	if painted.metallic_texture != null:
+		_fail("painted iron carries a metallic map it multiplies by zero; that is three triplanar taps for nothing")
+	if painted.roughness_texture == crown.roughness_texture:
+		_fail("painted iron is wearing the steel mask; its 0.22-1.00 gloss spread is the ironwork's specular return and the steel mask does not have one")
+
 	# The cache is what collapses two hundred facades onto a handful of materials.
 	# Snapping metallic before the key is built is supposed to make it collapse
 	# harder, not softer: two call sites asking for different half-metals now share.
@@ -643,6 +1061,34 @@ func _check_materials() -> void:
 			% ["yes" if a == b else "NO"])
 	if a != b:
 		_fail("metallic snap happens after the cache key, so it costs a draw call")
+
+
+## What a finished material's surface actually presents, per channel: albedo_color
+## multiplied by the mean of both texture layers, measured off the live descriptors.
+##
+## This is the same quantity the deck fascia's invariant computes, factored out so the
+## factory path can be held to it too. Doing it this way rather than re-deriving
+## ToonFactory's arithmetic is the whole point — the factory chains a ceiling, a floor,
+## a knee and two per-channel texture gains, and a check that recomputed that chain
+## would agree with a bug in it.
+func _presents(mat: StandardMaterial3D, surface: int, fine_net: Color) -> Color:
+	var stats: Variant = _map_stats(ToonFactory._ALBEDO_MAPS[surface])
+	var map_mean := Color(1.0, 1.0, 1.0)
+	if stats != null:
+		map_mean = (stats as Dictionary)["mean"]
+	return Color(mat.albedo_color.r * map_mean.r * fine_net.r,
+			mat.albedo_color.g * map_mean.g * fine_net.g,
+			mat.albedo_color.b * map_mean.b * fine_net.b)
+
+
+## What a call site's colour SHOULD present if no guard moved it: itself, with only the
+## physical ceiling applied. The floor and the knee are the things under test, so they
+## deliberately are not reproduced here.
+func _presents_target(authored: Color) -> Color:
+	var peak: float = maxf(authored.r, maxf(authored.g, authored.b))
+	if peak > ToonFactory.ALBEDO_CEILING and peak > 0.0:
+		return authored * (ToonFactory.ALBEDO_CEILING / peak)
+	return authored
 
 
 ## The per-channel mean of a NoiseTexture2D's ramped output, in LINEAR.
@@ -911,6 +1357,354 @@ func _check_fog(env: Environment) -> void:
 func _depth(d: float, begin: float, end: float, curve: float, density: float) -> float:
 	var t: float = clampf((d - begin) / (end - begin), 0.0, 1.0)
 	return pow(t * t * (3.0 - 2.0 * t), curve) * density
+
+
+# --- The river reflects ------------------------------------------------------
+
+## Round 3's leading finding, as two invariants that can be checked without a GPU.
+##
+## Both critics measured that the Douro returns nothing: a three-band sample across
+## shot 07 varied under 8% between water under bright terraces, open mid-span, and
+## water under a dark cliff, and the trend ran BACKWARDS — brightest under the
+## darkest bank. A large iron arch stood over calm water in shot 06 and did not
+## appear in it.
+##
+## 1. THE RAY MARCH HAS TO SURVIVE ITS OWN LENGTH. Godot's SSR fades a hit by
+##    pow(1 - progress, ssr_fade_out) where `progress` is how far along the march the
+##    hit was found, so ssr_fade_out is an EXPONENT and not a distance. It was 6.0
+##    under a comment calling it a distance and claiming it made "the far half of the
+##    reflection survive": a hit at the halfway point was multiplied by 0.5^6 = 0.016,
+##    i.e. deleted. Anything reflected off water seen at a grazing angle is found late
+##    in the march by construction — the reflected ray is nearly parallel to the
+##    surface — so this term selected against exactly the case it was tuned for.
+##
+## 2. THE BODY MUST NOT SWAMP THE MIRROR. A water surface returns 4-15% of what it
+##    reflects at these view angles. If its own diffuse albedo returns more than that,
+##    no reflection can be seen however well SSR works, and the water's brightness
+##    stops depending on what is above it — which is precisely the flat 8% spread the
+##    critics measured. Checked as a ratio against what the water is reflecting rather
+##    than as an absolute, so a retune of the palette does not have to come here.
+const SSR_MIDMARCH_MIN := 0.15
+## Body albedo as a fraction of the mirror colour it sits under. Real river water is
+## well under a tenth; 0.25 is a generous ceiling that still fails the 0.19-luminance
+## blue-grey that shipped for three rounds.
+const WATER_BODY_RATIO_MAX := 0.25
+
+
+func _check_reflection(env: Environment) -> void:
+	if not env.ssr_enabled:
+		_fail("ssr_enabled is off; nothing can put the arch in the water on Forward+")
+	var survives_mid := pow(0.5, env.ssr_fade_out)
+	var survives_quarter := pow(0.75, env.ssr_fade_out)
+	print("  ssr fade_out %.2f (an exponent): a hit 25%% along the march keeps %.3f, "
+			% [env.ssr_fade_out, survives_quarter] + "50%% along keeps %.3f" % survives_mid)
+	print("  ssr max_steps %d  fade_in %.2f  depth_tolerance %.2f"
+			% [env.ssr_max_steps, env.ssr_fade_in, env.ssr_depth_tolerance])
+	if survives_mid < SSR_MIDMARCH_MIN:
+		_fail("ssr_fade_out %.2f deletes any reflection found past the first third of "
+				% env.ssr_fade_out + "the march (%.3f survives at the midpoint); grazing "
+				% survives_mid + "water finds everything late")
+
+	var mat := _river_material()
+	if mat == null:
+		_fail("no ShaderMaterial in %s running water_wave.gdshader" % ARENA_PATH)
+		return
+	var body: Color = _water_param(mat, "deep_color", Color(0, 0, 0))
+	var mirror: Color = _water_param(mat, "shallow_color", Color(1, 1, 1))
+	var albedo_mix: float = float(_water_param(mat, "mirror_albedo", 0.14))
+	var ratio := _luma(body) / maxf(_luma(mirror), 0.0001)
+	print("  water body %s (luma %.3f) against mirror %s (luma %.3f) — ratio %.3f"
+			% [body.to_html(false), _luma(body), mirror.to_html(false), _luma(mirror), ratio])
+	print("  mirror carried in ALBEDO %.2f; the rest is SSR / the radiance cubemap"
+			% albedo_mix)
+	if ratio > WATER_BODY_RATIO_MAX:
+		_fail("the water's own body returns %.0f%% of what it reflects; a reflection "
+				% (ratio * 100.0) + "worth 4-15%% Fresnel cannot be seen over that")
+	if albedo_mix > 0.25:
+		_fail("mirror_albedo %.2f paints most of the mirror as flat colour, which is "
+				% albedo_mix + "the term that made the water brightest under the darkest bank")
+
+
+## Mat_river, found by shader identity rather than by node name.
+func _river_material() -> ShaderMaterial:
+	var packed: PackedScene = load(ARENA_PATH)
+	if packed == null:
+		return null
+	var state := packed.get_state()
+	for i in state.get_node_count():
+		for p in state.get_node_property_count(i):
+			var mat = state.get_node_property_value(i, p)
+			if not (mat is ShaderMaterial):
+				continue
+			var shader: Shader = (mat as ShaderMaterial).shader
+			if shader != null and shader.resource_path == WATER_SHADER_PATH:
+				return mat as ShaderMaterial
+	return null
+
+
+## A uniform as the RUNNING material sees it: the scene's override if it sets one,
+## the shader's own default if it does not. Reading only one of the two is how
+## Mat_river's sun vector stayed 121 degrees stale for three rounds while this probe
+## passed.
+func _water_param(mat: ShaderMaterial, uniform_name: String, fallback: Variant) -> Variant:
+	var authored = mat.get_shader_parameter(uniform_name)
+	if authored != null:
+		return authored
+	var value = _shader_default(mat.shader.code, uniform_name)
+	return fallback if value == null else value
+
+
+## `uniform <type> <name> [: hint] = <literal>;` out of shader source. Handles the
+## float and vec4-as-colour forms this stream authors; returns null for anything
+## else so the caller can fall back rather than assert on a parse it did not expect.
+func _shader_default(code: String, uniform_name: String) -> Variant:
+	var re := RegEx.new()
+	re.compile("uniform\\s+(\\w+)\\s+%s\\s*(?::[^=]*)?=\\s*([^;]+);" % uniform_name)
+	var m := re.search(code)
+	if m == null:
+		return null
+	var kind := m.get_string(1)
+	var body := m.get_string(2).strip_edges()
+	if kind == "float":
+		return float(body)
+	if kind == "vec4" or kind == "vec3":
+		var inner := body.substr(body.find("(") + 1)
+		inner = inner.substr(0, inner.rfind(")"))
+		var parts := inner.split(",")
+		if parts.size() >= 3:
+			return Color(float(parts[0]), float(parts[1]), float(parts[2]))
+	return null
+
+
+# --- The river meets a bank --------------------------------------------------
+
+## water_wave.gdshader draws its shore foam from an ANALYTIC description of the quay
+## line, because a shader has no way to ask the terrain where the bank is. That is
+## the same shape of dependency as Mat_river's hand-copied sun vector, which went
+## stale for three rounds, so it gets the same treatment: the model is evaluated
+## against TerrainBuilder's own front_x() along the whole modelled reach and fails
+## when the two stop describing the same wall.
+##
+## The tolerance is the jog. front_x() wanders the wall in and out by up to `jog`
+## metres per level (0.55 on Porto's cais, 0.50 on Gaia's) in piecewise-constant
+## runs, and the shader deliberately models the straight line rather than the jog —
+## a two-metre foam band does not need to follow a half-metre return. Anything
+## larger than that means the channel itself moved.
+const SHORE_TOLERANCE := 1.2
+
+
+func _check_shoreline() -> void:
+	var mat := _river_material()
+	if mat == null:
+		_fail("no river material; the shore model cannot be checked")
+		return
+	var half: float = float(_water_param(mat, "shore_half_width", 52.0))
+	var taper: float = float(_water_param(mat, "shore_taper", 0.028))
+	var z_min: float = float(_water_param(mat, "shore_z_min", -128.0))
+	var z_max: float = float(_water_param(mat, "shore_z_max", 46.0))
+	var band: float = float(_water_param(mat, "shore_band", 2.6))
+	print("  shader models the quay at |x| = %.1f + %.4f z over z in [%.0f, %.0f], "
+			% [half, taper, z_min, z_max] + "band %.1f m" % band)
+
+	var worst := 0.0
+	var worst_z := 0.0
+	var worst_side := 0.0
+	for side in [TerrainBuilder.PORTO, TerrainBuilder.GAIA]:
+		var z := z_min
+		while z <= z_max:
+			var real: float = absf(TerrainBuilder.front_x(side, 0, z))
+			var modelled := half + taper * clampf(z, z_min, z_max)
+			var err: float = absf(real - modelled)
+			if err > worst:
+				worst = err
+				worst_z = z
+				worst_side = side
+			z += 4.0
+	print("  worst disagreement with TerrainBuilder.front_x  %.2f m at z = %.0f on %s"
+			% [worst, worst_z, "Porto" if worst_side < 0.0 else "Gaia"])
+	if worst > SHORE_TOLERANCE:
+		_fail("the shore model is %.2f m off the quay TerrainBuilder actually builds at "
+				% worst + "z = %.0f; the foam band is in open water" % worst_z)
+
+	# The reach has to match too, or the band either stops short of the modelled
+	# bank or lays foam across open river past the headland.
+	if absf(z_min - TerrainBuilder.BANK_Z_FAR) > 1.0:
+		_fail("shore_z_min %.0f is not TerrainBuilder.BANK_Z_FAR %.0f"
+				% [z_min, TerrainBuilder.BANK_Z_FAR])
+	if absf(z_max - TerrainBuilder.HEADLAND_Z) > 1.0:
+		_fail("shore_z_max %.0f is not TerrainBuilder.HEADLAND_Z %.0f"
+				% [z_max, TerrainBuilder.HEADLAND_Z])
+	if band <= 0.5:
+		_fail("shore_band %.2f m is under a pixel at the 60 m the quay sits at in shot 07"
+				% band)
+
+
+# --- Contact darkening -------------------------------------------------------
+
+## Round 3 raised ssao_light_affect 0.15 -> 0.50 for contact darkening and a critic
+## then measured no dip in the paving under either lamp standard or the bollard. This
+## pass answered why, in an isolated render rather than by argument: a plane, three
+## posts of 0.12 / 0.30 / 0.80 m diameter and a wall corner, the same key, ambient and
+## grade as the arena, rendered with SSAO on and off and differenced.
+##
+##   ambient-only control (key off)   post 0.12 m  -2.55 L (3.0%)   corner  -7.90 L
+##   the shipping rig                 post 0.12 m  -0.19 L (0.2%)   corner  -1.96 L
+##   5x intensity, light_affect 1.0   post 0.12 m  -0.78 L (0.7%)   corner  -8.82 L (17%)
+##
+## So SSAO IS generating occlusion at radius 0.9, and its SHAPE is right — a contact
+## halo is plainly visible at every post base when the difference is amplified. Its
+## MAGNITUDE under this rig is 0.2% of the pixel, against paving whose own texture
+## deviation is 10-15 L. It is a sixth of one standard deviation of the noise it is
+## drawn on, which is why raising light_affect changed nothing measurable and why
+## raising it further cannot: at the setting that finally plants a lamp post, every
+## inside corner in the frame has become a dirt ring.
+##
+## The cause is structural rather than a value. SSAO occludes INDIRECT light, plus
+## whatever fraction of DIRECT light light_affect concedes — and this rig has spent
+## three rounds deliberately removing the indirect (ambient 0.55 -> 0.20, ssil 0.60 ->
+## 0.32, sdfgi 0.95 -> 0.80) because directionless light is what killed normal-map
+## relief inside shadows. Those cuts are right and are not being reversed. The
+## consequence is that AO has almost nothing left to occlude: the same AO is 13x
+## stronger in the ambient-only control purely because there is light there for it to
+## take away.
+##
+## The obvious alternative was also tried and is worse: giving SkyFill a shadow map
+## with a 30-degree angular diameter produces a second CAST SHADOW streaking away from
+## every object in a different direction from the sun's, plus shadow acne across open
+## paving. Two suns is a worse defect than no contact patch.
+##
+## What this leaves is a floor rather than a target. AO is inert if the indirect it
+## occludes goes to zero, so that is what is asserted — nobody should cut the last of
+## the indirect and then wonder where the crease darkening went.
+const OCCLUDABLE_INDIRECT_MIN := 0.30
+
+
+func _check_occlusion_budget(env: Environment) -> void:
+	# Everything AO is allowed to touch, in units of the ambient it scales.
+	var indirect := env.ambient_light_energy + env.ssil_intensity
+	if env.sdfgi_enabled:
+		indirect += env.sdfgi_energy * 0.25   # SDFGI arrives already occluded; count a quarter
+	print("  ssao radius %.2f  intensity %.2f  power %.2f  light_affect %.2f"
+			% [env.ssao_radius, env.ssao_intensity, env.ssao_power, env.ssao_light_affect])
+	print("  occludable indirect %.2f (ambient %.2f + ssil %.2f + sdfgi/4 %.2f)"
+			% [indirect, env.ambient_light_energy, env.ssil_intensity,
+				env.sdfgi_energy * 0.25 if env.sdfgi_enabled else 0.0])
+	if not env.ssao_enabled:
+		_fail("ssao_enabled is off; nothing darkens a crease at all")
+	if indirect < OCCLUDABLE_INDIRECT_MIN:
+		_fail("only %.2f of occludable indirect light is left; SSAO is inert below "
+				% indirect + "about %.2f and creases stop darkening entirely"
+				% OCCLUDABLE_INDIRECT_MIN)
+	if env.ssao_light_affect > 0.6:
+		_fail("ssao_light_affect %.2f: AO on DIRECT light is not physical, and the "
+				% env.ssao_light_affect + "measured return above 0.5 is dirt in every "
+				+ "sunlit corner rather than contact under anything")
+
+
+# --- Cloud field -------------------------------------------------------------
+
+const SkyScript := preload("res://scripts/world/sky_background.gd")
+## Every wide shot has to have weather in it. One hero frame with an empty sky is a
+## composition defect even when the field is honestly somewhere else, because the
+## critic scoring that frame sees a bare gradient and the frame next to it sees
+## cumulus.
+const CLOUDS_IN_FRAME_MIN := 2
+
+
+## Is the cloud coverage difference between shots FRAMING or PLACEMENT?
+##
+## Measured on the round-3 captures: 02_deck_eye 0.9% of its sky is cloud, 07_ribeira
+## 5.0%, 06_river_wide 1.8% (the critics' own metric put the spread wider still). The
+## claim to test is whether twelve clusters are simply distributed so that one hero
+## shot looks away from them — which is honest — or whether the field only occupies a
+## band no hero shot can see, which is a placement bug.
+##
+## So: build the real field off its real seed, project every cluster into every world
+## vantage in tools/shots.json, and count. Nothing here can be judged in a render,
+## which is exactly why it belongs in a probe.
+func _check_cloud_framing() -> void:
+	var sky := SkyScript.new()
+	sky._build_clouds()
+	var clouds: Array = sky._clouds
+	if clouds.is_empty():
+		_fail("the cloud field built no clusters")
+		sky.free()
+		return
+
+	var text := FileAccess.get_file_as_string("res://tools/shots.json")
+	var parsed = JSON.parse_string(text)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		_fail("could not read tools/shots.json")
+		sky.free()
+		return
+
+	var starved: Array[String] = []
+	for shot in parsed.get("shots", []):
+		if String(shot.get("kind", "world")) != "world":
+			continue
+		var pos := _shot_vec(shot["pos"])
+		var look := _shot_vec(shot["look"])
+		var fov: float = float(shot.get("fov", 55.0))
+		var seen := 0
+		for cloud in clouds:
+			if _in_frustum(pos, look, fov, 16.0 / 9.0, (cloud as Node3D).position,
+					_cluster_radius(cloud as Node3D)):
+				seen += 1
+		print("  %-16s fov %.0f  sees %2d of %d clusters"
+				% [String(shot.get("name", "?")), fov, seen, clouds.size()])
+		if seen < CLOUDS_IN_FRAME_MIN:
+			starved.append(String(shot.get("name", "?")))
+	if not starved.is_empty():
+		_fail("%s frame%s empty sky: the cloud field does not reach the part of the "
+				% [", ".join(starved), "s" if starved.size() > 1 else "s"]
+				+ "dome those vantages look at")
+	sky.free()
+
+
+## Half-extent of a baked cluster in world units, from the mesh's own AABB through
+## the cluster node's scale. Read rather than assumed: the puff count, span and
+## three-axis stretch are all per-cluster.
+func _cluster_radius(cloud: Node3D) -> float:
+	var r := 6.0
+	for child in cloud.get_children():
+		var mi := child as MeshInstance3D
+		if mi != null and mi.mesh != null:
+			var e: Vector3 = mi.mesh.get_aabb().size * 0.5
+			r = maxf(r, (e * cloud.scale).length())
+	return r
+
+
+func _shot_vec(a: Array) -> Vector3:
+	return Vector3(float(a[0]), float(a[1]), float(a[2]))
+
+
+## Sphere against the four side planes of a KEEP_HEIGHT camera, plus the near plane.
+## `fov` is vertical, which is Godot's default and what tools/baseline.gd hands the
+## Camera3D unmodified.
+func _in_frustum(eye: Vector3, target: Vector3, fov_deg: float, aspect: float,
+		centre: Vector3, radius: float) -> bool:
+	var fwd := (target - eye).normalized()
+	var right := fwd.cross(Vector3.UP)
+	if right.length_squared() < 1e-6:
+		right = Vector3.RIGHT
+	right = right.normalized()
+	var up := right.cross(fwd).normalized()
+	var d := centre - eye
+	var z := d.dot(fwd)
+	if z + radius <= 0.05:
+		return false
+	var half_v := tan(deg_to_rad(fov_deg) * 0.5)
+	var half_h := half_v * aspect
+	# Distance from the sphere centre to each side plane, with the plane normals
+	# built from the half-angles rather than from a projection, so a cluster that
+	# straddles the edge still counts as visible.
+	var cv := 1.0 / sqrt(1.0 + half_v * half_v)
+	var ch := 1.0 / sqrt(1.0 + half_h * half_h)
+	if absf(d.dot(up)) * cv - z * half_v * cv > radius:
+		return false
+	if absf(d.dot(right)) * ch - z * half_h * ch > radius:
+		return false
+	return true
 
 
 # --- Compatibility tier ------------------------------------------------------

@@ -162,63 +162,195 @@ ambient_light_energy = 0.2
 reflected_light_source = 2
 
 ; --- Tonemap ---
-; This is where the daylight is actually made, not in any albedo.
+; This is where the daylight is actually made, not in any albedo. Which is why, when
+; the albedos moved and this did not, the owner looked at the build and said
+; "everything is just so bright to the point of being white".
 ;
-; UNCHANGED this round, and that is the point of how the key was re-derived. Dropping
-; the sun 51 -> 34 degrees costs a horizontal deck sin(34)/sin(51) = 0.72 of its
-; incidence, and SunLight's energy went 2.0 -> 2.8 to pay exactly that back:
-; 2.8 x 0.559 = 1.57 against 2.0 x 0.777 = 1.55, so the KEY TERM on the surface this
-; grade is built around lands within 1% of where it was. (Its total moves about +7%,
-; because sky_fill_energy went up at the same time; that arrives as fill, which is the
-; half of the frame Round 1 said had no shape in it.) The re-key buys direction, not exposure.
-; Vertical surfaces do move, and deliberately — the ironwork's broad faces gain 2.4x
-; and the Ribeira facades lose 38% of their incidence — but neither is what the tonemap
-; is anchored on.
+; ROUND 5. exposure 0.72 -> 0.51, and NOTHING ELSE IN THIS FILE MOVED. Read the
+; measurement before touching either number again, because two of the three claims the
+; previous version of this block made are false and one of them cost a round.
 ;
-; exposure 1.05 -> 1.00 -> 0.72 and agx_white 10.5 -> 7.5 -> 4.0. These two moved
-; together and the pairing is the whole trick, so they have to be read together.
+; --- THE TRANSFER, MEASURED ------------------------------------------------
 ;
-; AgX log-encodes the scene between a fixed floor of -12.47 EV and log2(white), so the
-; white point is a RANGE control, not a brightness control: at white 7.5 the encoder is
-; spreading 15.4 stops across the output, and a scene that only occupies four of them
-; comes out compressed into the middle. That is exactly what the first render measured
-; — median 0.61, 99th percentile 0.87, nothing within 0.13 of white anywhere in three
-; shots. Dropping white to 4.0 narrows the encoded range to 14.5 stops, which lifts
-; everything; dropping exposure to 0.72 (-0.47 EV) puts the median back where it
-; belongs. The net is the same mid-tone with more range above and below it, which is
-; the definition of contrast and the thing the frame was missing.
+; Everything below was measured rather than modelled: a full-frame unshaded quad at a
+; known scene-referred linear value, rendered through this exact resource, read back
+; per channel. Godot's own AgX is a black box from here and reasoning about its
+; internals is what went wrong. `u` is the tonemapper's input, i.e. scene-referred
+; linear x tonemap_exposure, so exposure slides the whole table and nothing else does.
 ;
-; What that leaves, all quoted AFTER exposure so they can be compared with each other
-; and with the glow threshold below: sunlit deck granite 0.32, sunlit ochre plaster
-; 0.61, a sunlit white kerb 0.88, the sun disk 32. Only the last clips, which is
-; correct — it is the one thing in a bright frame that has to. (The plaster figure is
-; 0.72 -> 0.60 on the re-key: a Ribeira facade faces +x and its incidence went 0.545 ->
-; 0.337. That 18% cut on the background with the deck held flat is the largest single
-; contribution to fixing Round 1's inverted focal hierarchy, and it comes out of the
-; light vector rather than out of desaturating anybody's paint.)
-; agx_contrast 1.42 -> 1.62 buys further punch inside the tonemapper's own S-curve,
-; which is better behaved than doing it afterwards with adjustment_contrast because it
-; happens before the display transform rather than on top of it.
+;     u     0.046  0.092  0.130  0.180  0.250  0.330  0.420  0.520  0.650  0.800  1.00
+;   8-bit      26     60     92    125    145    161    178    192    205    215    225
+;   slope         64     70     42     40     49     45     40     33     31   levels/stop
+;
+; Two things fall straight out of that table.
+;
+; FIRST, u = 0.18 lands on 125/255. The tonemapper's own middle grey is where middle
+; grey belongs, so the CURVE is not the problem and never was. What the curve does have
+; is a knee: it carries 64-70 levels per stop below u = 0.18 and only 33-45 above
+; u = 0.5. Anything pushed past about u = 0.55 starts paying for its brightness in its
+; own texture and its own chroma, because both are differences and the curve has
+; stopped spending levels on differences up there.
+;
+; SECOND, and this is the one that cost a round: tonemap_agx_white IS NOT A RANGE
+; CONTROL. Measured at u = 0.5, over a forty-to-one sweep of the white point:
+;
+;     white     1.0    2.0    4.0   16.0   40.0
+;     8-bit     192    192    190    188    188
+;
+; Four levels. The previous version of this block reasoned from AgX's published log
+; encoding that "dropping white to 4.0 narrows the encoded range to 14.5 stops, which
+; lifts everything", and paired it with exposure 1.00 -> 0.72 to compensate for a lift
+; that does not happen. The compensation was therefore a naked -0.47 EV, and it was
+; applied to a frame that was already correctly placed. 4.0 is left where it is only
+; because it demonstrably does nothing; do not spend another round here.
+;
+; --- WHY 0.51, AND WHY IT IS DERIVED RATHER THAN DIALLED --------------------
+;
+; The RUBRIC's rule is "exposure-driven, not multiplier-driven", and the corollary
+; nobody wrote down is that an exposure has to be re-solved when the multipliers move.
+; They moved. ToonFactory now applies a PORTO_STONE_FLOOR of 0.44 to every grey stone
+; on the bridge — carriageway 0.325 -> 0.490, tram bed 0.235 -> 0.476 — and the deck
+; fascia's albedo_color has climbed 0.283 -> 0.452 across six rounds. Every one of
+; those was defensible and none of them is being unpicked here. What was missing is
+; that the exposure this grade is anchored on was solved against the old numbers and
+; nobody re-solved it.
+;
+; So it is solved, once, from the rig's own constants instead of by eye. A Lambertian
+; 18% grey card lying on the deck receives, from lighting_rig.gd and from the block
+; above this one:
+;
+;     key         SunLight 2.8 x sin(34) x luma(1, 0.935, 0.855)      1.477
+;     SkyFill     0.42 x 0.866 x luma(0.72, 0.82, 1.00)               0.295
+;     QuayBounce  arrives from BELOW, N.L = 0 on an up-facing surface  0
+;     Ribeira     exactly level by construction, N.L = 0               0
+;     ambient     ambient_light_energy, as an upper bound              0.200
+;                                                              E_h  =  1.962
+;
+; and correct exposure is the one that puts that card on the tonemapper's middle grey:
+;
+;     tonemap_exposure = 0.18 / (0.18 x E_h) = 1 / E_h = 0.510
+;
+; SDFGI and SSIL are deliberately NOT in E_h. They are occluded terms that vary across
+; the deck, so exposing for them means exposing for whichever patch of paving happens
+; to be gathering the most bounce. _atmosphere_probe.gd gates this identity, and gates
+; separately that the corridor's own delivered stone stays under the knee at u = 0.55.
+;
+; --- WHAT THAT DOES TO THE FRAME, MEASURED ---------------------------------
+;
+; Same regions, same cameras, all three rounds. Luminance out of 255, and saturation
+; in brackets where it is the point:
+;
+;                                     r3        before       after
+;     01 deck fascia, 16.9% of frame  104 (.29)  183 (.14)   160 (.16)   <- was white
+;     02 playable deck                105 (.18)  155 (.12)   132 (.14)
+;     02 far river / fog band         176        176         154        never moved
+;     01 Ribeira facades              155        157         132
+;     01 sky zenith, luminance        141        141         115
+;     01 sky zenith, B channel        201        201         178
+;     02 parapet shadow                52         58          41
+;
+; Read the third row first: the fog band is IDENTICAL across r3 and before, to within a
+; tenth of a level, and so is every sky row. Nothing atmospheric moved. What moved was
+; the ground, 105 -> 155 and 104 -> 183, until the two largest masses in the frame sat
+; inside one narrow band at the top of the curve — and the deck's saturation halved on
+; the way up, because at u = 0.67 the transfer has stopped spending levels on
+; differences and colour is a difference. A large, bright, colourless surface next to
+; another one is what "the bridge and the sky read as one white mass" describes.
+;
+; TWO THINGS THIS DELIBERATELY DOES NOT DO, both of which are the same fact:
+;
+; The fascia does not go back to r3's 104, and must not. The corridor's albedo gain is
+; RELATIVE and exposure is a global scale, so a global scale cannot undo it — the
+; deck-to-facade ratio runs 0.67 at r3, 1.17 before, 1.20 after. The corridor stays the
+; brightest thing in frame, which is what the RUBRIC asks for and what the albedo work
+; bought; all that comes off is the absolute lift that rode in with it.
+;
+; And for the same reason the fog band still sits above the deck — 154 against 132,
+; essentially the ratio it already had (1.13 before, 1.16 after). That is NOT fixed
+; here and cannot be, and the instrument for it is the sky shader's horizon hem rather
+; than anything in this block. See the note above horizon_color in porto_sky.gdshader.
+;
+; The sky gets BLUER rather than duller, which is the knee running in reverse: the
+; zenith's three channels sit at u 0.122 / 0.286 / 0.600, so the two dark ones drop
+; onto the steep part of the curve while the bright one stays on the shallow part and
+; the gap between them widens. Measured zenith saturation, 0.572 -> 0.746 in
+; 01_deck_mid and 0.767 -> 0.869 in 02_deck_eye, i.e. up 13-30% while its luminance
+; came DOWN. That is the answer to the obvious objection, which is that dropping the
+; exposure must cost the one thing Round 1 said was working. The playable deck recovers
+; the same way for the same reason: its own saturation goes 0.119 -> 0.140, and its
+; local contrast — the thing a normal map and a detail layer exist to produce — comes
+; back 21%, CoV 0.117 -> 0.142 on the near deck and 0.097 -> 0.117 on the fascia. Not
+; one texture, material or map changed to buy that. It is entirely the surface being
+; moved back onto a part of the curve that still has levels to spend on differences.
+;
+; A NOTE ON HOW THE NUMBER WAS CHOSEN, because it is reusable and it is cheap. The
+; whole "after" column was PREDICTED before anything was rendered, by inverting the
+; measured transfer on the before-capture pixel by pixel — new = T(k * T-inverse(old))
+; with k the exposure ratio — and only then confirmed. Rendered against predicted, on
+; 01_deck_mid: mean 116.3 / 117.0, median 129 / 130, p99 190 / 191, fraction over 200
+; 0.43% / 0.43%, fascia 160.3 / 160.4. A capture on this hardware costs ten to fifteen
+; minutes; the prediction costs two seconds, and it is exact for any change that is
+; purely a change of transfer. It is not valid for anything scene-side — a fill energy,
+; sky_energy, an albedo — because those move the input rather than the curve.
+;
+; --- WHAT THIS DOES NOT FIX ------------------------------------------------
+;
+; The 99th percentile lands at 190 and 180, i.e. the frame still contains nothing white.
+; That is the honest answer and the previous round already wrote it down before talking
+; itself out of it: with no cloud, no sun disk and no glint in frame, the brightest
+; object in the arena is a sunlit kerb, and a sunlit kerb is not white. Buying a white
+; point by over-exposing the mid-tones is precisely the trade that produced this
+; regression. If the frame needs a white it needs a white OBJECT.
+;
+; agx_contrast 1.62, kept: it works inside the tonemapper's own S-curve, before the
+; display transform rather than on top of it, which is better behaved than
+; adjustment_contrast.
 tonemap_mode = 4
-tonemap_exposure = 0.72
+tonemap_exposure = 0.51
 tonemap_agx_white = 4.0
 tonemap_agx_contrast = 1.62
 
 ; --- Screen-space reflections ---
 ; The Douro reflecting the arch and the lit city is THE Porto image, so this is tuned
-; for one specific case: a near-mirror plane (the water shader runs ROUGHNESS 0.07)
+; for one specific case: a near-mirror plane (the water shader runs ROUGHNESS 0.06)
 ; seen at a grazing angle from 17 m up, with rays that have to travel most of the
 ; screen. max_steps 112 for that reach; depth_tolerance 0.22 because 0.3 is wider than
-; the lattice members are thick and smears them into a smudge; fade_in 0.05 so the
-; reflection starts at the waterline instead of leaving a gap under the piers; fade_out
-; 6.0 so the far half of the reflection survives instead of dissolving mid-river.
-; Untouched by the daylight pass: none of it is about the time of day, and the
-; reflection matters MORE now that what it reflects is a blue sky with an iron arch
-; across it rather than an amber wash.
+; the lattice members are thick and smears them into a smudge.
+;
+; ROUND 4. fade_out 6.0 -> 1.5, and the old value was a units error of exactly the
+; kind Round 2's detail_blend_mode was.
+;
+; NEITHER fade_in NOR fade_out IS A DISTANCE. Both are exponents on the ray march's
+; own progress: Godot computes the blend of a hit found at fraction g along the march
+; as pow(g, ssr_fade_in) * pow(1 - g, ssr_fade_out). The comment here used to read
+; "fade_out 6.0 so the far half of the reflection survives instead of dissolving
+; mid-river", which is the opposite of what 6.0 does — a hit at the halfway point kept
+; 0.5^6 = 0.016 of itself, and a hit three quarters along kept 0.00024. It did not
+; dissolve the far half of the reflection, it deleted everything except the first
+; sixth.
+;
+; That is the wrong end to delete for water specifically. A reflection off a
+; horizontal plane seen at a grazing angle has a reflected ray that is ALSO nearly
+; horizontal, so it crawls across the screen and finds whatever it finds late in the
+; march by construction. Two critics measured the consequence independently: a
+; three-band sample of the Douro in shot 07 varied under 8% between water under bright
+; terraces, open mid-span and water under a dark cliff, and a large iron arch stood
+; over calm water in shot 06 and returned nothing. What DID survive was the reflection
+; of things within a few metres of the surface — the near bank's own facades in shot
+; 09 — which is exactly the signature of a fade that kills long rays.
+;
+; 1.5 keeps a midpoint hit at 0.354 and still rolls a hit in the last tenth of the
+; march off to 0.03, which is the part that genuinely wants suppressing: at the end of
+; the march the ray is off-screen or behind something and the sample is a smear.
+; _atmosphere_probe.gd asserts the midpoint survival rather than the number.
+;
+; fade_in 0.05 is kept and was always right: pow(g, 0.05) is within 20% of 1.0 by the
+; first step, so the reflection starts at the waterline instead of leaving a gap under
+; the piers.
 ssr_enabled = true
 ssr_max_steps = 112
 ssr_fade_in = 0.05
-ssr_fade_out = 6.0
+ssr_fade_out = 1.5
 ssr_depth_tolerance = 0.22
 
 ; --- SSAO / SSIL ---
@@ -254,26 +386,54 @@ ssao_radius = 0.9
 ssao_intensity = 1.6
 ssao_power = 1.2
 ssao_detail = 0.4
-; 0.15 -> 0.50. This is the global half of Round 3's contact-darkening finding.
+; 0.15 -> 0.50 in Round 3, and HELD at 0.50 in Round 4 after the question was
+; finally measured instead of argued. Do not raise it again; the reason follows,
+; because three rounds have now spent effort here on a premise that is false.
 ;
 ; ssao_light_affect decides how much of the occlusion term is allowed to touch
-; DIRECT light; the remainder lands only on ambient. At 0.15 essentially all of
-; it landed on ambient — and under a 2.8-energy key on sunlit granite, ambient is
-; a small fraction of what the surface returns, so the occlusion was being spent
-; where there was almost nothing to darken. Two independent critics measured the
-; result the same way: cast shadows are present and correct, but NOTHING has
-; contact darkening where it meets the ground, and every object reads as planted
-; by its cast shadow alone.
+; DIRECT light; the remainder lands only on the indirect terms. Round 3 raised it
+; to 0.50 for contact darkening under the lamp standards and the deck bollard, and
+; the capture that followed still showed no dip in the paving under any of them.
 ;
-; The world stream did what geometry can — moulded feet, shaft swells, contact
-; patches — and moved one lamp's ground transition from 4/39/128/174 to
-; 4/21/66/180, a ramp instead of a step. That is a real but small win at a ten
-; pixel foot, and it correctly reported that the rest lives here.
+; MEASURED, in an isolated render rather than in the arena where texture noise
+; hides everything: a plane, three posts of 0.12 / 0.30 / 0.80 m diameter, a wall
+; corner, this exact key, ambient and grade, rendered with SSAO on and off and
+; differenced.
 ;
-; 0.50 rather than the 0.4-0.6 recommended midpoint: AO on direct light is not
-; physical (a shadow term already accounts for what the key cannot see), so this
-; is a deliberate art lever and half is as far as it should go before contact
-; shadows start reading as dirt in the crease of every sunlit corner.
+;   ambient-only control (key off)    post 0.12 m  -2.55 L (3.0%)   corner -7.90 L
+;   this rig, as shipped              post 0.12 m  -0.19 L (0.2%)   corner -1.96 L
+;   5x intensity, light_affect 1.0    post 0.12 m  -0.78 L (0.7%)   corner -8.82 L (17%)
+;
+; SSAO IS generating occlusion at radius 0.9, and its SHAPE is right — amplify the
+; difference and there is a clean contact halo at every post base, thin one
+; included. Its MAGNITUDE under this rig is 0.2% of the pixel, on paving whose own
+; texture deviation is 10-15 L. It is a sixth of one standard deviation of the
+; noise it is drawn on. That is why raising light_affect changed nothing
+; measurable, and the third row is why raising it further cannot help: at the
+; setting that finally plants a lamp post, every inside corner in the frame has
+; become a dirt ring.
+;
+; The cause is structural, not a value. AO occludes INDIRECT light plus whatever
+; fraction of DIRECT light this number concedes — and this rig has spent three
+; rounds deliberately deleting the indirect (ambient 0.55 -> 0.20, ssil 0.60 ->
+; 0.32, sdfgi 0.95 -> 0.80) because directionless light is what killed normal-map
+; relief inside shadows. Those cuts were right and are not being reversed. The
+; consequence is that AO has almost nothing left to take away: the same AO is 13x
+; stronger in the ambient-only control purely because there is light there for it
+; to occlude.
+;
+; The obvious alternative was tried in the same harness and is worse: giving
+; LightingRig's SkyFill a shadow map with a 30-degree angular diameter puts a
+; second CAST SHADOW streaking away from every object in a direction the sun is
+; not, plus shadow acne across open paving. Two suns beats no contact patch only
+; if you are not looking at the frame.
+;
+; So contact under a sunlit object is not this stream's to give. It has to come
+; from geometry or a decal — the world stream's moulded feet and contact patches,
+; which moved one lamp's ground transition from 4/39/128/174 to 4/21/66/180, are
+; the right instrument and want more of the same. _atmosphere_probe.gd now gates
+; the only thing that is genuinely this file's: that enough occludable indirect
+; light survives for AO to darken a crease at all.
 ssao_light_affect = 0.5
 ssil_enabled = true
 ssil_radius = 2.4
@@ -311,10 +471,23 @@ sdfgi_probe_bias = 1.4
 ;
 ; This pass first tried 1.25 on the reasoning that "everything got brighter". That was
 ; true of the render it was written against and stopped being true when exposure came
-; down to 0.72 four paragraphs above — at 1.25 nothing in the arena except the sun disk
-; could reach the glow pass at all, which is a bloom that never fires.
+; down four paragraphs above — at 1.25 nothing in the arena except the sun disk could
+; reach the glow pass at all, which is a bloom that never fires.
 ; intensity 0.38 -> 0.34: with the threshold doing the selecting properly, the strength
 ; only has to carry the sun and the glints.
+;
+; ROUND 5, and UNCHANGED because it was ruled out rather than left alone. The white
+; frame the owner reported had an obvious glow explanation — glow_blend_mode is SCREEN,
+; and a threshold that had drifted under ordinary sunlit stone would screen-blend the
+; whole frame toward white, which is the exact failure the paragraph above warns about.
+; Measured instead of assumed, with the same full-frame flat field the tonemap block's
+; table came from, rendered with glow_enabled true and false and differenced:
+;
+;     scene-referred   0.02  0.10  0.38  0.60  1.20  2.00  3.50
+;     glow contributes    0     1     0     1     0     0     1   levels out of 255
+;
+; Glow is not touching any surface in this arena. It is doing its job on the sun disk
+; and the glints and nothing else, which is what the threshold was tuned for.
 ; luminance_cap 8 stops the sun disk from smearing the upper frame through the widest
 ; blur levels.
 glow_enabled = true
@@ -357,30 +530,67 @@ glow_hdr_luminance_cap = 8.0
 ; chord — cobalt, vermilion, ochre, cream — is the right chord for Porto and is not
 ; what is wrong.
 ;
-; begin 40 -> 18 and curve 0.90 -> 0.62, which roughly doubles the veil right across
-; the mid-ground while leaving the playable corridor alone. Composited with the
-; volumetric pass below, at the distances this scene actually has geometry:
+; begin 40 -> 18 and curve 0.90 -> 0.62 in Round 3, which roughly doubled the veil
+; right across the mid-ground while leaving the playable corridor alone.
 ;
-;                             was     now
-;     deck / hero      0-40 m  <4%     <6%    nothing playable is veiled
-;     bridge ends      50 m     6%      9%
-;     arch, abutments  70 m     9%     14%
-;     Ribeira terraces 100 m   12%     20%    where the over-bright facades are
-;     Clerigos, Serra  130 m   16%     27%
-;     scan, near edge  168 m   22%     35%
-;     scan, far edge   340 m   57%     69%
-;     horizon          640 m+ 100%    100%    the water reaches sky colour before its
-;                                             geometry runs out, so the river plane's
-;                                             far edge stops being visible at all
+; ROUND 4: fog_depth_end 640 -> 520, and it is the RANGE that moves rather than the
+; density or the curve, deliberately. Round 3's critics measured the same-material
+; saturation series up the left bank of shot 07 running near-to-far 0.265 -> 0.301 ->
+; 0.323 — saturation RISING with distance, which is an inverted atmospheric model —
+; and separately measured background saturation (0.32) sitting at two and a half
+; times the playable deck's (0.13). The correct instrument for that is more veil in
+; the 80-200 m band where the Ribeira terraces stand, because a veil is what strips
+; chroma: mixing a terracotta facade 24% toward the pale hem takes its saturation
+; from 0.55 to 0.40, and 42% takes it to 0.28. Density cannot deliver that (it is
+; already 1.0 and it only scales the far end) and curve cannot (it lifts the near
+; field at the same rate, and the playable corridor has a 9% ceiling in the probe).
+;
+; Composited with the volumetric pass below, at the distances this scene has geometry:
+;
+;                            r2      r3      r4
+;     deck / hero      0-40 m  <4%     6.1%    7.0%   nothing playable is veiled
+;     bridge ends      50 m     6%     8.6%   10.0%
+;     arch, abutments  70 m     9%    13.6%   15.9%
+;     Ribeira terraces 100 m   12%    20.4%   24.4%   where the over-bright facades are
+;     Clerigos, Serra  130 m   16%    26.6%   32.3%
+;     scan, near edge  168 m   22%    34.7%   42.3%
+;     scan, far edge   340 m   57%    69.2%   81.8%
+;     horizon          520 m+ 100%    100%   100%    the water reaches sky colour before
+;                                                    its geometry runs out, so the river
+;                                                    plane's far edge is never a seam
 ;
 ; The ramp is monotone at every sample, which is the whole depth cue — a dip anywhere
-; means near geometry hazier than something behind it. _atmosphere_probe.gd checks it.
+; means near geometry hazier than something behind it. _atmosphere_probe.gd checks it,
+; and LightingRig's three COMPAT_FOG_* constants were re-solved against this curve in
+; the same edit (worst mismatch 0.0065 over 10-410 m, against a 0.06 gate).
+;
+; What this does NOT fix, and should not be asked to: the veil BRIGHTENS as well as
+; desaturates, because with aerial_perspective at 0.90 it converges on the sky and the
+; horizon hem of a clear sky is genuinely bright. A critic measured the far river in
+; shot 02 at L 176-184 against a mean deck of 110 and called the eye to it, correctly.
+; That gap closes from the other end — by the playable corridor getting brighter, which
+; is the materials stream's albedo work — and NOT by dimming the sky, which would make
+; a clear Porto morning read as overcast. Adding veil without that is the milky-screen
+; failure this project already shipped once, so the two halves have to land together.
+;
+; ROUND 5 FOLLOWED UP ON THAT PREDICTION, and it is worth recording that it came true
+; and then went past true. The corridor did get brighter — 110 -> 167 — and the gap did
+; close, and then the deck kept going until it sat level with the fog band at 176 with
+; nothing between them, which is what the owner saw as one white mass. The half of the
+; trade this block asked for arrived; the other half, re-solving the exposure the new
+; albedos are seen through, did not, and that is fixed in the tonemap block above. The
+; fog band itself is UNCHANGED by that fix's own arithmetic — it comes down with
+; everything else, from 176 to 156 against a deck at 147-167 — so nothing here needed
+; moving and nothing here was moved. The instruction not to dim the sky still stands.
 ;
 ; Two more numbers here changed earlier, when the sunset went:
 ;
-; fog_light_color, warm haze amber -> pale sky blue. This is the 10% of the veil that
-; is NOT the sky behind the geometry, and an amber tint in it was putting a gold cast
-; on every distant surface in a frame lit at 5100 K.
+; fog_light_color, warm haze amber -> pale sky blue -> (0.706, 0.769, 0.824). This is
+; the 10% of the veil that is NOT the sky behind the geometry — the airlight's own
+; colour rather than the dome's — and it comes down in both value and chroma this
+; round for the same reason the range came in: it is the one part of the veil that can
+; desaturate without also brightening. B-R stays +0.118, so it is still decisively a
+; daylight haze rather than a cream one.
 ; fog_sun_scatter 0.42 -> 0.10. This adds the sun's own colour to the fog along
 ; sightlines near it. It existed because looking down the gorge was looking within 30
 ; degrees of an 11.5-degree sun, which is the glare that sells a low sun over water.
@@ -394,14 +604,14 @@ glow_hdr_luminance_cap = 8.0
 ; sky_affect stays 0: at anything above that the fog fogs the sky itself.
 fog_enabled = true
 fog_mode = 1
-fog_light_color = Color(0.741, 0.827, 0.902, 1)
+fog_light_color = Color(0.706, 0.769, 0.824, 1)
 fog_sun_scatter = 0.1
 fog_density = 1.0
 fog_aerial_perspective = 0.9
 fog_sky_affect = 0.0
 fog_depth_curve = 0.62
 fog_depth_begin = 18.0
-fog_depth_end = 640.0
+fog_depth_end = 520.0
 
 ; --- Volumetric fog: the light shafts ---
 ; This existed for one shot: an 11.5 degree sun raking through the arch lattice. A

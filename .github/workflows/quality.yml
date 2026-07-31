@@ -116,6 +116,22 @@ jobs:
           fi
           echo "ok: import clean"
 
+      # The import step above CANNOT catch a broken script on its own, and the
+      # project has already shipped one: tools/profile.gd — the profiler that
+      # owns the frame-cost distribution and the budget gate — did not parse,
+      # and had not since it was written. `--import` compiles what the resources
+      # it imports reference; a script reached only through a .tscn that no
+      # import loads is never compiled, so the log it greps stays clean.
+      #
+      # This loads every .gd in the project in one process and reload()s it.
+      # reload() rather than a null check, because ResourceLoader hands back a
+      # Script object for a file that did not compile — the first version of the
+      # tool used a null check and passed the very bug it was written for.
+      # Three seconds for 94 scripts.
+      - name: Every script compiles
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: timeout 300 godot --headless --path . tools/parsecheck.tscn
+
       # Two kinds of probe, and running one the other's way silently reports
       # nonsense: a probe that `extends SceneTree` runs via --script, but a probe
       # that needs a scene tree must be launched AS A SCENE, because --script

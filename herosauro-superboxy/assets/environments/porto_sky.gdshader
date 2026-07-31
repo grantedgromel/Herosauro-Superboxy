@@ -67,6 +67,19 @@ uniform vec4 upper_color : source_color = vec4(0.322, 0.541, 0.804, 1.0);
 // out brighter than the dome above it, which is the RUBRIC's "background competing
 // with playable space" failure arriving through the atmosphere rather than through
 // the art.
+//
+// ROUND 5 LOOKED HARD AT THIS AND DELIBERATELY LEFT IT, which is worth writing down
+// because it is the obvious next thing to reach for and it is the second-order problem
+// rather than the first. The owner reported the frame reading white; that was the
+// exposure, and re-solving it in porto_daylight.tres took 02_deck_eye's fog band from
+// L 176 to 154 and its deck from 155 to 132. But exposure is a GLOBAL SCALE, so it
+// cannot change a ratio: the fog band still sits 22 levels ABOVE the playable deck,
+// exactly as it did before, and the RUBRIC wants the corridor to be the brightest
+// thing in frame. This band is the instrument for that — it, and haze_tight_energy /
+// haze_broad_energy below — because the fog converges on it and nothing else does.
+// What must NOT be reached for is the zenith or sky_energy: those move the whole dome
+// and a Porto morning with a dull dome is overcast, whatever the histogram says. Move
+// the hem, measure the zenith, and check both against the deck.
 uniform vec4 horizon_color : source_color = vec4(0.660, 0.760, 0.850, 1.0);
 // sin(elevation) at which the pale band hands over to upper_color. 0.30 = 17.5 deg.
 uniform float horizon_band : hint_range(0.05, 0.9) = 0.30;

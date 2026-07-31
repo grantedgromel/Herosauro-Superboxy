@@ -1,46 +1,48 @@
 extends Control
-## The title screen.
+## The title screen. A poster: it is built in milliseconds and then it holds
+## still.
 ##
-## Not a flat gradient with a button on it any more: the real Douro gorge is
-## rendered live behind it by a scripted cinematic camera, the three character
-## sheets are staged as foreground art over the top, and the UI is a graded
-## column down the left margin.
+## IT USED TO BE A LIVE 3D SHOT, AND THAT WAS THE PROBLEM. The screen instanced a
+## second complete copy of `bridge_arena.tscn` — terrain, Ribeira facades,
+## landmarks, ironwork, sky, lighting rig — purely as a backdrop, and flew a
+## scripted camera around it on a seventy-four second loop. The probe puts that
+## build at several seconds of blocking main-thread work and a few hundred nodes,
+## paid before the player can read the game's name, and the whole load-hold
+## sequence that used to live in this file existed only to hide it. The web build
+## paid it worst. A title screen has no business being the most expensive screen
+## in the game.
 ##
-## LAYER ORDER, back to front. Only the first of these is 3D, and it renders
-## under every CanvasItem in the tree by definition, so nothing here has to fight
-## for draw order:
+## So the backdrop is a static composed image now (see menu_backdrop.gd, which is
+## also where the cinematic key art drops in when it lands), and everything that
+## existed to serve a moving world went with it: the second WorldEnvironment, the
+## camera path, the parallax feed into the cast, the horizon glare, the drifting
+## motes, the deferred build, the veil and the held title card.
 ##
-##   MenuWorld    bridge_arena.tscn plus a camera on a 74-second loop
-##   Atmosphere   scrims, horizon glare, vignette, drifting motes
-##   Veil         opaque until Porto is standing; the reveal fades it
-##   HeroStage    Adamastor, Super Boxy, Herosauro, parallaxed against the camera
+## LAYER ORDER, back to front. Every one of these is a CanvasItem — there is no
+## 3D in this scene at all any more:
+##
+##   Backdrop     the key art, or a graded ground, plus scrims and vignette
+##   HeroStage    Adamastor, Super Boxy, Herosauro as cut-outs. Hidden when the
+##                key art is in, because the key art already has the cast in it
 ##   TitleLogo    the display lockup
 ##   MenuList     START / DIFFICULTY / CONTROLS / CREDITS / QUIT
 ##   Modal        CONTROLS and CREDITS panels
 ##   Curtain      the fade to black on START and QUIT
 ##
-## THE LOAD IS PART OF THE SEQUENCE. Assembling the arena — terrain, Ribeira
-## facades, landmarks, ironwork — takes a good second and a half and blocks the
-## main thread while it does, so there is no animating through it. Instead the
-## logo is brought up on black first and left holding while the build runs; the
-## world, the cast and the menu column then all arrive together as the veil
-## lifts. A held title card is a load screen nobody reads as one.
-##
 ## COMPOSITION. Everything readable hangs off the left margin and everything
 ## drawn owns the right. That is not a style choice so much as a consequence of
 ## the art: Adamastor has to be cropped by the frame to read as a giant, the
-## heroes have to stand in front of him, and the camera's best shot of Porto is
-## down the gorge into the sun — all of which wants the right two thirds. A
-## centred logo and a centred button stack would have sat straight on top of it.
+## heroes have to stand in front of him, and the key art is composed down the
+## gorge — all of which wants the right two thirds. A centred logo and a centred
+## button stack would have sat straight on top of it.
 ##
-## LIFETIME. The 3D backdrop only exists while this screen is the one on show.
-## `_wake()` builds it a frame after the state settles (main.gd tears the
-## gameplay world down with `queue_free()`, which does not flush until the end of
-## its frame, and two live WorldEnvironments in one viewport is one too many);
-## `_sleep()` and `_leave()` detach it synchronously. See menu_world.gd.
+## THE CURTAIN IS STILL LOAD COVER, JUST NOT FOR THIS SCREEN. Pressing START
+## still hands off to main.gd, which builds the real arena and blocks while it
+## does. The fade to black is what covers that; it is the one piece of the old
+## sequencing worth keeping, and it now covers a build this screen does not pay
+## for twice.
 
-const MenuWorldScript := preload("res://scripts/ui/menu/menu_world.gd")
-const AtmosphereScript := preload("res://scripts/ui/menu/menu_atmosphere.gd")
+const BackdropScript := preload("res://scripts/ui/menu/menu_backdrop.gd")
 const HeroStageScript := preload("res://scripts/ui/menu/hero_stage.gd")
 const TitleLogoScript := preload("res://scripts/ui/menu/title_logo.gd")
 const MenuListScript := preload("res://scripts/ui/menu/menu_list.gd")
@@ -74,24 +76,23 @@ const LOGO_TO_LIST := 40.0
 const LIST_BOTTOM_CLEAR := 74.0
 
 # --- Timing ------------------------------------------------------------------
+#
+# The entry is a settle, not a load screen. There is nothing to wait for any
+# more, so the column is live from the first frame and the stagger below is only
+# there so the poster assembles itself rather than snapping into place. Anyone
+# who hits Enter before it finishes gets START, which is the correct answer.
 
-const VEIL_LIFT := 1.00          # fade up from black once the world is standing
 const CURTAIN_OUT := 0.28        # fade to black on START / QUIT
-## How long the logo is left alone on black before the (blocking) world build.
-## Must outlast title_logo.gd's own entry or the settle is cut off by the stall.
-const LOGO_HOLD := 0.72
-const STAGE_DELAY := 0.10
-const STAGE_STAGGER := 0.13
-const LIST_DELAY := 0.34
-const LIST_STAGGER := 0.07
+const STAGE_DELAY := 0.06
+const STAGE_STAGGER := 0.10
+const LIST_DELAY := 0.16
+const LIST_STAGGER := 0.06
 
-var _world: MenuWorldScript
-var _atmosphere: AtmosphereScript
+var _backdrop: BackdropScript
 var _stage: HeroStageScript
 var _logo: TitleLogoScript
 var _list: MenuListScript
 var _modal: MenuModalScript
-var _veil: ColorRect
 var _curtain: ColorRect
 
 var _awake: bool = false
@@ -102,6 +103,8 @@ var _return_focus: StringName = &"start"
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	# Nothing on this screen runs per frame. The entry is a tween and the rest is
+	# a still image, so the menu costs no `_process` at all while it is up.
 	set_process(false)
 	_build()
 
@@ -117,16 +120,22 @@ func _ready() -> void:
 # --- Construction ------------------------------------------------------------
 
 func _build() -> void:
-	_atmosphere = AtmosphereScript.new()
-	_atmosphere.name = "Atmosphere"
-	add_child(_atmosphere)
+	_backdrop = BackdropScript.new()
+	_backdrop.name = "Backdrop"
+	add_child(_backdrop)
 
-	_veil = _sheet("Veil", 1.0)
-	add_child(_veil)
-
-	_stage = HeroStageScript.new()
-	_stage.name = "HeroStage"
-	add_child(_stage)
+	# The key art is a full cast shot. Staging the cut-outs over it would put a
+	# second Adamastor next to the painted one, so the stage stands down entirely
+	# and lets the art carry the right of the frame.
+	#
+	# Not built rather than built-and-hidden: three figures means three Lanczos
+	# resamples of a 900 px character sheet, which is most of what this screen
+	# costs to stand up. Paying it for something nobody sees is the kind of thing
+	# that turns a fast screen slow again one small decision at a time.
+	if not _backdrop.has_key_art():
+		_stage = HeroStageScript.new()
+		_stage.name = "HeroStage"
+		add_child(_stage)
 
 	_logo = TitleLogoScript.new()
 	_logo.name = "TitleLogo"
@@ -143,17 +152,12 @@ func _build() -> void:
 	_modal.closed.connect(_on_modal_closed)
 	add_child(_modal)
 
-	_curtain = _sheet("Curtain", 0.0)
+	_curtain = ColorRect.new()
+	_curtain.name = "Curtain"
+	_curtain.color = Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, 0.0)
+	_curtain.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_curtain.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_curtain)
-
-
-func _sheet(sheet_name: String, alpha: float) -> ColorRect:
-	var r := ColorRect.new()
-	r.name = sheet_name
-	r.color = Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, alpha)
-	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	return r
 
 
 # --- Layout ------------------------------------------------------------------
@@ -183,8 +187,14 @@ func _relayout() -> void:
 	_list.size = Vector2(column_w, column_h)
 
 
-
 # --- Waking and sleeping -----------------------------------------------------
+#
+# All that is left of the old lifetime dance. It used to defer the 3D build by
+# two frames and then a further hold, because main.gd tears the gameplay world
+# down with `queue_free()` — which does not flush until the end of its frame —
+# and two live WorldEnvironments in one viewport is one too many. This screen
+# owns no WorldEnvironment and no Camera3D now, so there is nothing to sequence
+# against: waking is replaying the entry, sleeping is putting the modal away.
 
 func _on_state_changed(new_state: int) -> void:
 	if new_state == GameManager.State.MENU:
@@ -205,87 +215,30 @@ func _wake() -> void:
 		return
 	_awake = true
 	_leaving = false
-	_veil.color.a = 1.0
 	_curtain.color.a = 0.0
-	# The cast and the column sit ABOVE the veil so they can animate in as it
-	# lifts, which means they have to be held back by hand until then.
-	_stage.modulate.a = 0.0
-	_list.modulate.a = 0.0
-	# Locked until the reveal: a keypress that lands during the build would fire
-	# into a menu the player has not been shown yet.
-	_list.set_locked(true)
+	_list.set_locked(false)
 	_list.sync_difficulty(GameManager.difficulty)
-	set_process(true)
+	# Re-run before the entry rather than after: coming back from a match the
+	# window may have been resized while this screen was hidden, and `resized`
+	# does not fire on a Control that was not laid out at the time.
+	_relayout()
 	_logo.play_entry(0.0)
-	_spawn_world()
+	# Null whenever the key art is in — see `_build()`. Guarded rather than
+	# replaced with a hidden stub so the "no cast to stage" case stays visible in
+	# the code instead of hiding behind a node that does nothing.
+	if _stage != null:
+		_stage.play_entry(STAGE_DELAY, STAGE_STAGGER)
+	_list.play_entry(LIST_DELAY, LIST_STAGGER)
+	_list.focus_row(_return_focus)
 
 
 func _sleep() -> void:
 	if not _awake:
 		return
 	_awake = false
-	set_process(false)
 	if _modal.is_open():
 		_modal.close()
 	_list.set_locked(true)
-	_release_world()
-
-
-## Deferred by two frames on purpose — see the lifetime note at the top of the
-## file and in menu_world.gd. Re-checked after the wait because the player can
-## be out of the menu again by then (PLAY AGAIN goes VICTORY -> PLAYING without
-## ever passing through here, but a fast Esc-and-start can).
-func _spawn_world() -> void:
-	if _world != null and is_instance_valid(_world):
-		return
-	await get_tree().process_frame
-	await get_tree().process_frame
-	if not _still_here():
-		return
-	# Hold on the logo. Ignoring time scale and the pause flag because the tree
-	# can be paused when the player backs out of a fight.
-	await get_tree().create_timer(LOGO_HOLD, true, false, true).timeout
-	if not _still_here():
-		return
-	_world = MenuWorldScript.new()
-	_world.name = "MenuWorld"
-	add_child(_world)
-	_reveal()
-
-
-## Guard for every await point in the spawn: the player can be out of the menu
-## again before the timer lands.
-func _still_here() -> bool:
-	return _awake and is_inside_tree() and GameManager.state == GameManager.State.MENU
-
-
-func _release_world() -> void:
-	if _world != null and is_instance_valid(_world):
-		_world.dismiss()
-	_world = null
-
-
-func _process(_delta: float) -> void:
-	if _world != null and is_instance_valid(_world):
-		_stage.camera_sway = _world.sway()
-
-
-# --- Reveal ------------------------------------------------------------------
-
-## Porto is standing. Lift the veil and bring the cast and the column in with it.
-## Layout is re-run first because the world build ran a blocking second and a
-## half ago and the window may have been resized in the middle of it.
-func _reveal() -> void:
-	_relayout()
-	_stage.modulate.a = 1.0
-	_list.modulate.a = 1.0
-	_stage.play_entry(STAGE_DELAY, STAGE_STAGGER)
-	_list.play_entry(LIST_DELAY, LIST_STAGGER)
-	_list.set_locked(false)
-	_list.focus_row(_return_focus)
-
-	var tw := create_tween().set_parallel(true)
-	tw.tween_property(_veil, "color:a", 0.0, VEIL_LIFT).set_trans(Tween.TRANS_SINE)
 
 
 # --- Actions -----------------------------------------------------------------
@@ -321,9 +274,9 @@ func _on_modal_closed() -> void:
 	_list.focus_row(_return_focus)
 
 
-## Fade to black, drop the backdrop, then do the thing. The world is released
-## only once the screen is fully covered, so the hand-off to main.gd's own world
-## (or to the desktop, on QUIT) never shows a bare clear colour.
+## Fade to black, then do the thing. START hands off to main.gd, whose own arena
+## build blocks for seconds; the curtain is what stands in front of that stall,
+## and it is the reason the hand-off never shows a bare clear colour.
 func _leave(action: Callable) -> void:
 	if _leaving:
 		return
@@ -333,6 +286,5 @@ func _leave(action: Callable) -> void:
 	var tw := create_tween()
 	tw.tween_property(_curtain, "color:a", 1.0, CURTAIN_OUT).set_trans(Tween.TRANS_SINE)
 	tw.tween_callback(func() -> void:
-		_release_world()
 		_leaving = false
 		action.call())
