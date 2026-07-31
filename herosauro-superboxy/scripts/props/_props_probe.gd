@@ -82,22 +82,27 @@ func _ready() -> void:
 	get_tree().quit(1 if _fail > 0 else 0)
 
 
-## Order matters, once. The debris-lifetime and determinism checks run BEFORE the
-## first fight starts, because a live giant smashing barrels on the deck produces
-## fresh debris the whole time and a "does it free itself" measurement taken over
-## a running fight measures the fight. (Found the hard way: the first version of
-## this probe reported fourteen leaked shards, all of which turned out to be
-## three seconds old and made by the boss.)
+## Order matters, once: everything that needs a QUIESCENT scene runs before the
+## first fight starts, and nothing after that point can go back.
+##
+## Found the hard way, twice. A "does the debris free itself" measurement taken
+## over a live fight reported fourteen leaked shards, every one of which turned
+## out to be three seconds old and made by the boss. A "do props settle"
+## measurement taken over a live fight reported every prop awake, which is the
+## deck ring doing exactly what it is for. Both were the probe measuring the
+## arena instead of the subsystem.
 func _run() -> void:
+	# Quiescent: no world, no giant, no shakes.
 	await _check_layers()
 	_check_meshes()
 	await _check_break_ladder()
 	await _check_debris_budget()
 	await _check_determinism()
-	await _check_five_legs()
-	await _check_placement()
 	await _check_spawn_drop_margin()
 	await _check_settling()
+	# Live arena from here on.
+	await _check_five_legs()
+	await _check_placement()
 	await _check_variation()
 	await _check_deck_ring()
 	_check_payout_economy()
@@ -688,76 +693,110 @@ func _check_spawn_drop_margin() -> void:
 # --- Settling ---------------------------------------------------------------
 
 ## Props must settle rather than jitter forever. A prop that never sleeps is a
-## solver island every frame for the rest of the fight, and visually it is a
-## barrel vibrating on a flat deck.
+## solver island every frame for the rest of the fight, and on screen it is a
+## barrel very slightly vibrating on flat granite.
+##
+## Measured QUIESCENTLY, on a static floor with no giant on it. The arena the
+## player sees is never quiescent — the deck ring deliberately wakes props every
+## time nine metres of stone lands — so measuring settling there would measure
+## the ring. The live arena is reported below as a number, not asserted.
 func _check_settling() -> void:
-	await _start()
+	var host := _scratch()
+	var floor_body := StaticBody3D.new()
+	floor_body.collision_layer = PhysicsLayers.WORLD
+	var fs := CollisionShape3D.new()
+	var fb := BoxShape3D.new()
+	fb.size = Vector3(60.0, 1.0, 12.0)
+	fs.shape = fb
+	floor_body.add_child(fs)
+	host.add_child(floor_body)
+	floor_body.global_position = Vector3(0.0, 1.5, 0.0)
 
-	var asleep_at := -1.0
-	var t := 0.0
-	var props: Array[Node3D] = []
-	for i in int(6.0 * TICK):
-		await get_tree().physics_frame
-		t += 1.0 / TICK
-		props = _props()
-		if props.is_empty():
-			continue
-		var all_asleep := true
-		for p in props:
-			if p is RigidBody3D and not (p as RigidBody3D).sleeping:
-				all_asleep = false
-				break
-		if all_asleep and asleep_at < 0.0:
-			asleep_at = t
-			break
+	# Fourteen props, one deck's worth, dropped the way the spawner drops them.
+	var props: Array[PropBody] = []
+	for i in 14:
+		var scene: PackedScene = [BarrelScene, CrateScene, RubbleScene][i % 3]
+		var p := scene.instantiate() as PropBody
+		p.variant_seed = 977 + i * 31
+		host.add_child(p)
+		if scene == BarrelScene:
+			p.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+		p.global_position = Vector3(float(i) * 3.0 - 20.0, 2.0 + p.extent()
+			+ PropSpawner.SETTLE_DROP, 0.0)
+		props.append(p)
 
-	props = _props()
-	var fastest := 0.0
-	var spinniest := 0.0
-	var awake := 0
-	for p in props:
-		var rb := p as RigidBody3D
-		if rb == null:
-			continue
-		fastest = maxf(fastest, rb.linear_velocity.length())
-		spinniest = maxf(spinniest, rb.angular_velocity.length())
-		if not rb.sleeping:
-			awake += 1
-
-	print("\n  -- the untouched arena went quiet after %.2f s; %d/%d props still awake, "
-		% [asleep_at, awake, props.size()]
-		+ "fastest %.4f m/s, spinniest %.4f rad/s" % [fastest, spinniest])
+	var asleep_at := await _time_to_sleep(props, 6.0)
+	var worst := _worst_motion(props)
+	print("\n  -- fourteen props dropped onto a bare deck: all asleep after %.2f s; "
+		% asleep_at
+		+ "%d still awake, fastest %.4f m/s, spinniest %.4f rad/s"
+			% [int(worst["awake"]), worst["speed"], worst["spin"]])
 	_ok(asleep_at >= 0.0 and asleep_at < 5.0,
 		"every prop settles and SLEEPS within five seconds (%.2f s)" % asleep_at)
-	_ok(fastest < 0.05,
-		"nothing is still creeping across the deck (%.4f m/s)" % fastest)
-	_ok(spinniest < 0.05, "nothing is still vibrating (%.4f rad/s)" % spinniest)
+	_ok(float(worst["speed"]) < 0.05,
+		"nothing is still creeping across the deck (%.4f m/s)" % worst["speed"])
+	_ok(float(worst["spin"]) < 0.05, "nothing is still vibrating (%.4f rad/s)" % worst["spin"])
 
-	# And it settles again after being disturbed, which is the case that actually
+	# And it settles AGAIN after being disturbed, which is the case that actually
 	# happens mid-fight. Deliberately just under the softest break_impulse in the
-	# arena (6.0), so this measures SETTLING and not destruction.
+	# arena (6.0), so this measures settling and not destruction.
 	for p in props:
-		if p is PropBody:
-			(p as PropBody).apply_hit_impulse(Vector3(4.0, 1.8, 0.0), p.global_position)
+		if is_instance_valid(p):
+			p.apply_hit_impulse(Vector3(4.0, 1.8, 0.0), p.global_position)
 	await _thaw()
-	var resettle := -1.0
-	t = 0.0
-	for i in int(8.0 * TICK):
+	var resettle := await _time_to_sleep(props, 8.0)
+	print("  -- shoved and left alone, all asleep again after %.2f s" % resettle)
+	_ok(resettle >= 0.0 and resettle < 7.0,
+		"a disturbed arena comes back to rest (%.2f s)" % resettle)
+	_free(host)
+	await _settle(4)
+
+	# The live arena, reported. The giant is walking, slamming and roaring, so
+	# props being awake here is the deck ring working, not a settling failure.
+	await _start()
+	await _settle(int(4.0 * TICK))
+	var live: Array[PropBody] = []
+	for p in _props():
+		if p is PropBody:
+			live.append(p as PropBody)
+	var w := _worst_motion(live)
+	print("  -- for contrast, four seconds into a LIVE fight: %d/%d props awake, "
+		% [int(w["awake"]), live.size()]
+		+ "fastest %.3f m/s (this is the deck ring, not jitter)" % w["speed"])
+
+
+## Seconds until every one of `props` is asleep, or -1 if it never happens.
+func _time_to_sleep(props: Array[PropBody], limit: float) -> float:
+	var t := 0.0
+	for i in int(limit * TICK):
 		await get_tree().physics_frame
 		t += 1.0 / TICK
-		var live := _props()
-		if live.is_empty():
-			break
 		var quiet := true
-		for p in live:
-			if p is RigidBody3D and not (p as RigidBody3D).sleeping:
+		var any := false
+		for p in props:
+			if not is_instance_valid(p):
+				continue
+			any = true
+			if not p.sleeping:
 				quiet = false
 				break
-		if quiet:
-			resettle = t
-			break
-	print("  -- shoved hard, the survivors were asleep again after %.2f s" % resettle)
-	_ok(resettle >= 0.0, "a disturbed arena comes back to rest (%.2f s)" % resettle)
+		if any and quiet:
+			return t
+	return -1.0
+
+
+func _worst_motion(props: Array[PropBody]) -> Dictionary:
+	var speed := 0.0
+	var spin := 0.0
+	var awake := 0
+	for p in props:
+		if not is_instance_valid(p):
+			continue
+		speed = maxf(speed, p.linear_velocity.length())
+		spin = maxf(spin, p.angular_velocity.length())
+		if not p.sleeping:
+			awake += 1
+	return {"speed": speed, "spin": spin, "awake": awake}
 
 
 # --- Variation --------------------------------------------------------------

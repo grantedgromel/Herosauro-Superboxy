@@ -54,8 +54,6 @@ extends PropBody
 @export var break_delta_v: float = 7.0
 @export var piece_count: int = 11
 @export var piece_lifetime: float = 4.0
-## Shard edge length as a fraction of the prop's own extent.
-@export var piece_scale: float = 0.34
 ## Non-zero pins the debris scatter so a replay looks identical. The spawner
 ## sets it; leave 0 to derive one from the prop's resting position.
 @export var rng_seed: int = 0
@@ -95,9 +93,10 @@ extends PropBody
 # and lights gold, which is a real leg-5 acknowledgement for free.
 
 ## Colour of forty litres of Ruby port leaving a cask at speed. ImpactFX owns the
-## splash itself (`ImpactFX.PORT_WINE`); this is the tint on the physical
-## droplets a CRACKED — not yet burst — cask leaves on the deck.
-const PORT_RED := Color(0.30, 0.045, 0.075)
+## splash itself; this is the tint on the physical droplets a CRACKED — not yet
+## burst — cask leaves on the deck, and it is deliberately the same RGB as
+## `ImpactFX.PORT_WINE` so the spill and the mist are one liquid.
+const PORT_RED := Color(0.30, 0.045, 0.09)
 
 ## Damage-state cues.
 const SQUASH_RETURN := 0.16
@@ -115,6 +114,10 @@ var _squash: Tween = null
 
 func _ready() -> void:
 	super._ready()
+	# The drawn parts already carry this instance's size variation, so every later
+	# cue (squash, crumble) has to work relative to it rather than to 1.0 — or the
+	# first hit would snap a small crate back to full size.
+	_visual_scale = size_scale()
 	# Seeded here rather than at shatter time, so the SAME generator drives the
 	# chips knocked off along the way and the final burst. A prop's whole life is
 	# one deterministic stream. ARCHITECTURE.md rule 4.
@@ -381,8 +384,7 @@ func _squash_pulse() -> void:
 ## a worn-down block is genuinely smaller rather than merely looking it.
 func _crumble(factor: float) -> void:
 	_visual_scale *= factor
-	for mi in _meshes(self):
-		mi.scale = Vector3.ONE * _visual_scale
+	_apply_visual_scale(_visual_scale)
 	var node := _own_collision_node()
 	if node == null or node.shape == null:
 		return

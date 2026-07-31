@@ -75,9 +75,11 @@ const FINE_BLEND := 0.55
 
 
 func _initialize() -> void:
-	for recipe in _recipes():
+	var recipes := _recipes()
+	for recipe in recipes:
 		_write_pair(recipe)
 	_write_fine()
+	_report(recipes)
 	quit()
 
 
@@ -125,9 +127,13 @@ func _recipes() -> Array[Dictionary]:
 			"ao": Vector2(0.72, 1.00),
 			"albedo_noise": _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.011, 3, 0.55, 2.1, 1307),
 			"albedo_ramp": [
-				[0.00, Color(0.800, 0.820, 0.860)],
-				[0.45, Color(0.940, 0.940, 0.935)],
-				[1.00, Color(1.000, 0.990, 0.965)],
+				[0.00, Color(0.884, 0.835, 0.808)],
+				[0.17, Color(0.843, 0.863, 0.884)],
+				[0.33, Color(0.842, 0.895, 0.908)],
+				[0.50, Color(0.934, 0.883, 0.885)],
+				[0.67, Color(0.933, 0.941, 0.884)],
+				[0.83, Color(0.919, 0.916, 0.974)],
+				[1.00, Color(0.927, 0.972, 0.964)],
 			],
 		},
 		# Weathered plate: broad corrosion blooms, not grain. Intact paint is smooth,
@@ -195,12 +201,12 @@ func _recipes() -> Array[Dictionary]:
 			# sky is actually putting there. Still unmistakably stone-to-stone
 			# variation, which is the finding; no longer a mosaic, which was mine.
 			"albedo_ramp": [
-				[0.00, Color(0.820, 0.815, 0.805)],
-				[0.19, Color(1.000, 0.995, 0.985)],
-				[0.37, Color(0.895, 0.890, 0.880)],
-				[0.55, Color(0.955, 0.950, 0.940)],
-				[0.73, Color(0.855, 0.845, 0.830)],
-				[0.88, Color(0.935, 0.930, 0.920)],
+				[0.00, Color(0.877, 0.863, 0.816)],
+				[0.16, Color(0.816, 0.863, 0.877)],
+				[0.32, Color(0.946, 0.879, 0.871)],
+				[0.50, Color(0.871, 0.879, 0.946)],
+				[0.68, Color(0.976, 0.953, 0.900)],
+				[0.85, Color(0.900, 0.953, 0.976)],
 			],
 		},
 		# Limewash: very low frequency, almost flat, just enough to kill the plastic.
@@ -238,9 +244,12 @@ func _recipes() -> Array[Dictionary]:
 			"ao": Vector2(0.90, 1.00),
 			"albedo_noise": _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.006, 4, 0.55, 2.3, 4523),
 			"albedo_ramp": [
-				[0.00, Color(0.905, 0.900, 0.890)],
-				[0.38, Color(0.955, 0.952, 0.945)],
-				[1.00, Color(1.000, 0.998, 0.992)],
+				[0.00, Color(0.949, 0.921, 0.915)],
+				[0.20, Color(0.920, 0.947, 0.952)],
+				[0.40, Color(0.947, 0.943, 0.961)],
+				[0.60, Color(0.977, 0.968, 0.938)],
+				[0.80, Color(0.970, 0.965, 0.981)],
+				[1.00, Color(0.963, 0.989, 0.994)],
 			],
 		},
 		# Barrel roof tiles: rounded cells with a gritty clay surface. Rain-polished
@@ -373,8 +382,15 @@ func _write_fine() -> void:
 
 	var albedo := _base_texture()
 	albedo.color_ramp = _fine_ramp()
-	albedo.noise = _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.032, 3, 0.55, 2.0, 8821)
+	albedo.noise = _fine_noise()
 	_save(albedo, "detail_fine_albedo.tres")
+
+
+## Factored out of _write_fine() only so _report() can measure the ramp over the
+## same field the map is written from. Two copies of a seed is how two copies
+## drift apart.
+func _fine_noise() -> FastNoiseLite:
+	return _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.032, 3, 0.55, 2.0, 8821)
 
 
 ## Greyscale, biased high so the average surface keeps most of its authored value,
@@ -383,11 +399,14 @@ func _write_fine() -> void:
 func _fine_ramp() -> Gradient:
 	var g := Gradient.new()
 	g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_LINEAR
-	g.offsets = PackedFloat32Array([0.0, 0.40, 1.0])
+	g.offsets = PackedFloat32Array([0.0, 0.20, 0.40, 0.60, 0.80, 1.0])
 	g.colors = PackedColorArray([
-		Color(0.68, 0.68, 0.68, FINE_BLEND),
-		Color(0.88, 0.88, 0.88, FINE_BLEND),
-		Color(1.00, 1.00, 1.00, FINE_BLEND),
+		Color(0.713, 0.644, 0.635, FINE_BLEND),
+		Color(0.702, 0.749, 0.753, FINE_BLEND),
+		Color(0.778, 0.790, 0.824, FINE_BLEND),
+		Color(0.881, 0.856, 0.824, FINE_BLEND),
+		Color(0.914, 0.910, 0.895, FINE_BLEND),
+		Color(0.930, 0.947, 0.986, FINE_BLEND),
 	])
 	return g
 
@@ -437,6 +456,116 @@ func _ramp(rough: Vector2, ao: Vector2) -> Gradient:
 		Color(rough.y, ao.y, 0.0, 1.0),
 	])
 	return g
+
+
+# --- Measurement ------------------------------------------------------------
+
+## Print, for every albedo map this script writes, the quantity Round 3 is judged
+## on: the per-channel correlation of the colour it actually delivers.
+##
+## WHY THIS EXISTS. Round 2 measured every stone surface in the game and found
+## channel-deviation correlations of 0.88-0.995 — cobbles rg 0.945 / rb 0.894,
+## granite 0.987 / 0.882, kerb 0.995 / 0.975, parapet 0.994 / 0.964, walkway
+## 0.995 / 0.952. A correlation that close to 1 is the signature of ONE flat
+## albedo multiplied by a grey mask: whatever the mask does, it does it to all
+## three channels at once, so the variation never becomes colour and the surface
+## never becomes matter. Real granite decorrelates — feldspar warm, quartz
+## near-neutral, biotite dark, lichen green — and that decorrelation is a large
+## part of why stone reads as stone.
+##
+## The trap this measures around: a NoiseTexture2D carries ONE scalar field, so
+## every channel is a function of the same t. If R(t), G(t) and B(t) are all
+## MONOTONE the correlation is ~1 however much hue swing the ramp carries — which
+## is exactly what the old ramps were, and exactly why "make the dark end cooler
+## and the bright end warmer" did not move the number. Only a ramp whose channels
+## REVERSE against each other decorrelates. That is not a trick: it is what a
+## mineral mixture is, because grain brightness and grain hue are independent.
+##
+## Rendering to find that out costs ~6 minutes a shot. This costs 400 ms, so the
+## ramps can be tuned against the real noise histogram instead of against a guess.
+##
+## The numbers are LINEAR and post-ramp, i.e. what actually multiplies ALBEDO —
+## the albedo sampler carries a source_color hint, so an sRGB stop is linearised
+## on read. Sampled through ToonFactory.sample_noise() so the frequency-scaling
+## rule that keeps the sample over the whole field has one implementation.
+const REPORT_SAMPLES := 192
+
+func _report(recipes: Array[Dictionary]) -> void:
+	print("")
+	print("-- delivered albedo, LINEAR, over the real noise histogram --")
+	print("   map          mean rgb              sd rgb            corr r-g  r-b   max chroma")
+	for recipe in recipes:
+		if not recipe.has("albedo_ramp"):
+			continue
+		var tex: NoiseTexture2D = _base_texture()
+		tex.noise = recipe.get("albedo_noise", recipe["noise"])
+		tex.color_ramp = _stops(recipe["albedo_ramp"], recipe.get("albedo_constant", false))
+		_measure(recipe["name"], tex, 1.0, 0.0)
+
+	# The shared fine layer is reported through its NET multiplier, 0.45 + 0.55*c,
+	# because that is what reaches ALBEDO once the detail pass has mixed it. Its
+	# three channel means must stay EQUAL: DETAIL_ALBEDO_GAIN is one scalar, so a
+	# fine layer whose channels average differently tints every material in the
+	# game and no per-channel gain divides it back out.
+	var fine := _base_texture()
+	fine.noise = _fine_noise()
+	fine.color_ramp = _fine_ramp()
+	_measure("fine(net)", fine, FINE_BLEND, 1.0 - FINE_BLEND)
+
+
+## Rasterise one albedo descriptor and report mean / sd / channel correlation of
+## `bias + scale * ramp(noise)`, all in linear.
+func _measure(label: String, tex: NoiseTexture2D, scale: float, bias: float) -> void:
+	var img := ToonFactory.sample_noise(tex, REPORT_SAMPLES)
+	if img == null:
+		print("   %-12s (no noise field)" % label)
+		return
+	var ramp: Gradient = tex.color_ramp
+	var n := 0
+	var s := [0.0, 0.0, 0.0]
+	var ss := [0.0, 0.0, 0.0]
+	var s_rg := 0.0
+	var s_rb := 0.0
+	var chroma := 0.0
+	for y in REPORT_SAMPLES:
+		for x in REPORT_SAMPLES:
+			var c := ramp.sample(img.get_pixel(x, y).r).srgb_to_linear()
+			var v := [bias + scale * c.r, bias + scale * c.g, bias + scale * c.b]
+			for ch in 3:
+				s[ch] += v[ch]
+				ss[ch] += v[ch] * v[ch]
+			s_rg += v[0] * v[1]
+			s_rb += v[0] * v[2]
+			chroma = maxf(chroma, maxf(v[0], maxf(v[1], v[2])) - minf(v[0], minf(v[1], v[2])))
+			n += 1
+	var fn := float(n)
+	var m := [s[0] / fn, s[1] / fn, s[2] / fn]
+	var sd: Array[float] = []
+	for ch in 3:
+		sd.append(sqrt(maxf(ss[ch] / fn - m[ch] * m[ch], 0.0)))
+	var rg: float = (s_rg / fn - m[0] * m[1]) / maxf(sd[0] * sd[1], 1e-9)
+	var rb: float = (s_rb / fn - m[0] * m[2]) / maxf(sd[0] * sd[2], 1e-9)
+	print("   %-12s %.4f %.4f %.4f   %.4f %.4f %.4f   %+.3f %+.3f   %.3f"
+			% [label, m[0], m[1], m[2], sd[0], sd[1], sd[2], rg, rb, chroma])
+
+	# Where t actually lands, which is where the stops have to be. An fBm field
+	# normalised to 0..1 is bell-shaped, not uniform: half its area sits inside
+	# roughly t = 0.4..0.6, so stops spaced evenly across 0..1 spend most of their
+	# range on texels that barely exist and deliver only the two or three stops in
+	# the middle. That is not hypothetical — it is why the first pass at the fine
+	# ramp measured r-b +0.858 with three hue reversals authored into it: the
+	# reversals were outside the window. Cellular RETURN_CELL_VALUE is the one
+	# field here that really is uniform, which is why the cobble ramp can space its
+	# six stones evenly and get six equal shares.
+	var ts := PackedFloat32Array()
+	for y in REPORT_SAMPLES:
+		for x in REPORT_SAMPLES:
+			ts.append(img.get_pixel(x, y).r)
+	ts.sort()
+	var q := "                deciles of t:"
+	for i in 11:
+		q += " %.2f" % ts[mini(int(float(i) / 10.0 * float(ts.size())), ts.size() - 1)]
+	print(q)
 
 
 func _save(tex: NoiseTexture2D, file_name: String) -> void:

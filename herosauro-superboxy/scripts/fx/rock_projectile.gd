@@ -81,6 +81,23 @@ func _ready() -> void:
 	contact_monitor = true
 	max_contacts_reported = 4
 	gravity_scale = 1.0
+	# NO AIR DRAG, and this is a correctness fix rather than a feel one.
+	#
+	# `launch()` solves an exact ballistic arc, and an exact solve is only exact
+	# if the body then flies ballistically. Godot's `physics/3d/default_linear_damp`
+	# is 0.1 and every RigidBody3D COMBINES with it unless it says otherwise, so
+	# every rock was quietly bleeding speed all the way down: measured by
+	# `_fx_probe`, a 28 m throw landed 1.41 m short of the crosshair the giant had
+	# already drawn on the deck, and a 20 m throw 0.75 m short. Both are inside the
+	# 1.6 m mark, which is exactly why nobody caught it — the tell was wrong in the
+	# direction that still looks nearly right.
+	#
+	# This is the same failure the arc solve already carries a note about (it used
+	# to hardcode g = 30 next to a body using the project's gravity). One constant
+	# was reconciled and the other was not. REPLACE rather than a smaller COMBINE
+	# value, so a change to the project default cannot reintroduce it.
+	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+	linear_damp = 0.0
 	can_sleep = true
 	_life = lifetime
 

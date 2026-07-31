@@ -103,6 +103,15 @@ class HeroStub:
 		return false
 
 
+## A piece of world geometry that has opted into the impact table by declaring
+## `fx_surface` as a NAME rather than as an enum value. Both spellings have to
+## work or the hook is a trap for whichever stream guesses the other one.
+class TaggedGeometry:
+	extends Node3D
+
+	var fx_surface: String = "terracotta"
+
+
 func _ready() -> void:
 	await get_tree().process_frame
 	await _run()
@@ -232,8 +241,14 @@ func _check_surface_resolution() -> void:
 	# either side importing the other's script.
 	var rock: Node = RockScene.instantiate()
 	_ok(ImpactFX.surface_of(rock, ToonFactory.Surface.FLAT) == ToonFactory.Surface.GRANITE,
-		"an `fx_surface` declaration wins over everything else (the thrown rock)")
+		"an `fx_surface` enum declaration wins over everything else (the thrown rock)")
 	rock.free()
+
+	var tagged := TaggedGeometry.new()
+	_ok(ImpactFX.surface_of(tagged) == ToonFactory.Surface.TERRACOTTA,
+		"...and so does an `fx_surface` written as a name, which is the other way a"
+			+ " stream will reach for it")
+	tagged.free()
 
 	# ...and the fallbacks, both directions.
 	var stone_giant := Node3D.new()
@@ -337,7 +352,7 @@ func _check_lifetimes_and_leaks() -> void:
 	var at_birth: Array[int] = []
 	for fx in made:
 		at_birth.append((fx as ImpactFX).emitter_count())
-	await _settle_idle(int(ImpactFX.FLASH_LIFE * 60.0) + 4)
+	await _advance(ImpactFX.FLASH_LIFE + 0.02)
 	var after_flash: Array[int] = []
 	for i in made.size():
 		var fx: ImpactFX = made[i]
@@ -352,7 +367,7 @@ func _check_lifetimes_and_leaks() -> void:
 	var longest: float = 0.0
 	for l in lives:
 		longest = maxf(longest, float(l))
-	await _settle_idle(int(longest * 60.0) + 20)
+	await _advance(longest + 0.3)
 
 	var alive := 0
 	for i in made.size():
@@ -404,11 +419,11 @@ func _check_determinism() -> void:
 	var first: Array[Transform3D] = []
 	for i in a.shard_count():
 		first.append(a.sample_shard(i, 0.42))
-	await _settle_idle(25)
+	await _advance(0.25)
 	var drift := 0.0
 	if is_instance_valid(a):
 		for i in a.shard_count():
-			drift = maxf(drift, first[i].origin.distance_to(a.sample_shard(i, 0.42)))
+			drift = maxf(drift, first[i].origin.distance_to(a.sample_shard(i, 0.42).origin))
 	print("  -- the same shard at the same age, 25 frames later: %.6f m of drift" % drift)
 	_ok(drift < 1.0e-5,
 		"shard state is a pure function of age, not of the clock (%.6f m)" % drift)
@@ -436,24 +451,33 @@ func _check_shockwave() -> void:
 
 	var worst_gap := 0.0
 	var reached := 0.0
-	var frames := 0
-	while is_instance_valid(wave) and frames < int(2.0 * 60.0):
+	var puffs := 0
+	var elapsed := 0.0
+	var samples := 0
+	# Time, not frames: a headless idle tick is whatever the machine can manage,
+	# so a frame count means nothing here. The sweep is 0.5 s of growth plus the
+	# wave's own tail, and two seconds is comfortably past both.
+	while is_instance_valid(wave) and elapsed < 2.0:
 		await get_tree().process_frame
-		frames += 1
+		elapsed += get_process_delta_time()
+		samples += 1
 		if not is_instance_valid(wave):
 			break
+		puffs = maxi(puffs, wave.wall_instances())
 		reached = maxf(reached, wave.wave_radius())
 		if wave.ring_radius() > 0.0:
 			worst_gap = maxf(worst_gap, absf(wave.ring_radius() - wave.wave_radius()))
 
-	print("  -- wave: reached %.2f m of a promised %.2f m, ring vs collider worst gap %.4f m, %d puffs, gone after %.2f s"
-		% [reached, 12.0, worst_gap, ImpactFX.MAX_DUST, float(frames) / 60.0])
+	print("  -- wave: reached %.2f m of a promised %.2f m over %d samples, ring vs collider worst gap %.4f m, %d rim puffs, gone after %.2f s"
+		% [reached, 12.0, samples, worst_gap, puffs, elapsed])
 	_ok(reached >= 12.0 - 0.05,
 		"the wave actually reaches the radius it promises (%.2f / 12.00 m)" % reached)
 	_ok(worst_gap <= WAVE_TOLERANCE,
 		"what you can see and what can hit you never disagree by more than %.0f cm (%.1f cm)"
 			% [WAVE_TOLERANCE * 100.0, worst_gap * 100.0])
-	_ok(not is_instance_valid(wave), "the wave frees itself (%.2f s)" % (float(frames) / 60.0))
+	_ok(not is_instance_valid(wave), "the wave frees itself (%.2f s)" % elapsed)
+	_ok(puffs > 0 and puffs <= ImpactFX.MAX_DUST * 2,
+		"the rim dust wall is one bounded MultiMesh (%d puffs, one draw call)" % puffs)
 
 	# The direction bug, measured. The hero is on the -X side of the blast, so an
 	# outward knockback has a NEGATIVE x; the old behaviour gave a positive one.
@@ -581,16 +605,23 @@ func _check_across_a_fight() -> void:
 	_ok(peak_draws <= BUDGET_DRAW_CALLS,
 		"...and so did the draw-call ceiling (%d / %d)" % [peak_draws, BUDGET_DRAW_CALLS])
 
-	# ...and then it all goes away. Two seconds is longer than the longest thing
-	# the fx stream draws (SMASH_LIFE 1.35 s), so anything still alive after it is
-	# leaking, not lingering.
-	GameManager.change_state(GameManager.State.PAUSED)
-	await _settle_idle(int(2.5 * 60.0))
+	# ...and then the run ends and it all goes away.
+	#
+	# Ending the run rather than pausing it, deliberately. A paused tree stops
+	# `_process`, so every burst would freeze mid-flight and the check would pass
+	# for the wrong reason. Going back to the menu tears the world down and frees
+	# the bursts through their PARENT, which is the case the live counter can
+	# actually get wrong: it is decremented on PREDELETE, and a counter that only
+	# came back when a burst expired on its own would drift up by one for every FX
+	# still in the air when a fight ended.
+	var live_before_teardown := ImpactFX.live_count()
+	GameManager.go_to_menu()
+	await _advance(0.5)
 	var tree_bursts := _bursts().size()
-	print("  -- 2.5 s after the last impact: %d live by the counter, %d actually in the tree"
-		% [ImpactFX.live_count(), tree_bursts])
+	print("  -- run ended with %d bursts still in the air: %d live by the counter afterwards, %d actually in the tree"
+		% [live_before_teardown, ImpactFX.live_count(), tree_bursts])
 	_ok(ImpactFX.live_count() == 0 and tree_bursts == 0,
-		"every burst the fight made is gone (%d counted, %d in tree)"
+		"the run ending takes every burst with it and gives the budget back (%d counted, %d in tree)"
 			% [ImpactFX.live_count(), tree_bursts])
 
 
@@ -631,7 +662,7 @@ func _drop_root() -> void:
 ## Run out everything currently alive, so one check's leftovers cannot eat the
 ## next check's budget.
 func _drain() -> void:
-	await _settle_idle(int(ImpactFX.SMASH_LIFE * 60.0) + 20)
+	await _advance(ImpactFX.SMASH_LIFE + 0.3)
 
 
 func _settle(frames: int) -> void:
@@ -639,11 +670,23 @@ func _settle(frames: int) -> void:
 		await get_tree().physics_frame
 
 
-## FX animate on the idle tick (like BossTelegraph), so anything measuring their
-## lifetime has to advance idle frames, not physics ones.
-func _settle_idle(frames: int) -> void:
-	for i in frames:
+## Advance `seconds` of SIMULATED time on the idle tick.
+##
+## FX animate on `_process` (like BossTelegraph), so their lifetimes have to be
+## measured in idle frames — and a headless idle frame is however long the
+## machine took, which can be a tenth of a millisecond or, right after a 900k
+## triangle scene loads, most of a second. Counting frames here would measure the
+## container rather than the code. Accumulating the same delta the FX themselves
+## accumulate is the only wait that means the same thing on every machine.
+func _advance(seconds: float) -> void:
+	var t := 0.0
+	# A ceiling on the loop, not on the wait: if the idle tick ever stopped
+	# advancing, this must fail the check rather than hang the build.
+	var guard := 0
+	while t < seconds and guard < 400000:
 		await get_tree().process_frame
+		t += get_process_delta_time()
+		guard += 1
 
 
 func _ok(cond: bool, label: String) -> void:

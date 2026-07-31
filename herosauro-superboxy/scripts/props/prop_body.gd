@@ -131,6 +131,25 @@ const JOLT_COOLDOWN := 0.18
 ## re-hit is a machine gun.
 const IMPACT_SOUND_COOLDOWN := 0.28
 
+# --- Settling ----------------------------------------------------------------
+# Measured, not assumed: dropped onto the deck and left completely alone, the
+# fourteen props were still awake after six seconds at 0.10 m/s and 0.26 rad/s.
+# That is a solver island per prop for the whole fight, and on screen it is a
+# barrel very slightly vibrating on flat granite — the RUBRIC's "a still frame is
+# a dead frame" does not mean this.
+#
+# Jolt's own sleep thresholds are tuned for a general-purpose scene and these
+# props are heavy, high-friction and resting on a dead-flat plane, so rather than
+# retune a global that every other body in the game shares, a prop decides for
+# itself when it has arrived. Same pattern DebrisPiece uses, one size up.
+
+## Speed and spin under which a prop is considered to have arrived.
+const SETTLE_SPEED := 0.12
+const SETTLE_SPIN := 0.40
+## How long it has to be that quiet for. One frame of slowness is the apex of a
+## bounce, not a rest; half a second is not.
+const SETTLE_TIME := 0.5
+
 var _kicker: Area3D = null
 var _touching: Array[Node3D] = []
 var _variant: int = 0
@@ -141,6 +160,7 @@ var _sound_cooldown: float = 0.0
 var _prev_vel: Vector3 = Vector3.ZERO
 var _awake_for: float = 0.0
 var _armed: bool = false
+var _slow_for: float = 0.0
 
 
 func _ready() -> void:
@@ -149,7 +169,15 @@ func _ready() -> void:
 	collision_mask = PhysicsLayers.WORLD | PhysicsLayers.PROPS | PhysicsLayers.PLAYERS
 
 	_seed_variant()
+	# Geometry FIRST, at the shape's authored size, and only then the collider is
+	# resized. PropMeshKit caches on its arguments, so building at each prop's own
+	# jittered size would mint one unique ArrayMesh per prop and give the renderer
+	# nothing to share; built at the nominal size there are three body meshes and
+	# two trim meshes in the whole arena, and the instance's size lives on the
+	# MeshInstance3D's transform where it is free.
+	_build_body()
 	_apply_size_variation()
+	_apply_visual_scale(_size_scale)
 
 	mass = prop_mass * _size_scale * _size_scale * _size_scale
 	var pm := PhysicsMaterial.new()
@@ -165,7 +193,6 @@ func _ready() -> void:
 	linear_damp = 0.08
 	angular_damp = 0.55
 
-	_build_body()
 	_apply_materials()
 	if kick_strength > 0.0:
 		_build_kicker()
@@ -186,11 +213,13 @@ func _physics_process(delta: float) -> void:
 		# Whatever it was doing, it has arrived. Nothing to compare against next
 		# time it wakes, and a settled prop is by definition armed.
 		_prev_vel = Vector3.ZERO
+		_slow_for = 0.0
 		_armed = true
 	else:
 		_awake_for += delta
 		if _awake_for >= ARM_DELAY:
 			_armed = true
+		_check_settled(delta)
 		var vel := linear_velocity
 		# _physics_process runs before the step is integrated, so linear_velocity
 		# is the result of the PREVIOUS step: the frame after hitting something,
@@ -286,13 +315,21 @@ func _impact_response(strength: float, at: Vector3, impulse: Vector3) -> void:
 	var into := impulse.normalized()
 	if into.length() < 0.5:
 		into = Vector3.DOWN
+	# The spark is ungated: it is the point-of-contact FX and suppressing it is
+	# what makes a hit feel dead. It costs nothing when there is nothing to spend,
+	# because ImpactFX hands back null past its own budget.
 	ImpactFX.spark(self, at, into, int(surface_kind()), power, _fx_seed())
+	# The shake and the sound ARE gated, on the same cooldown and for the same
+	# reason: the giant's prop sweep re-hits every 0.22 s for as long as a barrel
+	# is under his feet, and five barrels under him is twenty-three shake requests
+	# a second. That is not weight, it is a rumble with no edges on it.
+	if _sound_cooldown > 0.0:
+		return
+	_sound_cooldown = IMPACT_SOUND_COOLDOWN
 	# Small and proportional. A hero's own swing already asks for 0.16, so a prop
 	# adding much on top of it would double-count the same blow.
 	GameManager.request_shake(0.05 + 0.06 * power, 0.10)
-	if _sound_cooldown <= 0.0:
-		_sound_cooldown = IMPACT_SOUND_COOLDOWN
-		play_surface_hit()
+	play_surface_hit()
 
 
 ## Legs 1-3 for a prop ARRIVING: dust off the deck, a thump, a whisper of shake.
@@ -309,6 +346,27 @@ func _land_response(dv: float, at: Vector3) -> void:
 	ImpactFX.ground(self, ground, int(DECK_SURFACE), extent() * 2.4, power, _fx_seed())
 	AudioManager.play_land()
 	GameManager.request_shake(0.04 + 0.05 * power, 0.10)
+
+
+## Put the prop to sleep once it has genuinely stopped. See the SETTLE_ block
+## above for the measurement that made this necessary.
+##
+## Never while something is standing against it: the kicker holds a reference to
+## whoever is touching, and apply_force() on a sleeping body does nothing at all,
+## so a prop that slept under a hero's shoulder could never be pushed again.
+func _check_settled(delta: float) -> void:
+	if not _touching.is_empty():
+		_slow_for = 0.0
+		return
+	if linear_velocity.length() < SETTLE_SPEED and angular_velocity.length() < SETTLE_SPIN:
+		_slow_for += delta
+		if _slow_for >= SETTLE_TIME:
+			_slow_for = 0.0
+			linear_velocity = Vector3.ZERO
+			angular_velocity = Vector3.ZERO
+			sleeping = true
+	else:
+		_slow_for = 0.0
 
 
 ## A deterministic, non-zero seed for one FX burst. Drawn from this prop's own
@@ -607,11 +665,25 @@ func _has_trim() -> bool:
 	return false
 
 
+## Uniform scale on every drawn part. Used for the per-instance size variation
+## and, in BreakableProp, for the squash pulse and the crumble.
+func _apply_visual_scale(s: float) -> void:
+	for mi in _meshes(self):
+		mi.scale = Vector3.ONE * s
+
+
 func _apply_materials() -> void:
 	var body_mat := _surface_material()
-	var trim_mat := trim_material()
+	# Built lazily: a masonry block has no trim, and minting its iron material
+	# anyway would put four unused entries in ToonFactory's cache for nothing.
+	var trim_mat: StandardMaterial3D = null
 	for mi in _meshes(self):
-		mi.material_override = trim_mat if mi.is_in_group("prop_trim") else body_mat
+		if mi.is_in_group("prop_trim"):
+			if trim_mat == null:
+				trim_mat = trim_material()
+			mi.material_override = trim_mat
+		else:
+			mi.material_override = body_mat
 
 
 func _surface_material() -> StandardMaterial3D:

@@ -20,7 +20,6 @@ toughness = 3
 shatter_impulse = 36.0
 break_delta_v = 9.0
 piece_count = 9
-piece_scale = 0.3
 chip_score = 5
 break_score = 35
 

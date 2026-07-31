@@ -381,7 +381,19 @@ static func surface_of(node: Node, fallback: int = ToonFactory.Surface.FLAT) -> 
 	if node == null or not is_instance_valid(node):
 		return fallback
 	if "fx_surface" in node:
-		return int(node.get("fx_surface"))
+		# Accept either form of the declaration. A stream that writes
+		# `@export var fx_surface := ToonFactory.Surface.WOOD` and one that writes
+		# `@export var fx_surface := "wood"` both mean the same thing, and a hook
+		# that silently returned FLAT for the second would be worse than no hook.
+		var declared: Variant = node.get("fx_surface")
+		if typeof(declared) == TYPE_STRING or typeof(declared) == TYPE_STRING_NAME:
+			return surface_named(str(declared), fallback)
+		var as_int := int(declared)
+		if as_int >= 0 and as_int < ToonFactory.Surface.size():
+			return as_int
+		push_error("ImpactFX: `fx_surface` on %s is not a ToonFactory.Surface (%s)"
+			% [node.name, str(declared)])
+		return fallback
 	if "surface" in node:
 		var named := surface_named(str(node.get("surface")), -1)
 		if named >= 0:
@@ -466,11 +478,13 @@ static func ground(from: Node, at: Vector3, surface: int, radius: float = 2.0,
 	# The burst's origin IS the contact plane, so the local floor is zero.
 	fx._floor_y = 0.0
 	fx.life = GROUND_LIFE
+	# The ring first, because it is what sets the burst's reach and therefore the
+	# explicit bounding box the MultiMeshes below are given.
+	fx._build_ring(row, radius)
 	# 0.15 puts most of the spray between 40 and 80 degrees off the deck, which is
 	# where debris off a real impact goes.
 	fx._build_shards(row, surface, Vector3.UP, 0.15, power, 1.0, TRIM_NONE)
 	fx._build_dust(row, radius * 0.35, power, NO_LIQUID)
-	fx._build_ring(row, radius)
 	fx._finish()
 	return fx
 
@@ -1097,7 +1111,10 @@ func _multimesh(node_name: String, mesh: Mesh, material: Material, count: int,
 	# MultiMesh's bounds from its instance buffer and ours move every frame. A
 	# stale bound is a burst that vanishes the instant the camera turns slightly
 	# away from where it started — a bug that only ever shows up in a capture.
-	var reach: float = maxf(6.0, _ring_radius * 1.6)
+	# 10 m floor rather than something tight: the fastest small chip in the table
+	# (iron, 11 m/s) can cover eight metres before gravity and the shrink-out take
+	# it, and an over-generous bound only ever costs a cull test that says yes.
+	var reach: float = maxf(10.0, _ring_radius * 1.6)
 	mm.custom_aabb = AABB(Vector3.ONE * -reach, Vector3.ONE * reach * 2.0)
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = node_name
