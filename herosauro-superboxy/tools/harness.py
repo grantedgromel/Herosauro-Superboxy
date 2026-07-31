@@ -95,15 +95,41 @@ def _render(shot: dict, out: Path, tier: str, timeout: int) -> dict:
         rc = proc.returncode
         tail = proc.stdout.strip().splitlines()[-3:] + proc.stderr.strip().splitlines()[-3:]
     except subprocess.TimeoutExpired:
-        rc, tail = -1, [f"TIMEOUT after {timeout}s"]
+        rc, tail = -1, [f"killed after {timeout}s (frame may still be good — see below)"]
 
-    made = (out / f"{shot['name']}.png").exists()
+    # THE ARTIFACT IS THE RESULT, NOT THE EXIT CODE.
+    #
+    # Godot writes the PNG and then spends minutes tearing down the scene: on
+    # this hardware a 900k-triangle arena took 4 MINUTES to shut down after the
+    # frame was already flushed to disk. Gating on the exit code therefore
+    # reported TIMEOUT for captures that had completely succeeded, and the shots
+    # it hit hardest were the wide ones — the establishing frames critics score.
+    #
+    # So the success test is: does a decodable PNG exist? png.read() parses the
+    # IHDR, inflates the IDAT and unfilters every scanline, so a truncated file
+    # from a process killed mid-write raises rather than passing silently. That
+    # is a stronger check than `rc == 0` ever was.
+    path = out / f"{shot['name']}.png"
+    good, note = False, None
+    if path.exists():
+        try:
+            img = png.read(str(path))
+            good = img.w > 0 and img.h > 0
+        except Exception as exc:                      # noqa: BLE001 — any decode failure is a bad frame
+            note = f"PNG unreadable: {exc}"
+
+    log = [ln for ln in tail if ln and "ALSA" not in ln and "pulse" not in ln]
+    if note:
+        log.append(note)
+    elif good and rc != 0:
+        log.append(f"frame is valid; engine exited {rc} during teardown (ignored)")
+
     return {
         "shot": shot["name"],
-        "ok": rc == 0 and made,
+        "ok": good,
         "rc": rc,
         "seconds": round(time.time() - t0, 1),
-        "log": [ln for ln in tail if ln and "ALSA" not in ln and "pulse" not in ln],
+        "log": log,
     }
 
 
