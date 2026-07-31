@@ -170,19 +170,21 @@ const DEFAULT_ROUGHNESS := 0.80
 ## reads as an object that cannot take a shadow. Clamped by scaling the whole colour
 ## rather than per channel, so nothing shifts hue on the way in.
 ##
-## A HAZARD WORTH KNOWING, because Round 3 walked into it. The ceiling is applied to
-## albedo_color, i.e. AFTER both texture gains, and albedo_color is the value the
-## brightest texel reaches rather than the surface's mean. So the effective ceiling on
-## a call site's authored MEAN reflectance is 0.90 divided by both gains — currently
-## about 0.616 for granite — and it MOVES when an albedo map is re-authored with a
-## different mean. Round 3's granite ramp dropped the map's mean 0.863 -> 0.774, which
-## raised the gain 1.159 -> 1.293 and pulled three call sites over the line
-## (TRIM_WHITE 0.93, GRANITE_DRESS 0.69, DRESSED 0.63), darkening their rendered mean
-## by 10%, 10% and 2%. All three are authored above what granite physically reflects,
-## so the clamp is arguably doing its job — but it is doing it as a side effect of a
-## texture edit, which is not how a physical guard should behave. Left as-is and
-## reported rather than changed: moving the clamp to the authored value would brighten
-## those three instead, and either way it is another stream's palette.
+## THIS APPLIES TO THE AUTHORED COLOUR, before the texture gains — see
+## _physical_albedo() for the full reasoning. It used to be applied after them, and
+## Round 3 walked straight into the consequence: the effective ceiling on a call
+## site's authored reflectance was 0.90 divided by both gains, about 0.616 for
+## granite, and it MOVED whenever an albedo map was re-authored. Re-authoring the
+## granite ramp for hue dropped the map's mean 0.863 -> 0.774, raised the gain
+## 1.159 -> 1.293, and silently darkened TRIM_WHITE, GRANITE_DRESS and DRESSED by
+## 10%, 10% and 2% — three world-stream call sites that had nothing to do with the
+## texture edit that moved them.
+##
+## A guard that fires because somebody changed a noise ramp is not measuring physics.
+## Against the authored value it means exactly what it says, it is stable under
+## texture work, and it lands on the stream that authored the colour. Those three
+## call sites are still above what granite physically reflects and are still clamped
+## — but now for the reason stated on the tin.
 const ALBEDO_CEILING := 0.90
 const ALBEDO_FLOOR := 0.02
 
@@ -526,17 +528,34 @@ static func _add_fine_detail(m: StandardMaterial3D) -> void:
 ## pre-multiply out both texture layers' means so the authored colour still means what
 ## it says once they have multiplied it.
 ##
-## The CEILING is applied last and scaled as a whole colour, never clamped per
-## channel: clamping (0.93, 0.91, 0.85) channel-wise pulls red down and leaves blue
-## alone, which desaturates and cools the surface. Scaling keeps the hue and only
-## moves the value, which is what "this wall is a bit too bright to be real" actually
-## means.
+## The CEILING and FLOOR are applied to the AUTHORED colour, BEFORE the texture
+## gains — because the authored colour is the physical claim being made ("this
+## wall reflects 63% of the light that hits it") and the gains are a correction
+## that makes the surface's rendered MEAN come out at exactly that. The value
+## after the gains is an intermediate: it is what the shader multiplies by a
+## texture whose mean divides it straight back out.
+##
+## Clamping the intermediate, which is what this used to do, makes the effective
+## ceiling on a call site 0.90 divided by both gains — about 0.616 for granite —
+## and, far worse, MOVES IT WHENEVER AN ALBEDO MAP IS RE-AUTHORED. Round 3
+## re-authored the granite map for hue, its gain went 1.159 to 1.293, and three
+## world-stream call sites silently darkened by 2 to 10% as a side effect of a
+## texture edit they had nothing to do with. A physical guard that fires because
+## somebody changed a noise ramp is not measuring physics.
+##
+## Applied to the authored value the ceiling means what it says, is stable
+## against texture work, and lands on the stream that actually authored the
+## colour. Note the returned colour may now exceed 1.0 per channel by design:
+## 0.90 x 1.13 x 1.293 is 1.315, and the texture it multiplies has a mean of
+## 1/1.315, so the surface still presents 0.90. Godot does not clamp
+## albedo_color, and the product is what reaches ALBEDO.
+##
+## The ceiling scales the colour as a whole and is never clamped per channel:
+## clamping (0.93, 0.91, 0.85) channel-wise pulls red down and leaves blue alone,
+## which desaturates and cools the surface. Scaling keeps the hue and moves only
+## the value, which is what "this wall is a bit too bright to be real" means.
 static func _physical_albedo(color: Color, surface: Surface, has_fine_detail: bool) -> Color:
 	var c := color
-	if has_fine_detail:
-		c = Color(c.r * DETAIL_ALBEDO_GAIN, c.g * DETAIL_ALBEDO_GAIN, c.b * DETAIL_ALBEDO_GAIN)
-	var map := _albedo_map_gain(surface)
-	c = Color(c.r * map.r, c.g * map.g, c.b * map.b)
 	var peak := maxf(c.r, maxf(c.g, c.b))
 	if peak > ALBEDO_CEILING and peak > 0.0:
 		c *= ALBEDO_CEILING / peak
@@ -547,7 +566,11 @@ static func _physical_albedo(color: Color, surface: Surface, has_fine_detail: bo
 	var dim := minf(c.r, minf(c.g, c.b))
 	if dim < ALBEDO_FLOOR:
 		c = Color(maxf(c.r, ALBEDO_FLOOR), maxf(c.g, ALBEDO_FLOOR), maxf(c.b, ALBEDO_FLOOR))
-	return c
+
+	if has_fine_detail:
+		c = Color(c.r * DETAIL_ALBEDO_GAIN, c.g * DETAIL_ALBEDO_GAIN, c.b * DETAIL_ALBEDO_GAIN)
+	var map := _albedo_map_gain(surface)
+	return Color(c.r * map.r, c.g * map.g, c.b * map.b)
 
 
 ## The reciprocal of a surface albedo map's own mean, per channel — what

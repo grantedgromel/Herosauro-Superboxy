@@ -1230,8 +1230,14 @@ static func _emit_quoins(batch: Batch, front: Transform3D, spec: Spec, wall_h: f
 ## The fix is to stop asking. A building gets its returns and its rear dressed
 ## unless it is a silhouette (Detail.LOW), and the cost of dressing a party wall
 ## that a neighbour happens to hide is triangles the neighbour then occludes.
-## `spec.side` survives as "which flank is the OPEN one" — it earns a downpipe and
-## a second window per floor — but it is now a refinement, not a gate.
+##
+## `spec.side` survives, but its DEFAULT now means "exposure unknown" rather than
+## "neither side is exposed", and unknown is treated as exposed. That is the only
+## honest reading: a caller that never sets it has not told us the flanks are
+## hidden, it has told us nothing, and the old default silently chose the answer
+## that skips the work. What `side` still buys when a caller does set it is the
+## one thing that would be wrong on a party wall — a service door, which cannot
+## open into the house next door.
 ##
 ## THE RELIEF IS THE POINT, not the count. There is no punched skin here: a return
 ## has no separate outer plane, so an opening cannot be a hole. It is built the
@@ -1242,11 +1248,15 @@ static func _emit_quoins(batch: Batch, front: Transform3D, spec: Spec, wall_h: f
 static func _emit_returns(batch: Batch, base: Transform3D, spec: Spec,
 		rng: RandomNumberGenerator, lines: PackedFloat32Array, wall_h: float) -> void:
 	var open_side := signf(float(spec.side))
+	var unknown := spec.side == 0
 	# Two flanks and the rear. `half` is the face's own half-width; a flank is
-	# `depth` across and the rear is `width` across.
+	# `depth` across and the rear is `width` across. `door` is the end-of-row case
+	# the caller has actually declared.
 	var faces := [
-		{"yaw": PI * 0.5, "dist": spec.width * 0.5, "half": spec.depth * 0.5, "open": open_side > 0.0},
-		{"yaw": -PI * 0.5, "dist": spec.width * 0.5, "half": spec.depth * 0.5, "open": open_side < 0.0},
+		{"yaw": PI * 0.5, "dist": spec.width * 0.5, "half": spec.depth * 0.5,
+			"open": unknown or open_side > 0.0, "door": open_side > 0.0},
+		{"yaw": -PI * 0.5, "dist": spec.width * 0.5, "half": spec.depth * 0.5,
+			"open": unknown or open_side < 0.0, "door": open_side < 0.0},
 	]
 	# The rear only on the near buildings. It faces into the hill, so the only
 	# vantage that ever sees one is a camera standing outboard of its own bank —
@@ -1254,20 +1264,20 @@ static func _emit_returns(batch: Batch, base: Transform3D, spec: Spec,
 	# at all, and at MEDIUM those buildings are 80 m further away again.
 	if spec.detail == Detail.FULL:
 		faces.append({"yaw": PI, "dist": spec.depth * 0.5, "half": spec.width * 0.5,
-				"open": false})
+				"open": false, "door": false})
 	for spot in faces:
 		var yaw: float = spot["yaw"]
 		var face := base * Transform3D(Basis(Vector3.UP, yaw),
 				Vector3(sin(yaw) * float(spot["dist"]), 0.0, cos(yaw) * float(spot["dist"])))
 		_emit_return_face(batch, face, spec, rng, lines, wall_h,
-				float(spot["half"]), bool(spot["open"]))
+				float(spot["half"]), bool(spot["open"]), bool(spot["door"]))
 
 
 ## One return: its openings, its downpipe and the moulding that ties it to the
 ## front.
 static func _emit_return_face(batch: Batch, face: Transform3D, spec: Spec,
 		rng: RandomNumberGenerator, lines: PackedFloat32Array, wall_h: float,
-		half: float, open: bool) -> void:
+		half: float, open: bool, door: bool) -> void:
 	# A 3 m return takes one window per floor; a 9 m one takes two. Never three —
 	# these are the backs and sides of 4 m houses, and a regular grid of three is
 	# a curtain wall, not a Ribeira party wall.
@@ -1284,12 +1294,13 @@ static func _emit_return_face(batch: Batch, face: Transform3D, spec: Spec,
 			# what stops the returns acquiring a grid of their own. The open flank
 			# keeps more of them, because it is the one somebody actually lives
 			# behind.
-			if rng.randf() < (0.16 if open else 0.34):
+			if rng.randf() < (0.22 if open else 0.34):
 				continue
 			_emit_return_window(batch, face, spec, rng, cx, sill_y, open_w, open_h)
 
-	# Ground floor: a service door on the open flank, a blind arch on the rest.
-	if spec.detail == Detail.FULL and open:
+	# Ground floor: a service door, but only where the caller has said this flank
+	# really is the end of the row. A door into a party wall is worse than none.
+	if spec.detail == Detail.FULL and door:
 		var door_h := minf(lines[1] * 0.62, 2.2)
 		var timber_b := batch.baker(Batch.timber())
 		var trim_b := batch.baker(Batch.trim())
