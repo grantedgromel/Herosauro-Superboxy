@@ -956,8 +956,18 @@ static func headland_shore_x(side: float, z: float) -> float:
 ## a 900 m plane is the z-fighting hairline that reads as "a hard cut".
 static func _headland_y(side: float, ax: float, z: float, land: float) -> float:
 	var shore := absf(headland_shore_x(side, z))
-	var rock := maxf(WATER_Y + (ax - shore) * HEADLAND_SLOPE, WALL_FOOT_Y + 0.3)
 	var t := clampf((z - BANK_Z_NEAR) / (HEADLAND_Z - BANK_Z_NEAR), 0.0, 1.0)
+	# Two crossing ridges over the ramp, faded out at both seams by sin(t * PI).
+	# Without them the point is a ruled surface between two curves, which renders
+	# as exactly what a critic called "a pale tan low-poly terrain sheet" — the
+	# facets were only half the complaint, the other half was that a bare ruled
+	# ramp has no landform in it at any subdivision. The ridges also make the
+	# WATERLINE ragged, because they move the ground either side of WATER_Y near
+	# the shore, and a headland with coves in it is the point of having one.
+	var key := float(_land_key(side))
+	var ridge := sin(z * 0.34 + key) * 0.62 + sin(ax * 0.26 + key * 1.7) * 0.44
+	var rock := maxf(WATER_Y + (ax - shore) * HEADLAND_SLOPE + ridge * 1.5 * sin(t * PI),
+			WALL_FOOT_Y + 0.3)
 	# Blend in over the first thirty per cent so the quay's last coping does not
 	# step. Past that the point is entirely its own shape.
 	return lerpf(land, minf(land, rock), smoothstep(0.0, 0.30, t))
@@ -1030,6 +1040,30 @@ static func _build_headlands(near: TerrainBatch, seed: int) -> void:
 			RK.boulder(b, Vector3(headland_shore_x(side, z) - side * (2.4 + float(k) * 2.2),
 					WATER_Y + 0.35, z),
 					1.5 + MK.hash01(seed, k) * 1.3, seed + k * 5)
+
+		# Outcrops and scrub ON the point. Everything else on both banks is dressed
+		# — terraces, walls, upland, bluff — and the headland was the one surface
+		# left bare, which is why it read as a sheet rather than as ground however
+		# much it was subdivided. Placed between the waterline and the back so a
+		# clump can never end up floating over the river.
+		var key := _land_key(side) + 131
+		for k in 14:
+			var z := lerpf(BANK_Z_NEAR + 2.0, HEADLAND_Z - 3.0, MK.hash01(key, k))
+			var shore := absf(headland_shore_x(side, z))
+			var back := absf(front_x(side, _levels(side).size(), z)) + HEADLAND_OVERRUN
+			if back - shore < 4.0:
+				continue
+			var ax := lerpf(shore + 2.0, back - 1.5, MK.hash01(key + 3, k))
+			var x := side * ax
+			var y := ground_height(x, z)
+			if y < WATER_Y + 0.4:
+				continue
+			if MK.hash01(key + 5, k) < 0.45:
+				RK.boulder(b, Vector3(x, y + 0.35, z),
+						1.1 + MK.hash01(key + 7, k) * 1.8, key + k * 17)
+			else:
+				FK.scrub(near.leaf_dark(), Vector3(x, y, z),
+						0.9 + MK.hash01(key + 9, k) * 1.1, key + k * 23)
 
 
 # --- Planting ----------------------------------------------------------------

@@ -220,8 +220,13 @@ class Spec extends RefCounted:
 	## Washing strung across the front. Waterfront rows only — it is a Ribeira
 	## thing, not a general Porto one.
 	var laundry := false
-	## Which return elevation is exposed to the camera: -1, 0 (neither, the
-	## normal terrace case) or +1. Side detail is deliberately cheap.
+	## Which return elevation is the exposed END of a row: -1, +1, or 0 for
+	## "not stated". It no longer decides whether the returns get dressed — every
+	## building dresses both flanks and, at FULL, its rear; see _emit_returns().
+	## All it still buys is the one thing that would be wrong on a party wall,
+	## which is a service door. 0 is read as "the caller has not told us", not as
+	## "neither side is exposed", because the caller that never sets it is the
+	## one whose buildings a critic scored as blank prisms.
 	var side := 0
 
 	## The bottom of each floor, plus the wall top as the last entry.

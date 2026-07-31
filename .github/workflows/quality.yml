@@ -168,17 +168,24 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: python3 tools/harness.py check --timeout 900
 
-      # playtest.tscn exits non-zero on a real failure, so gate on the exit code.
-      # Grepping its output for warnings was the old way and it was fragile in
-      # both directions: it missed failures that did not use the magic word, and
-      # it failed the build on diagnostics that were merely informational.
+      # HEADLESS, and that is what makes this a usable gate rather than a
+      # timeout. What the playthrough proves — the boss takes damage, both
+      # heroes move, nobody falls through the deck — is simulation, and physics
+      # and scripts run whether or not a frame is drawn. Rendering it on
+      # software Vulkan cost 4.8 SECONDS PER FRAME here: the first 60-frame beat
+      # took four minutes fifty and the full route needed about eighty minutes
+      # against a fifteen-minute timeout, which is the exit 124 this replaces.
+      # Headless the same route is ten seconds.
+      #
+      # It exits non-zero on a real failure, so gate on the exit code. Grepping
+      # the output for warnings was the older way and was fragile in both
+      # directions: it missed failures that did not use the magic word, and
+      # failed the build on diagnostics that were purely informational.
       - name: Scripted playthrough
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -o pipefail
-          VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
-          timeout 900 xvfb-run -a -s "-screen 0 640x360x24" \
-            godot --path . tools/playtest.tscn --rendering-driver vulkan \
+          timeout 600 godot --headless --path . tools/playtest.tscn \
             --fixed-fps 60 -- --out=/tmp/playtest 2>&1 | tee /tmp/playtest.log
           rc=$?
           grep -E "^playtest: (boss|hero|travelled|FAIL|PASS|FAILED)" /tmp/playtest.log || true

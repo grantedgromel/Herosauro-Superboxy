@@ -19,9 +19,21 @@ extends Node
 ## every attack does in fact land — the worst failure mode a gate has, because it
 ## trains people to ignore it.
 ##
+## RUNS HEADLESS BY DEFAULT, and that is what makes it usable as a gate. What this
+## harness proves — that the boss takes damage, that both heroes move, that nobody
+## falls through the deck — is SIMULATION, not rendering. Rendering it on software
+## Vulkan cost 4.8 seconds per frame in CI: the first 60-frame beat took four
+## minutes fifty, and the full route would have needed about eighty minutes against
+## a fifteen-minute timeout. Headless, the same route is seconds, because physics
+## and scripts run either way and only the frame does not.
+##
+## Screenshots therefore only happen when there is a display to draw into. Pass
+## --shots to force them on for a human looking at a run locally.
+##
 ## Usage:
-##   godot --path . tools/playtest.tscn --rendering-driver vulkan --fixed-fps 60 \
-##         -- --out=/abs/dir
+##   godot --headless --path . tools/playtest.tscn --fixed-fps 60 -- --out=/abs/dir
+##   VK_ICD_FILENAMES=... xvfb-run -a godot --path . tools/playtest.tscn \
+##       --rendering-driver vulkan --fixed-fps 60 -- --out=/abs/dir --shots
 
 const MainScene: PackedScene = preload("res://scenes/main.tscn")
 
@@ -68,14 +80,24 @@ var _start_pos: Dictionary = {}
 var _last_pos: Dictionary = {}
 var _min_y: Dictionary = {}
 var _boss_start_health: int = 0
+## Screenshots need a real display. Under --headless the viewport texture is not
+## drawable, so asking for its image is both meaningless and, on some drivers, a
+## crash. Default off when headless, on otherwise, and --shots overrides.
+var _shots: bool = false
 
 
 func _ready() -> void:
 	seed(1881)
+	_shots = DisplayServer.get_name() != "headless"
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--out="):
 			_out_dir = arg.substr(6)
-	DirAccess.make_dir_recursive_absolute(_out_dir)
+		elif arg == "--shots":
+			_shots = true
+		elif arg == "--no-shots":
+			_shots = false
+	if _shots:
+		DirAccess.make_dir_recursive_absolute(_out_dir)
 	add_child(MainScene.instantiate())
 	print("playtest: renderer=", RenderingServer.get_video_adapter_name())
 
@@ -193,8 +215,9 @@ func _track_players() -> void:
 
 
 func _shoot(label: String) -> void:
-	var img := get_viewport().get_texture().get_image()
-	img.save_png("%s/%02d_%s.png" % [_out_dir, _step, label])
+	if _shots:
+		var img := get_viewport().get_texture().get_image()
+		img.save_png("%s/%02d_%s.png" % [_out_dir, _step, label])
 	var where := ""
 	for pid in _last_pos.keys():
 		where += " p%d=%s" % [pid, str((_last_pos[pid] as Vector3).round())]
