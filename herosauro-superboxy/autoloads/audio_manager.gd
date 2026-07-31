@@ -759,12 +759,22 @@ func _on_game_over(victory: bool) -> void:
 ##
 ## The numbers are physics, not taste, and the argument for each sits next to it:
 ##
+## EVERY DECAY IN THIS TABLE IS SECONDS TO -60 dB. All of them: the modes, the
+## noise, the body, the debris grains. They were not, and the mismatch mattered —
+## a 30 ms noise decay read as a 1/e time constant is 207 ms to -60 dB, which is
+## slower than any mode granite has and slower than wood's, so granite's crack
+## measured as ringing longer than a wooden crate's. One convention, stated once.
+##
 ##   modes         [Hz, seconds to -60 dB, amplitude]. Inharmonic on purpose —
 ##                 a plate or a hoop is not a string and its partials are not
-##                 integer multiples of anything.
-##   noise*        the attack's broadband part: how much, what band it occupies,
-##                 how resonant that band is, how fast it dies.
-##   body*         the sub the object's mass puts into the deck under the ring.
+##                 integer multiples of anything. The summed ring is normalised
+##                 to full scale, so these amplitudes are relative to each other
+##                 and every other layer below is a fraction of the whole.
+##   noise*        the attack's broadband part: its PEAK AS A FRACTION OF THE
+##                 RING, what band it occupies, how resonant that band is, and
+##                 how fast it dies.
+##   body*         the sub the object's mass puts into the deck under the ring,
+##                 again as a fraction of it.
 ##   hit_dur       how long a survivable blow lasts. This IS the material read:
 ##                 wood is done in a quarter of a second, iron is still going a
 ##                 second later.
@@ -828,14 +838,20 @@ static func surface_voice(surface: int) -> Dictionary:
 			# Limewash render. The deadest thing in the game — three modes, all
 			# gone inside 30 ms, and the rest is dust. If a hit on it rings at all
 			# the material is wrong.
+			#
+			# The dust belongs in the TAIL, not in the attack. It carried a 45 ms
+			# noise decay, which is the longest in the table and made a limewash
+			# knock measure as ringing longer than a wooden one — the cloud is
+			# real, but a cloud is something that happens after the blow, so it
+			# lives in the twenty-four grains and the long tail instead.
 			return {
 				"surface": ToonFactory.Surface.PLASTER,
 				"modes": [[158.0, 0.030, 0.42], [372.0, 0.022, 0.30], [700.0, 0.014, 0.18]],
-				"noise": 0.70, "noise_hz": 1150.0, "noise_q": 0.45, "noise_decay": 0.045,
+				"noise": 0.70, "noise_hz": 1150.0, "noise_q": 0.45, "noise_decay": 0.026,
 				"body": 0.40, "body_hz": 64.0, "body_decay": 0.09,
 				"hit_dur": 0.18, "break_dur": 0.44, "break_drop": 0.78,
-				"grains": 20, "grain_spread": 0.80, "grain_hz": Vector2(180.0, 700.0),
-				"grain_decay": 0.035, "tail_dur": 1.00,
+				"grains": 24, "grain_spread": 0.80, "grain_hz": Vector2(180.0, 700.0),
+				"grain_decay": 0.035, "tail_dur": 1.15,
 			}
 		ToonFactory.Surface.TERRACOTTA:
 			# Fired roof tile: a thin ceramic plate, so the fundamental sits an
@@ -853,15 +869,20 @@ static func surface_voice(surface: int) -> Dictionary:
 				"grain_decay": 0.09, "tail_dur": 1.20,
 			}
 		ToonFactory.Surface.WOOD:
-			# Crate boards and barrel staves. Mid-frequency, strongly damped
-			# across the grain, and the fracture is the loudest attack in the
-			# table relative to its ring — splintering is a broadband event, and
-			# the 2.1 kHz noise band is where a snapping board lives. Sixteen
-			# grains over 0.85 s is planks clattering onto granite.
+			# Crate boards and barrel staves — and both of those are HOLLOW BOXES,
+			# which is the thing that decides how this row sounds. Timber's loss
+			# factor is an order of magnitude below stone's and there is a volume
+			# of air inside to drive, so a crate is the second-longest ring in the
+			# table: a struck cask knocks and keeps knocking for a fifth of a
+			# second, where a granite kerb is finished in fifty milliseconds.
+			# The fracture is the loudest attack in the table relative to its
+			# ring — splintering is a broadband event and 2.1 kHz is where a
+			# snapping board lives. Sixteen grains over 0.85 s is planks
+			# clattering onto granite.
 			return {
 				"surface": ToonFactory.Surface.WOOD,
-				"modes": [[186.0, 0.110, 0.55], [431.0, 0.085, 0.42],
-					[910.0, 0.055, 0.30], [1640.0, 0.032, 0.18]],
+				"modes": [[186.0, 0.180, 0.55], [431.0, 0.140, 0.42],
+					[910.0, 0.090, 0.30], [1640.0, 0.050, 0.18]],
 				"noise": 0.40, "noise_hz": 2100.0, "noise_q": 0.80, "noise_decay": 0.020,
 				"body": 0.30, "body_hz": 82.0, "body_decay": 0.06,
 				"hit_dur": 0.26, "break_dur": 0.42, "break_drop": 0.88,
@@ -871,11 +892,14 @@ static func surface_voice(surface: int) -> Dictionary:
 		ToonFactory.Surface.FLAT:
 			# The deliberate fallback, and the right answer for a blow that lands
 			# on something not made of anything in particular. Neutral, short, and
-			# it claims no material — exactly what ImpactFX's FLAT row does.
+			# it claims no material — exactly what ImpactFX's FLAT row does. It is
+			# deliberately DULLER and DEADER than wood: an untagged collider must
+			# never be mistakable for a crate, or the fallback stops being a
+			# fallback and starts being a wrong answer.
 			return {
 				"surface": ToonFactory.Surface.FLAT,
-				"modes": [[210.0, 0.075, 0.48], [505.0, 0.055, 0.34], [980.0, 0.035, 0.20]],
-				"noise": 0.45, "noise_hz": 1800.0, "noise_q": 0.70, "noise_decay": 0.022,
+				"modes": [[210.0, 0.045, 0.48], [440.0, 0.030, 0.34], [820.0, 0.018, 0.20]],
+				"noise": 0.45, "noise_hz": 1200.0, "noise_q": 0.70, "noise_decay": 0.022,
 				"body": 0.28, "body_hz": 76.0, "body_decay": 0.06,
 				"hit_dur": 0.22, "break_dur": 0.40, "break_drop": 0.86,
 				"grains": 14, "grain_spread": 0.70, "grain_hz": Vector2(280.0, 1200.0),
@@ -1093,6 +1117,18 @@ func _bandpass(buf: PackedFloat32Array, hz: float, q: float, rate: float) -> voi
 		buf[i] = band * damp
 
 
+## Scale a buffer so its loudest sample sits exactly at `peak`, in place.
+func _scale_peak(buf: PackedFloat32Array, peak: float) -> void:
+	var hi := 0.0
+	for i in buf.size():
+		hi = maxf(hi, absf(buf[i]))
+	if hi <= 0.0:
+		return
+	var g: float = peak / hi
+	for i in buf.size():
+		buf[i] *= g
+
+
 ## Add `src * gain` into `dst` starting at sample `offset`.
 func _mix_into(dst: PackedFloat32Array, src: PackedFloat32Array, offset: int, gain: float) -> void:
 	var start := maxi(0, offset)
@@ -1111,13 +1147,7 @@ func _mix_into(dst: PackedFloat32Array, src: PackedFloat32Array, offset: int, ga
 ## the gain staging in each generator happened to add up.
 func _finish(buf: PackedFloat32Array, peak: float = 0.94, fade: float = 0.012,
 		rate: float = float(MIX_RATE)) -> PackedFloat32Array:
-	var hi := 0.0
-	for i in buf.size():
-		hi = maxf(hi, absf(buf[i]))
-	if hi > 0.0:
-		var g: float = peak / hi
-		for i in buf.size():
-			buf[i] *= g
+	_scale_peak(buf, peak)
 	var f: int = mini(buf.size(), int(fade * rate))
 	for i in f:
 		buf[buf.size() - 1 - i] *= float(i) / float(maxi(1, f))
@@ -1179,7 +1209,28 @@ func _impact(row: Dictionary, broke: bool) -> PackedFloat32Array:
 	var modes: Array = row["modes"]
 	var n := int(dur * rate)
 
+	# THE RING SETS THE SCALE, and every other layer is a stated fraction of it.
+	#
+	# This normalisation is not cosmetic. Without it `noise` was a gain on a
+	# band-passed noise buffer whose own amplitude depended on the filter's Q and
+	# on nothing the table could see — so the broadband attack came out louder
+	# than the modes on every surface, the material's ring never rose above a
+	# tenth of the peak, and MEASURED RING-DOWN REPORTED THE NOISE TAIL INSTEAD
+	# OF THE MATERIAL. Granite read as ringing longer than wood, which is exactly
+	# backwards. Scaled this way, `noise: 0.62` means "the broadband attack peaks
+	# at 62% of the ring", which is a number a person can reason about.
 	var out := _modal(modes, dur, drop)
+	_scale_peak(out, 1.0)
+
+	if broke:
+		# One object becoming two. Both halves ring on, lower (they are looser
+		# now) and out of step with each other, and that doubling is most of what
+		# separates a crack from a knock. It is also where a break's extra ENERGY
+		# comes from: everything here is peak-normalised at the end, so a bigger
+		# event can only be made by adding sustain, never by adding gain.
+		var halves := _modal(modes, dur, drop * 0.72)
+		_scale_peak(halves, 0.70)
+		_mix_into(out, halves, int(0.018 * rate), 1.0)
 
 	# The broadband part of the attack. This is what actually tells stone from
 	# wood in the first ten milliseconds, before any mode has had time to be
@@ -1190,8 +1241,9 @@ func _impact(row: Dictionary, broke: bool) -> PackedFloat32Array:
 	if broke:
 		nd *= 2.2   # a fracture keeps tearing after a knock has stopped
 	for i in n:
-		nz[i] *= exp(-float(i) / rate / nd)
-	_mix_into(out, nz, 0, float(row["noise"]) * (1.35 if broke else 1.0))
+		nz[i] *= exp(-6.9078 * float(i) / rate / nd)
+	_scale_peak(nz, float(row["noise"]) * (1.35 if broke else 1.0))
+	_mix_into(out, nz, 0, 1.0)
 
 	# The mass. A sine that starts an octave high and falls, which is what a heavy
 	# thing puts into a deck.
@@ -1201,14 +1253,16 @@ func _impact(row: Dictionary, broke: bool) -> PackedFloat32Array:
 	for i in n:
 		var t: float = float(i) / rate
 		phase += TAU * body_hz * (1.0 + 1.2 * exp(-14.0 * t)) / rate
-		out[i] += sin(phase) * exp(-t / body_decay) * float(row["body"])
+		out[i] += sin(phase) * exp(-6.9078 * t / body_decay) * float(row["body"])
 
-	# Two milliseconds of full-band click at the very front. Without it every
-	# impact starts with the filters' own rise time and reads as soft.
+	# Two milliseconds of full-band click at the very front, scaled with the
+	# surface's own broadband content so stone ticks and iron does not. Without it
+	# every impact starts with the filters' own rise time and reads as soft.
 	var click := _noise(int(0.002 * rate))
 	for i in click.size():
 		click[i] *= 1.0 - float(i) / float(maxi(1, click.size()))
-	_mix_into(out, click, 0, 0.35)
+	_scale_peak(click, 0.15 + 0.45 * float(row["noise"]))
+	_mix_into(out, click, 0, 1.0)
 
 	return _finish(out, 0.92 if broke else 0.80)
 
@@ -1251,8 +1305,9 @@ func _debris(row: Dictionary) -> PackedFloat32Array:
 	var dust := _noise(int(spread * 0.6 * rate))
 	_bandpass(dust, float(row["noise_hz"]) * 0.6, 0.5, rate)
 	for i in dust.size():
-		dust[i] *= exp(-float(i) / rate / (spread * 0.22))
-	_mix_into(out, dust, 0, float(row["noise"]) * 0.30)
+		dust[i] *= exp(-6.9078 * float(i) / rate / (spread * 0.5))
+	_scale_peak(dust, float(row["noise"]) * 0.30)
+	_mix_into(out, dust, 0, 1.0)
 
 	return _finish(out, 0.72)
 

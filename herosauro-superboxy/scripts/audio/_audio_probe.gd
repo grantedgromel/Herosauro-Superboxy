@@ -563,25 +563,42 @@ func _check_surface_voices() -> void:
 		var deb: AudioStreamWAV = lib[_am.call("_surface_key", "prop_debris", s)]
 		var pcm := _pcm(hit)
 		var rate := float(hit.mix_rate)
-		t20[s] = _decay_t20(_hp(pcm, 250.0, rate), rate)
-		cen[s] = _centroid(pcm, rate)
+		# Both measured above 250 Hz, and for the same reason: below that is the
+		# body sweep every surface puts into the deck, which is a property of the
+		# blow rather than of the material. Left in, it dragged cobble's centroid
+		# BELOW granite's — the opposite of the table, and an artefact.
+		var ring := _hp(pcm, 250.0, rate)
+		t20[s] = _decay_t20(ring, rate)
+		cen[s] = _centroid(ring, rate)
 		print("  %-12s %8.3f %9.3f %8.0fHz %9.3f %9.3f"
 			% [str(names[s]).to_lower(), hit.get_length(), float(t20[s]), float(cen[s]),
 				brk.get_length(), deb.get_length()])
 
-	# Distinctness, pairwise, on both axes at once. Two surfaces are allowed to be
-	# similar; none may be the same sound.
+	# Distinctness, pairwise. Two surfaces are allowed to be similar; none may be
+	# the same sound. Compared as RATIOS rather than differences, because a 40 ms
+	# gap between two 50 ms rings is an enormous difference and the same 40 ms
+	# between two 400 ms rings is not.
 	var same: Array = []
+	var worst := 99.0
+	var worst_pair := ""
 	for a in ToonFactory.Surface.size():
 		for b in range(a + 1, ToonFactory.Surface.size()):
-			var dt: float = absf(float(t20[a]) - float(t20[b]))
-			var dc: float = absf(float(cen[a]) - float(cen[b]))
-			if dt < 0.010 and dc < 60.0:
+			var rt: float = maxf(float(t20[a]), float(t20[b])) \
+				/ maxf(1e-6, minf(float(t20[a]), float(t20[b])))
+			var rc: float = maxf(float(cen[a]), float(cen[b])) \
+				/ maxf(1e-6, minf(float(cen[a]), float(cen[b])))
+			var sep: float = maxf(rt, rc)
+			if sep < worst:
+				worst = sep
+				worst_pair = "%s/%s" % [str(names[a]).to_lower(), str(names[b]).to_lower()]
+			if sep < 1.15:
 				same.append("%s/%s" % [str(names[a]).to_lower(), str(names[b]).to_lower()])
 	_ok(same.is_empty(),
-		"all %d surface pairs differ in ring-down or brightness (%s)"
-			% [ToonFactory.Surface.size() * (ToonFactory.Surface.size() - 1) / 2,
-				"all distinct" if same.is_empty() else str(same)])
+		"all %d surface pairs are at least 15%% apart on ring-down or brightness "
+			% (ToonFactory.Surface.size() * (ToonFactory.Surface.size() - 1) / 2)
+			+ "(closest %s at %.0f%%%s)"
+			% [worst_pair, (worst - 1.0) * 100.0,
+				"" if same.is_empty() else "; too close: " + str(same)])
 
 	var iron: float = float(t20[ToonFactory.Surface.IRON])
 	var wood: float = float(t20[ToonFactory.Surface.WOOD])
