@@ -449,17 +449,20 @@ func _build_clouds() -> void:
 ## twelve PARENT nodes, so everything inside one cluster is rigid with respect to it.
 ## One surface per cluster is 12 draw calls for the same twelve varied clusters.
 ##
-## It bakes with SurfaceTool.append_from() rather than with MeshBaker, and that is
-## deliberate rather than lazy. MeshBaker derives its shading normals from the winding
-## as +RH(a, b, c), which is the negative of the convention Godot's own primitives use
-## — see scripts/world/landmarks/_winding_probe.gd, where the world stream has the
-## same finding written up. Every surface it bakes is currently lit as though it faced
-## inward. This shader reads NORMAL directly to decide which side of the puff the sun
-## is on, so baking through MeshBaker would flip every cloud's shading: caps in shadow,
-## undersides in sun. append_from() carries SphereMesh's own (correct) normals through
-## the transform untouched, so the clouds are right today and stay right when
-## mesh_baker.gd is fixed. Working around that bug in a caller is exactly what its own
-## write-up asks nobody to do.
+## It bakes with SurfaceTool.append_from() rather than with MeshBaker, and the reason
+## is now simply that MeshBaker is the wrong tool for this input rather than that it
+## was broken. MeshBaker builds geometry from primitive descriptions — boxes, beams,
+## prisms — and derives a flat normal per triangle. A cloud puff is an existing
+## SphereMesh with smooth per-vertex normals already on it, and append_from() carries
+## those through the transform untouched, which is exactly what this shader needs:
+## it reads NORMAL directly to decide which side of the puff the sun is on, so a
+## flat-shaded rebuild would facet every cloud.
+##
+## (This comment used to say MeshBaker could not be used because it stored inward
+## shading normals. That was true when it was written and is not any more — see the
+## winding contract at the top of scripts/world/mesh_baker.gd, and the permanent gate
+## in scripts/world/landmarks/_winding_probe.gd. The choice here survives the fix on
+## its own merits, so the code did not change; the justification did.)
 ##
 ## One consequence worth stating: within a baked cluster the puffs no longer sort
 ## against each other, they blend in buffer order. For an alpha-blended body whose
