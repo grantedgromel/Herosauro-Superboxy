@@ -114,6 +114,23 @@ const EAVE_OVERHANG := 0.42
 ## front-elevation feature; a gable end abuts the party wall and stops.
 const PARTY_OVERHANG := 0.06
 const PLINTH_PROUD := 0.05
+## How far a return elevation's mouldings stand off their wall — window surrounds,
+## sills and the string courses coming round the corner.
+##
+## Deliberately larger than ARCHITRAVE_PROUD (0.075) on the street front, because
+## a return has no punched skin behind it: the front's opening is a real hole with
+## 22 cm of reveal, so its surround only has to edge that hole, while a return's
+## opening is a plate on a flat wall and the surround's own projection is the ONLY
+## thing casting. 11 cm reads as a value step at the 40-90 m these are seen from,
+## and a party wall it intrudes on is 5 cm away and solid.
+const RETURN_PROUD := 0.11
+## Width of the stone band round a return's opening. Wider than the front's 0.13
+## would be too heavy on a 0.9 m window; 0.10 keeps the proportion.
+const RETURN_BAND := 0.10
+## A return sill projects past its own surround, as sills do. This is the widest
+## anything on a return reaches, and `_facade_probe.gd`'s party-wall rule is
+## written against it.
+const RETURN_SILL_PROUD := RETURN_PROUD * 1.4
 const BALCONY_PROJECT := 0.42
 const JULIET_PROJECT := 0.11
 const RAIL_HEIGHT := 0.86
@@ -463,10 +480,20 @@ static func _assemble(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> v
 	# moulding that projects into the gap between houses either merges with the
 	# neighbour's — fine — or pokes out through the wall of a taller one, which
 	# is not.
+	#
+	# The band now stands 12 cm off the street front with a thinner fascia tucked
+	# under it, rather than 5.5 cm flush. A moulding that projects less than the
+	# window surrounds beside it (ARCHITRAVE_PROUD is 7.5 cm) cannot cast across
+	# them, which is why a critic read these as "hard-edged flat white horizontal
+	# strips... painted stripes rather than string courses, because nothing casts
+	# a shadow under them". The overhang over the fascia is what gives the band a
+	# dark line under it at any sun angle.
 	if spec.string_courses and detailed:
 		for f in range(1, spec.floors):
 			Geo.box(trim_b, base, 0.0, lines[f], 0.0,
-					spec.width + PARTY_OVERHANG, 0.10, spec.depth + 0.11)
+					spec.width + PARTY_OVERHANG, 0.10, spec.depth + 0.24)
+			Geo.box(trim_b, base, 0.0, lines[f] - 0.10, 0.0,
+					spec.width + PARTY_OVERHANG * 0.5, 0.06, spec.depth + 0.10)
 
 	# Cornice: the deep overhang at the top, plus a thinner fascia under it. The
 	# whole job of this pair is to cast one hard shadow line across the facade.
@@ -481,8 +508,10 @@ static func _assemble(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> v
 	if detailed:
 		_emit_rainwater(batch, base, front, spec, rng, wall_h)
 
-	if spec.side != 0:
-		_emit_side_elevation(batch, base, spec, rng, lines)
+	# Returns and rear, for every building that is not pure silhouette. No longer
+	# gated on `spec.side`; see the note over _emit_returns().
+	if detailed:
+		_emit_returns(batch, base, spec, rng, lines, wall_h)
 
 	if spec.laundry and spec.detail == Detail.FULL and spec.floors >= 3:
 		_emit_laundry(batch, front, spec, rng, lines)
@@ -1179,30 +1208,170 @@ static func _emit_quoins(batch: Batch, front: Transform3D, spec: Spec, wall_h: f
 		i += 1
 
 
-# --- Return elevation --------------------------------------------------------
+# --- Return and rear elevations ----------------------------------------------
 
-## The side wall, when one is exposed at the end of a row. Deliberately thin
-## detail: a flat dark opening and a stone surround, no reveal and no shutters,
-## because a return elevation is only ever seen obliquely.
-static func _emit_side_elevation(batch: Batch, base: Transform3D, spec: Spec,
-		rng: RandomNumberGenerator, lines: PackedFloat32Array) -> void:
-	var facing := signf(float(spec.side))
-	var face := base * Transform3D(Basis(Vector3.UP, facing * PI * 0.5),
-			Vector3(facing * spec.width * 0.5, 0.0, 0.0))
-	var dark_b := batch.baker(Batch.reveal_dark())
-	var trim_b := batch.baker(Batch.trim())
-	var open_w := 0.72
+## WHY THESE ARE NO LONGER OPT-IN.
+##
+## A critic scored 06_river_wide's nearest and largest object — the orange house
+## at x 0-340 — as "a blank orange prism: no windows, no doors, no balconies, no
+## downpipes, no shutters", and named it the blind-test tell: "untextured blockout
+## geometry left in the hero foreground of an establishing shot". It called out
+## the cream buildings behind it the same way.
+##
+## Those buildings are not blockout and they did not miss the builder. They are
+## fully dressed — on the ONE elevation that faces the river. Everything above
+## used to be emitted into `front`, and the only other face with anything on it
+## was gated behind `spec.side`, which `_place_row()` sets on the two end houses
+## of a hand-built terrace and which the real placement path never sets at all:
+## sky_background.gd builds a Spec per surveyed plot and leaves `side` at 0. So
+## every one of the 251 houses in this world had three plain faces, and the shot
+## that looks along the bank from outboard sees two of them.
+##
+## The fix is to stop asking. A building gets its returns and its rear dressed
+## unless it is a silhouette (Detail.LOW), and the cost of dressing a party wall
+## that a neighbour happens to hide is triangles the neighbour then occludes.
+## `spec.side` survives as "which flank is the OPEN one" — it earns a downpipe and
+## a second window per floor — but it is now a refinement, not a gate.
+##
+## THE RELIEF IS THE POINT, not the count. There is no punched skin here: a return
+## has no separate outer plane, so an opening cannot be a hole. It is built the
+## way a stone one is instead — a dark plate on the wall face with a moulded
+## surround and a sill standing proud of it — and it is the surround's own
+## projection that throws the shadow. At 40-90 m that is indistinguishable from a
+## reveal, and it is real geometry either way.
+static func _emit_returns(batch: Batch, base: Transform3D, spec: Spec,
+		rng: RandomNumberGenerator, lines: PackedFloat32Array, wall_h: float) -> void:
+	var open_side := signf(float(spec.side))
+	# Two flanks and the rear. `half` is the face's own half-width; a flank is
+	# `depth` across and the rear is `width` across.
+	var faces := [
+		{"yaw": PI * 0.5, "dist": spec.width * 0.5, "half": spec.depth * 0.5, "open": open_side > 0.0},
+		{"yaw": -PI * 0.5, "dist": spec.width * 0.5, "half": spec.depth * 0.5, "open": open_side < 0.0},
+	]
+	# The rear only on the near buildings. It faces into the hill, so the only
+	# vantage that ever sees one is a camera standing outboard of its own bank —
+	# 06_river_wide does exactly that for the Porto row, which is why it is here
+	# at all, and at MEDIUM those buildings are 80 m further away again.
+	if spec.detail == Detail.FULL:
+		faces.append({"yaw": PI, "dist": spec.depth * 0.5, "half": spec.width * 0.5,
+				"open": false})
+	for spot in faces:
+		var yaw: float = spot["yaw"]
+		var face := base * Transform3D(Basis(Vector3.UP, yaw),
+				Vector3(sin(yaw) * float(spot["dist"]), 0.0, cos(yaw) * float(spot["dist"])))
+		_emit_return_face(batch, face, spec, rng, lines, wall_h,
+				float(spot["half"]), bool(spot["open"]))
+
+
+## One return: its openings, its downpipe and the moulding that ties it to the
+## front.
+static func _emit_return_face(batch: Batch, face: Transform3D, spec: Spec,
+		rng: RandomNumberGenerator, lines: PackedFloat32Array, wall_h: float,
+		half: float, open: bool) -> void:
+	# A 3 m return takes one window per floor; a 9 m one takes two. Never three —
+	# these are the backs and sides of 4 m houses, and a regular grid of three is
+	# a curtain wall, not a Ribeira party wall.
+	var bays := 1 if (half < 2.6 or spec.detail != Detail.FULL) else 2
+	var open_w := clampf(half * 0.42, 0.60, 1.02)
+
 	for f in range(1, spec.floors):
 		var fh := lines[f + 1] - lines[f]
-		var y0 := lines[f] + fh * 0.32
-		var y1 := y0 + minf(fh * 0.50, 1.7)
-		for cx: float in [-spec.depth * 0.22, spec.depth * 0.22]:
-			if rng.randf() < 0.25:
+		var sill_y := lines[f] + fh * 0.32
+		var open_h := minf(fh * 0.50, 1.7)
+		for k in bays:
+			var cx := (float(k) - (float(bays) - 1.0) * 0.5) * half * 0.92
+			# A blank patch of party wall in the middle of a run is normal and is
+			# what stops the returns acquiring a grid of their own. The open flank
+			# keeps more of them, because it is the one somebody actually lives
+			# behind.
+			if rng.randf() < (0.16 if open else 0.34):
 				continue
-			Geo.rect(dark_b, face, cx - open_w * 0.5, y0, cx + open_w * 0.5, y1, SKIN_GAP)
-			if spec.detail != Detail.LOW:
-				Geo.ring(trim_b, face, cx - open_w * 0.5, y0, cx + open_w * 0.5, y1,
-						0.10, 0.10, 0.09, 0.10, SKIN_GAP * 2.0)
+			_emit_return_window(batch, face, spec, rng, cx, sill_y, open_w, open_h)
+
+	# Ground floor: a service door on the open flank, a blind arch on the rest.
+	if spec.detail == Detail.FULL and open:
+		var door_h := minf(lines[1] * 0.62, 2.2)
+		var timber_b := batch.baker(Batch.timber())
+		var trim_b := batch.baker(Batch.trim())
+		var dw := 0.92
+		Geo.box(timber_b, face, half * 0.44, spec.plinth_height + door_h * 0.5, SKIN_GAP,
+				dw, door_h, 0.10)
+		Geo.ring(trim_b, face, half * 0.44 - dw * 0.5, spec.plinth_height,
+				half * 0.44 + dw * 0.5, spec.plinth_height + door_h,
+				0.11, 0.11, 0.0, 0.12, ARCHITRAVE_PROUD)
+
+	if spec.detail == Detail.LOW:
+		return
+
+	# The string courses and the cornice return round the corner, because they do
+	# in stone and because a return with nothing horizontal on it is a stripe of
+	# flat colour however many windows are punched in it. Standing proud with a
+	# thinner band under them, so each one keeps a self-shadowing lip whatever the
+	# sun is doing — the critic's reading of the front's own bands was "hard-edged
+	# flat white horizontal strips that read as painted stripes rather than string
+	# courses, because nothing casts a shadow under them", and 3 cm of projection
+	# is why.
+	var band_b := batch.baker(Batch.trim())
+	if spec.string_courses:
+		for f in range(1, spec.floors):
+			# 0.11 tall against the wrapping band's 0.10, so the two are never
+			# coplanar in Y where they overlap — a 3 cm coplanar sliver on a
+			# 24-bit depth buffer is a flickering line on the web build.
+			Geo.box(band_b, face, 0.0, lines[f], RETURN_PROUD * 0.5,
+					half * 2.0, 0.11, RETURN_PROUD)
+			Geo.box(band_b, face, 0.0, lines[f] - 0.10, RETURN_PROUD * 0.28,
+					half * 2.0, 0.06, RETURN_PROUD * 0.55)
+
+	if not open or spec.detail != Detail.FULL:
+		return
+
+	# The downpipe an exposed flank always has, at the back corner where it runs
+	# to a gully. A hard full-height vertical in a colour the wall is not.
+	var zinc_b := batch.baker(Batch.zinc())
+	var px := -half + 0.22
+	Geo.beam(zinc_b, face, Vector3(px, wall_h - 0.20, 0.07),
+			Vector3(px, spec.plinth_height + 0.16, 0.07), 0.075)
+	Geo.box(zinc_b, face, px, wall_h - 0.06, 0.07, 0.20, 0.24, 0.16)
+	for t: float in [0.30, 0.66]:
+		Geo.box(zinc_b, face, px, lerpf(spec.plinth_height, wall_h, t), 0.04,
+				0.12, 0.05, 0.10)
+
+
+## One return opening: dark plate, moulded surround standing proud, stone sill,
+## and — on the fuller buildings — a shutter pair.
+static func _emit_return_window(batch: Batch, face: Transform3D, spec: Spec,
+		rng: RandomNumberGenerator, cx: float, sill_y: float, open_w: float,
+		open_h: float) -> void:
+	var x0 := cx - open_w * 0.5
+	var x1 := cx + open_w * 0.5
+	var y1 := sill_y + open_h
+	var lit := rng.randf() < spec.lit_fraction * 0.5
+	Geo.rect(batch.baker(Batch.lit() if lit else Batch.reveal_dark()),
+			face, x0, sill_y, x1, y1, SKIN_GAP)
+	if spec.detail == Detail.LOW:
+		return
+
+	var trim_b := batch.baker(Batch.trim())
+	# Surround: the flat frame plus the return round its outer edge, so it is a
+	# solid moulding standing off the wall rather than a card lying on it.
+	Geo.ring(trim_b, face, x0, sill_y, x1, y1,
+			RETURN_BAND, RETURN_BAND, 0.0, RETURN_BAND, RETURN_PROUD)
+	var outer := Geo.ring_bounds(x0, sill_y, x1, y1, RETURN_BAND, RETURN_BAND, 0.0, RETURN_BAND)
+	Geo.tube(trim_b, face, outer.position.x, outer.position.y, outer.end.x, outer.end.y,
+			0.0, RETURN_PROUD, false)
+	Geo.box(trim_b, face, cx, sill_y - 0.05, RETURN_SILL_PROUD * 0.5,
+			open_w + RETURN_BAND * 2.0 + 0.12, 0.10, RETURN_SILL_PROUD)
+
+	if spec.detail != Detail.FULL or rng.randf() > 0.5:
+		return
+	# Half the return windows are shuttered, and the leaves sit flat in the
+	# surround rather than swinging open: a flank at this distance wants the third
+	# value, not the silhouette.
+	var shutter_b := batch.baker(Batch.timber(Batch.SHUTTER_GREEN))
+	var leaf_w := open_w * 0.5 - 0.03
+	for side: float in [-1.0, 1.0]:
+		Geo.box(shutter_b, face, cx + side * open_w * 0.25, sill_y + open_h * 0.5,
+				RETURN_PROUD * 0.45, leaf_w, open_h - 0.06, 0.05)
 
 
 # --- Washing -----------------------------------------------------------------

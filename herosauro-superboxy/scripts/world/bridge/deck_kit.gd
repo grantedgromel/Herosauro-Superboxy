@@ -269,12 +269,20 @@ const SPAN_DROP := 0.55
 
 
 ## One catenary mast: stepped cast base, a shaft that steps down once, and a cap.
-static func catenary_mast(b: MeshBaker, x: float, z: float, base_y: float) -> void:
+static func catenary_mast(b: MeshBaker, x: float, z: float, base_y: float,
+		dark: MeshBaker = null) -> void:
 	var top := base_y + MAST_HEIGHT
+	# Three courses down to the paving instead of one, so the foot is a moulded
+	# base that turns away from the key rather than a plate ending at a plane.
+	# The widest course overhangs the one above it, which is what puts a dark line
+	# at the contact from any sun angle. See contact_patch() below.
+	contact_patch(dark, Vector3(x, base_y, z), 0.34)
+	b.add_box(Vector3(0.52, 0.05, 0.52),
+			Transform3D(Basis.IDENTITY, Vector3(x, base_y + 0.025, z)))
 	b.add_box(Vector3(0.38, 0.09, 0.38),
-			Transform3D(Basis.IDENTITY, Vector3(x, base_y + 0.045, z)))
+			Transform3D(Basis.IDENTITY, Vector3(x, base_y + 0.095, z)))
 	b.add_box(Vector3(0.27, 0.36, 0.27),
-			Transform3D(Basis.IDENTITY, Vector3(x, base_y + 0.27, z)))
+			Transform3D(Basis.IDENTITY, Vector3(x, base_y + 0.32, z)))
 	# Two stages rather than one: a parallel-sided pole reads as scaffold tube,
 	# and the step is where a real mast changes section.
 	b.add_cylinder(MAST_RADIUS, MAST_HEIGHT * 0.55,
@@ -490,7 +498,8 @@ static func _fray(b: MeshBaker, at: Vector3, dir: Vector3, key: float) -> void:
 
 ## A cast-iron mooring-style bollard: the thing that stops a lorry mounting the
 ## footway at either end of the bridge. Squat, so it never blocks the corridor.
-static func bollard(b: MeshBaker, at: Vector3, height: float, seed: int) -> void:
+static func bollard(b: MeshBaker, at: Vector3, height: float, seed: int,
+		dark: MeshBaker = null) -> void:
 	var lean := (float(seed % 13) / 13.0 - 0.5) * 0.05
 	var xf := Transform3D(Basis(Vector3.BACK, lean), at)
 	b.add_box(Vector3(0.30, 0.06, 0.30), xf * Transform3D(Basis.IDENTITY,
@@ -499,6 +508,44 @@ static func bollard(b: MeshBaker, at: Vector3, height: float, seed: int) -> void
 			Vector3(0.0, height * 0.5 - 0.02, 0.0)), 8)
 	b.add_cylinder(0.055, 0.11, xf * Transform3D(Basis.IDENTITY,
 			Vector3(0.0, height - 0.05, 0.0)), 8)
+	contact_patch(dark, at, 0.24)
+
+
+# --- Contact ------------------------------------------------------------------
+
+## The dirt ring at the foot of anything standing on paving.
+##
+## WHY THIS IS GEOMETRY AND NOT A RENDERER SETTING. A critic confirmed the
+## directional key is working and consistent across all three establishing shots —
+## the railing shadow dapple in 02_deck_eye is named as the best lighting event in
+## the set — and then found that "no object in any frame has contact darkening
+## where it meets the ground", naming the lamp posts at x 412 and x 790, which
+## "meet the paving on a hard line with no falloff".
+##
+## The renderer is not going to supply it here. The environment has SSAO on at
+## intensity 1.6, but `ssao_light_affect` is 0.15, so the occlusion term is
+## applied almost entirely to the ambient path — and on a sunlit granite flag
+## under a 2.8-energy key, ambient is a small fraction of the return. That
+## setting lives in assets/environments/porto_daylight.tres, which belongs to the
+## atmosphere stream; raising it is the correct global fix and is in this pass's
+## report, not in this pass's diff.
+##
+## What geometry can do is put something at the contact that is genuinely darker
+## and genuinely there: a thin plate of the void material lying on the paving,
+## wider than the post. Grit, moss and road tar collect against a post base and a
+## kerb and never get swept out, so this is the detail that was missing rather
+## than a trick standing in for one.
+##
+## Deliberately not a gradient — there is no vertex-colour path in this pipeline —
+## and it does not need to be: at 8 mm of lift it is under the 13 mm the kerb
+## already asks a capsule to climb, and its own edge is inside the penumbra the
+## 0.53-degree sun throws off the post beside it.
+static func contact_patch(dark: MeshBaker, at: Vector3, radius: float,
+		lift: float = 0.008) -> void:
+	if dark == null:
+		return
+	dark.add_box(Vector3(radius * 2.0, 0.012, radius * 2.0),
+			Transform3D(Basis.IDENTITY, at + Vector3(0.0, lift, 0.0)))
 
 
 ## A gully grating set into the kerb line. Flush, so it is a pattern in the deck

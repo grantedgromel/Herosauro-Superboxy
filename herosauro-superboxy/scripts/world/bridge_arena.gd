@@ -520,13 +520,20 @@ func _build_lamps() -> void:
 	# glowing globes stay separate, because they are separate materials and
 	# because lighting_rig.gd has to be able to find them (see _lamp below).
 	var castings := MeshBaker.new()
+	# The contact ring under each foot. Its own material, because void black is
+	# not iron — but the same parameter set ToonFactory already caches for the
+	# deck's gully voids, so it is one extra draw call for all eight lamps and
+	# nothing new in the material table.
+	var collars := MeshBaker.new()
 	for x in LAMP_XS:
 		for side in [-1.0, 1.0]:
-			_lamp(lamps, castings, x, side * PARAPET_MID)
+			_lamp(lamps, castings, collars, x, side * PARAPET_MID)
 	# LODs off for the same reason as the arch: eight disjoint 13 cm poles are
 	# exactly what mesh decimation deletes first.
 	lamps.add_child(castings.commit(
 			ToonFactory.iron(LAMP_IRON_COLOR, 0.8, 0.2, 0.45), "LampCastings", false))
+	lamps.add_child(collars.commit(
+			ToonFactory.solid(Color(0.055, 0.05, 0.055), 0.0, 1.0), "LampCollars", false))
 
 	# Capsules, and all eight on one body: a swept-sphere SpringArm glides around
 	# a capsule where it snags on the corners of a box, and one body means one
@@ -557,9 +564,26 @@ func _build_lamps() -> void:
 ## children for a SphereMesh, so nesting the parts would leave the bridge unlit —
 ## and any second sphere here (a finial, a lantern shell) would burn one of the
 ## eight OmniLight3D slots on itself.
-func _lamp(parent: Node3D, castings: MeshBaker, x: float, z: float) -> void:
+func _lamp(parent: Node3D, castings: MeshBaker, collars: MeshBaker,
+		x: float, z: float) -> void:
+	# A moulded foot, not a pole ending at a plane. A critic measured the two
+	# posts in 02_deck_eye as meeting the paving "on a hard line with no falloff",
+	# and half of that is the geometry: a 34 cm box on a flat coping presents one
+	# horizontal edge and nothing under it. Three courses stepping outward give
+	# the base a face that turns away from a 34-degree key and an overhang that
+	# shades the course below, which is the value ramp the eye is looking for.
+	# The other half is a contact ring — see BridgeDeckKit.contact_patch().
+	DeckKit.contact_patch(collars, Vector3(x, LAMP_BASE_Y, z), 0.30)
+	castings.add_box(Vector3(0.50, 0.05, 0.50),
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.025, z)))
+	castings.add_box(Vector3(0.42, 0.07, 0.42),
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.085, z)))
 	castings.add_box(Vector3(0.34, 0.22, 0.34),
-			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.11, z)))
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.23, z)))
+	# The shaft's own swell where it leaves the base, which is what a cast-iron
+	# standard actually has and what stops the joint reading as a butt.
+	castings.add_cylinder(0.115, 0.30,
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.47, z)), 8)
 	castings.add_cylinder(0.065, 2.60,
 			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 1.52, z)))
 	castings.add_cylinder(0.11, 0.10,
@@ -614,9 +638,9 @@ func _build_deck_dressing() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 18_86    # the year the bridge opened; seeded, see ARCHITECTURE.md
 
-	_build_catenary(iron)
+	_build_catenary(iron, dark)
 	_build_fallen_line(iron, dressing)
-	_build_furniture(iron, stone, rng)
+	_build_furniture(iron, stone, dark, rng)
 	_build_gratings(iron, dark)
 	_build_perched_gulls(feather, dark, rng)
 	_build_litter(scrap, rng)
@@ -643,14 +667,14 @@ func _build_deck_dressing() -> void:
 ## is both what a real one does — so a pantograph carbon wears evenly instead of
 ## grooving in one place — and what stops a 100 m wire being a dead straight line
 ## down the middle of the frame.
-func _build_catenary(iron: MeshBaker) -> void:
+func _build_catenary(iron: MeshBaker, dark: MeshBaker) -> void:
 	var span_y := MAST_BASE_Y + DeckKit.MAST_HEIGHT - DeckKit.SPAN_DROP
 	for x: float in CATENARY_XS:
 		# Every mast, its cap and its bracket lug stand on all four stations, torn
 		# gantry or not. They are the converging verticals the corridor is for, and
 		# at |z| = 6.25 against a giant who reaches 5.75 they are already clear.
 		for side in [-1.0, 1.0]:
-			DeckKit.catenary_mast(iron, x, side * MAST_Z, MAST_BASE_Y)
+			DeckKit.catenary_mast(iron, x, side * MAST_Z, MAST_BASE_Y, dark)
 		if _gantry_is_wrecked(x, span_y):
 			DeckKit.torn_cross_span(iron, x, MAST_Z, span_y, WRECK_HANG_Z,
 					WRECK_CATCH_Y - 0.35)
@@ -779,7 +803,8 @@ func _build_fallen_line(iron: MeshBaker, dressing: Node3D) -> void:
 ## Bollards guarding the footway ends, and a granite bench under every other
 ## catenary station. The bench is the only piece of dressing tall enough to stand
 ## in the player's way, so it is the only one with a collider.
-func _build_furniture(iron: MeshBaker, stone: MeshBaker, rng: RandomNumberGenerator) -> void:
+func _build_furniture(iron: MeshBaker, stone: MeshBaker, dark: MeshBaker,
+		rng: RandomNumberGenerator) -> void:
 	var bodies := StaticBody3D.new()
 	bodies.name = "DeckFurnitureBodies"
 	bodies.collision_layer = PhysicsLayers.WORLD
@@ -794,10 +819,14 @@ func _build_furniture(iron: MeshBaker, stone: MeshBaker, rng: RandomNumberGenera
 				# of perfectly plumb posts is the repetition the RUBRIC bans.
 				var x := sx * (ABUTMENT_INNER - 0.9 - float(k) * 1.35)
 				DeckKit.bollard(iron, Vector3(x, WALKWAY_TOP, sz * (WALKWAY_OUTER - 0.42)),
-						0.78 + rng.randf_range(-0.05, 0.05), rng.randi())
+						0.78 + rng.randf_range(-0.05, 0.05), rng.randi(), dark)
 		for bx: float in [-30.0, 10.0]:
 			var z := sx * bench_z
 			DeckKit.bench(stone, Vector3(bx, WALKWAY_TOP, z), 1.9, rng.randf_range(-0.03, 0.03))
+			# The grime line under a bench end, which is the same contact problem
+			# a lamp post has and the same fix. See DeckKit.contact_patch().
+			for ex: float in [-0.68, 0.68]:
+				DeckKit.contact_patch(dark, Vector3(bx + ex, WALKWAY_TOP, z), 0.20)
 			# The box reaches back into the parapet body, so there is no
 			# hero-width slot between a bench and the railing behind it.
 			SceneryKit.solid_shape(bodies, Vector3(2.0, 0.55, 0.86),

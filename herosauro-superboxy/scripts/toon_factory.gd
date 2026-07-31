@@ -169,6 +169,20 @@ const DEFAULT_ROUGHNESS := 0.80
 ## gull feathers at 0.94 — and an albedo above 0.9 does not read as "brighter", it
 ## reads as an object that cannot take a shadow. Clamped by scaling the whole colour
 ## rather than per channel, so nothing shifts hue on the way in.
+##
+## A HAZARD WORTH KNOWING, because Round 3 walked into it. The ceiling is applied to
+## albedo_color, i.e. AFTER both texture gains, and albedo_color is the value the
+## brightest texel reaches rather than the surface's mean. So the effective ceiling on
+## a call site's authored MEAN reflectance is 0.90 divided by both gains — currently
+## about 0.616 for granite — and it MOVES when an albedo map is re-authored with a
+## different mean. Round 3's granite ramp dropped the map's mean 0.863 -> 0.774, which
+## raised the gain 1.159 -> 1.293 and pulled three call sites over the line
+## (TRIM_WHITE 0.93, GRANITE_DRESS 0.69, DRESSED 0.63), darkening their rendered mean
+## by 10%, 10% and 2%. All three are authored above what granite physically reflects,
+## so the clamp is arguably doing its job — but it is doing it as a side effect of a
+## texture edit, which is not how a physical guard should behave. Left as-is and
+## reported rather than changed: moving the clamp to the authored value would brighten
+## those three instead, and either way it is another stream's palette.
 const ALBEDO_CEILING := 0.90
 const ALBEDO_FLOOR := 0.02
 
@@ -193,7 +207,7 @@ const DIELECTRIC_METAL_SPECULAR := 0.62
 ## slight softening — which is the correct behaviour for a second layer.
 const DETAIL_TILE_METERS := 0.28
 
-## The fine layer's NET multiplier on albedo runs 0.70 at the bottom of its range to
+## The fine layer's NET multiplier on albedo runs 0.65 at the bottom of its range to
 ## 1.00 at the top and averages 0.876, so leaving it alone would quietly darken every
 ## authored colour in the game by roughly 12% and make forty call sites' palettes mean
 ## something they do not say. This puts that back. It is not a look dial — the

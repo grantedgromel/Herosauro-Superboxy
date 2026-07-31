@@ -289,7 +289,21 @@ func _check_bounds() -> void:
 		# Slack for the pantile relief: a crest stands 5 cm off the slope, and at
 		# the verge a couple of centimetres of that lands sideways. Verge tiles do
 		# stand proud in life, so this is geometry, not error.
-		var allowed := s.width + FacadeBuilder.PARTY_OVERHANG * 2.0 + 0.05
+		#
+		# The budget is RETURN_SILL_PROUD, not PARTY_OVERHANG, since round 3: every
+		# building now dresses both returns, and a return's window surrounds, sills
+		# and string-course returns necessarily project along the party-wall axis
+		# because that IS their face normal. That is a deliberate trade, and the
+		# rule it relaxes is not the rule it looks like. What the check exists to
+		# stop is a ROOF or a CORNICE growing out of the neighbour — geometry that
+		# sits at or above the neighbour's wall head, where nothing hides it, and
+		# which still has only PARTY_OVERHANG to play with. A moulding at a storey
+		# line stands 11 cm into a 5 cm party gap and is therefore 6 cm inside a
+		# solid wall that is exactly as deep as this one, because neighbours on a
+		# level share a plot depth. Where the neighbour is absent — row ends and
+		# alleys, which is the whole reason the returns are dressed — it projects
+		# into open air, which is the point.
+		var allowed := s.width + FacadeBuilder.RETURN_SILL_PROUD * 2.0 + 0.05
 		_expect("nothing overhangs the party wall (gable_front=%s)" % gable_front,
 				box.size.x <= allowed,
 				"x span %.3f, allowed %.3f" % [box.size.x, allowed])

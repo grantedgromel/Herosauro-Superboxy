@@ -237,3 +237,13 @@ static func tree_row(batch: TerrainBatch, x: float, z0: float, z1: float, pitch:
 		var h := lerpf(height_min, height_max, MK.hash01(seed + 9, i))
 		var dx := MK.hash_sym(seed + 13, i) * 0.7
 		broadleaf(batch.leaf_lit(), batch.timber(), Vector3(x + dx, y, z), h, seed + i * 37)
+		# The tree pit: every plane tree on the Ribeira stands in one, and it is
+		# also the contact darkening a trunk meeting a paved apron otherwise has
+		# none of. A critic scored the whole set as having no contact darkening on
+		# anything, and the renderer is not going to supply it under a 2.8-energy
+		# key with ssao_light_affect at 0.15 — see the note on
+		# BridgeDeckKit.contact_patch(). Here it is a real object either way.
+		batch.dark().add_box(Vector3(1.05, 0.014, 1.05),
+				Transform3D(Basis.IDENTITY, Vector3(x + dx, y + 0.02, z)))
+		batch.dressed().add_box(Vector3(1.25, 0.10, 1.25),
+				Transform3D(Basis.IDENTITY, Vector3(x + dx, y + 0.05, z)))

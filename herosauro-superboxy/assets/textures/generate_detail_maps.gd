@@ -170,7 +170,7 @@ func _recipes() -> Array[Dictionary]:
 		# because the hue terms add variance to each channel while cancelling between
 		# them — the map varies more than it used to and correlates less. And the
 		# normal, the mask's 0.52-1.00 roughness and 0.72-1.00 AO, and the fine
-		# layer's 0.70-1.00 all still carry value variation, none of which can ever
+		# layer's 0.65-1.00 all still carry value variation, none of which can ever
 		# carry colour.
 		#
 		# STOP OFFSETS ARE THE FIELD'S OWN QUANTILES, not even sixths. A normalised
@@ -468,10 +468,11 @@ func _write_pair(recipe: Dictionary) -> void:
 ##     because the base colour underneath decides which it reads as.
 ##
 ## The albedo values are sRGB (the shader's detail sampler carries source_color) and
-## run 0.45 -> 0.99 in linear. At the 0.55 blend weight that lands as a 0.70-1.00
-## multiplier on albedo: a 30% swing, deep enough to see across a facade and shallow
-## enough that no surface loses its identity. Since Round 3 it also carries hue —
-## see _fine_ramp() for what that costs and what it may not break.
+## run 0.36 -> 0.99 in linear per channel, 0.48 -> 0.95 in luminance. At the 0.55
+## blend weight that lands as a 0.65-1.00 multiplier on albedo: deep enough to see
+## across a facade and shallow enough that no surface loses its identity. Since
+## Round 3 it also carries hue — see _fine_ramp() for what that costs and what it
+## may not break.
 func _write_fine() -> void:
 	var normal := _base_texture()
 	normal.as_normal_map = true
@@ -511,18 +512,21 @@ func _fine_noise() -> FastNoiseLite:
 ##
 ##   * its three channel means must be EQUAL. A fine layer averaging even 2% warm
 ##     tints the ironwork, the azulejos, the terracotta and forty facade colours at
-##     once, and nothing downstream divides it back out. Measured equal to 1.3%,
-##     which is inside the 4% _atmosphere_probe.gd allows.
+##     once, and nothing downstream divides it back out. Measured spread 0.54%;
+##     _atmosphere_probe.gd fails past 2%.
 ##   * its NET mean — 0.45 + 0.55*c, since FINE_BLEND is the weight of the whole
-##     detail pass — must stay at 0.873, which is what DETAIL_ALBEDO_GAIN's 1.13 is
-##     the reciprocal of. Measured 0.8733 against the old ramp's 0.8734, so the
-##     constant does not move and no call site's palette shifts.
+##     detail pass — must stay where it was, because DETAIL_ALBEDO_GAIN is its
+##     reciprocal and moving it rescales every authored colour in the game. Measured
+##     0.8759 against the old ramp's 0.8734, a 0.3% drift, so the constant stays at
+##     1.13 and no call site's palette shifts.
 ##
-## Those two are also why this layer's correlation only comes down to about +0.85
-## rather than to granite's +0.18: its VALUE swing (0.45-0.94 linear) is load-bearing
-## for "damp in the crevices, dry on the face" and cannot be spent, and matching it
-## with chroma would need +-0.14 linear of hue on every material in the game. The
-## surface-scale maps carry the decorrelation; this one contributes to it.
+## Those two are also why this layer's correlation only comes down to +0.91 / +0.80
+## rather than to granite's +0.43 / +0.06: its VALUE swing (0.45-0.94 in luminance)
+## is load-bearing for "damp in the crevices, dry on the face" and cannot be spent,
+## and matching that much variance with chroma would need +-0.14 linear of hue on
+## every material in the game — including the ironwork, which is the one surface a
+## critic has named as working. The surface-scale maps carry the decorrelation; this
+## one contributes to it and is deliberately not pushed further.
 ##
 ## Stops sit at the fBm field's quantiles, not at even fifths — see the granite note.
 func _fine_ramp() -> Gradient:

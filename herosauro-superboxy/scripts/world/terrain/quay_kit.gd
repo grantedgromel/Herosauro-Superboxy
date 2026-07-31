@@ -235,15 +235,19 @@ static func hillside_sign(batch: TerrainBatch, at: Vector3, yaw: float, text: St
 
 	# One backing plate per letter, set back so the letter stands off it. Spaces
 	# and unmapped characters get none, which is what opens the word gaps up.
+	# Glyph i's ink runs from pen + 0 to pen + 5 cells of a 6-cell advance, so with
+	# the string centred its middle sits 3 cells in. Getting this wrong by one cell
+	# leaves every letter half off its own plate.
+	var pen0 := -text_w * 0.5 + cell * 0.5
 	for i in text.length():
 		if not LandmarksBuilder.SIGN_FONT.has(text[i]):
 			continue
-		var cx := -text_w * 0.5 + cell * 6.0 * (float(i) + 0.5) - cell * 0.5
-		board.add_box(Vector3(cell * 5.5, band, 0.09),
+		var cx := pen0 + cell * (6.0 * float(i) + 2.5)
+		board.add_box(Vector3(cell * 5.6, band, 0.09),
 				xf * Transform3D(Basis(), Vector3(cx, sill + band * 0.5, -0.12)))
 
 	# Solid letters, standing off the plates toward the river.
-	LandmarksBuilder.sign_text_solid(face, xf, text, -text_w * 0.5 + cell * 1.0,
+	LandmarksBuilder.sign_text_solid(face, xf, text, pen0,
 			sill + cell * 0.5, cell, cell * 0.55)
 
 
