@@ -695,7 +695,8 @@ func _on_rock_contact(body: Node, once: Array) -> void:
 	if is_instance_valid(boss):
 		boss.report_impact(&"rock")
 	if body != null and body.is_in_group("players"):
-		GameManager.hit_stop(ROCK_HIT_STOP)
+		# No hit_stop: the hero's own take_hit() has already frozen the frame by
+		# the time this fires, and hit_stop does not nest. See _on_slam_landed.
 		GameManager.request_shake(ROCK_HIT_SHAKE, 0.22)
 	else:
 		# Masonry on granite is still an impact; it just is not a hit.

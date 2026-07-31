@@ -28,11 +28,9 @@ extends Area3D
 ##     wave is born, so the giant's fists throw chips and a dust cloud out of the
 ##     surface he actually hit.
 ##
-## And leg one of the impact contract for the hits it lands: a hero swept by the
-## wave gets an `ImpactFX.spark()` at their feet. Camera, audio, hit-stop and UI
-## for that hit are already covered — `PlayerBase.take_hit` requests the shake
-## and the hurt sound, `GameManager.player_damaged` drives the HUD — so the only
-## missing leg was the one at the point of contact.
+## The hero's end of a hit is NOT drawn here. `PlayerBase.take_hit()` owns it —
+## five damage sources converge there and none of them can forget — so this only
+## has to deliver the damage and let that fire.
 ##
 ## --- SURFACE -----------------------------------------------------------------
 ##
@@ -329,13 +327,12 @@ func _on_body_entered(body: Node) -> void:
 
 	if body.is_in_group("players"):
 		_hit.append(id)
-		if body.take_hit(damage, dir * knockback + Vector3.UP * 6.0):
-			# Leg one for this hit, at the point of contact. Only when the blow
-			# actually landed — take_hit returns false through a hero's i-frames,
-			# and an FX for a hit that did not happen teaches the wrong thing.
-			# FLAT rather than the deck's surface: what was struck is a hero.
-			ImpactFX.spark(self, here + Vector3.UP * 0.9, dir,
-				ToonFactory.Surface.FLAT, 1.2)
+		# The wave delivers the damage and nothing else. The hero's end of the
+		# blow — the burst at the point of contact — is drawn by
+		# PlayerBase.take_hit(), which is where all five damage sources converge
+		# and therefore the one place that cannot forget. A spark here as well
+		# would double the burst on exactly the hits that already hurt most.
+		body.take_hit(damage, dir * knockback + Vector3.UP * 6.0)
 	elif body is PropBody:
 		_hit.append(id)
 		# Falls off toward the rim: barrels at the giant's feet are launched,

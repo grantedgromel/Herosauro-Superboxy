@@ -265,7 +265,15 @@ func arm_slam(duration: float = 0.16) -> void:
 func _on_slam_landed(target: Node3D) -> void:
 	if target == null or not target.is_in_group("players"):
 		return
-	GameManager.hit_stop(SLAM_HIT_STOP)
+	# No hit_stop here any more, and it is worth saying why rather than leaving a
+	# reader to wonder where the slam's freeze went. Hitbox._deliver() calls the
+	# hero's take_hit() BEFORE it emits `landed`, take_hit now freezes in
+	# proportion to damage, and GameManager.hit_stop refuses to nest — so by the
+	# time this runs the frame is already stopped and this call returned
+	# immediately. The freeze still happens; it is just owned by the hero, which
+	# is the only place that knows how hard the hit actually landed.
+	# PlayerBase.HURT_STOP_PER_DAMAGE x SLAM_DAMAGE reproduces SLAM_HIT_STOP
+	# exactly, and _coop_probe asserts that equality so the two cannot drift.
 	GameManager.request_shake(0.85, 0.35)
 
 

@@ -26,8 +26,8 @@ extends RigidBody3D
 ##     `PropBody`'s exported `surface` string), so a rock landing on the calçada
 ##     throws grey lime dust, a rock landing on a crate throws splinters, and a
 ##     rock landing on the ironwork throws sparks — all from one call.
-##   * ON A HERO, an `ImpactFX.spark()` at the contact, thrown along the rock's
-##     own velocity so the chips carry the direction the blow came from.
+##   * ON A HERO, only the rock's own destruction. The hero's end of the blow is
+##     drawn by PlayerBase.take_hit(), where every damage source converges.
 ##   * ON DYING, the rock CRUMBLES. It shrinks over its settle window and leaves
 ##     a small `smash()` of its own masonry behind, instead of being deleted
 ##     between two frames.
@@ -192,8 +192,9 @@ func _on_body_entered(body: Node) -> void:
 			var travel := linear_velocity
 			if travel.length() < 0.5:
 				travel = dir
-			ImpactFX.spark(self, contact, travel, ToonFactory.Surface.FLAT, 1.4)
-			# ...and the rock itself comes apart on him.
+			# The hero's end of this blow is drawn by PlayerBase.take_hit(), which
+			# is where every damage source converges; a spark here as well would
+			# double it. What is still ours is the ROCK's end — granite failing.
 			_crumbled = true
 			ImpactFX.smash(self, global_position, fx_surface, _radius * 0.8, travel)
 		queue_free()
