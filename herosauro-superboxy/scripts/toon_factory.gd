@@ -557,9 +557,12 @@ static func build(color: Color, surface: Surface = Surface.FLAT,
 	#
 	# On Forward+ WorldTier.fine_detail() returns true, so this expression is the
 	# caller's own value, the cache key is unchanged and the desktop material set
-	# is identical by construction. That is an argument from the code, not a
-	# measurement — the capture diff that would make it a measurement is running
-	# and this comment gets updated with its result either way.
+	# is untouched. CHECKED, not argued: scripts/world/_tier_probe.tscn builds
+	# every surface the world asks for, in both metal states, with the detail
+	# layer explicitly on and off, and asserts that on the desktop tier the two
+	# stay distinct materials, that detail_enabled and uv2_triplanar survive, and
+	# that caching still collapses identical requests. Forcing fine_detail() to
+	# false — the leak this guards against — turns it red.
 	fine_detail = fine_detail and WorldTier.fine_detail()
 
 	# Snap and clamp BEFORE the key is built, so two callers asking for 0.30 and 0.45
