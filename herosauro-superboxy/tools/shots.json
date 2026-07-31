@@ -111,6 +111,13 @@
       "settle": 90,
       "script": [["", 30]],
       "intent": "The HUD reading a live fight. UI legibility over a bright 3D scene."
+    },
+    {
+      "name": "15_hit_taken",
+      "kind": "game",
+      "settle": 8,
+      "script": [["", 40], ["move_up", 210], ["", 130]],
+      "intent": "A hero mid-damage. THE SHOT SET HAD NO DAMAGED FRAME, and that is how a full-screen crimson wash survived four rounds of review: HitVignette only draws once someone has been hit, and every game shot captured either the opening frame or a clean swing. A state nothing renders is a state nobody scores."
     }
   ]
 }

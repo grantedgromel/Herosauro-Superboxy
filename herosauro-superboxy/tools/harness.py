@@ -69,11 +69,29 @@ def godot_bin() -> str:
 
 # --- capture -----------------------------------------------------------------
 
-def _render(shot: dict, out: Path, tier: str, timeout: int) -> dict:
+def _render(shot: dict, out: Path, tier: str, timeout: int,
+            renderer: str = "forward_plus") -> dict:
     w, h, _ = TIERS[tier]
     env = dict(os.environ)
     if Path(LAVAPIPE).exists():
         env["VK_ICD_FILENAMES"] = LAVAPIPE
+
+    # THE RENDERER IS PART OF THE SHOT, and for four rounds it was not.
+    #
+    # This function hard-coded `--rendering-driver vulkan`, so every capture the
+    # review loop has ever scored was Forward+ — while the build the owner
+    # actually plays is the web export, which is GL Compatibility. The two are
+    # not the same picture: `lighting_rig.gd` strips SDFGI, SSR, SSIL and
+    # volumetric fog on Compatibility and pays back what was lost, and
+    # `world_tier.gd` builds different geometry. A lighting fix verified on
+    # Forward+ says nothing about the tier in the browser.
+    #
+    # `forward_plus` keeps the historical behaviour byte for byte, so existing
+    # baselines stay comparable.
+    if renderer == "forward_plus":
+        driver = ["--rendering-driver", "vulkan"]
+    else:
+        driver = ["--rendering-method", renderer]
 
     # `-a` (auto-pick a free display), NOT `-n <fixed number>`. Fixed numbers
     # were chosen for reproducibility, which was a mistake twice over: the X
@@ -83,7 +101,7 @@ def _render(shot: dict, out: Path, tier: str, timeout: int) -> dict:
     cmd = [
         "xvfb-run", "-a", "-s", f"-screen 0 {w}x{h}x24",
         godot_bin(), "--path", str(ROOT), "tools/baseline.tscn",
-        "--rendering-driver", "vulkan",
+        *driver,
         "--fixed-fps", "60",
         "--resolution", f"{w}x{h}",
         "--", f"--shot={shot['name']}", f"--out={out}",
@@ -140,12 +158,14 @@ def cmd_capture(args) -> int:
                  args.kinds.split(",") if args.kinds else None)
 
     workers = args.jobs or max(1, (os.cpu_count() or 2) - 1)
-    print(f"capture: {len(todo)} shots, tier={args.tier}, {workers} workers -> {out}")
+    renderer = getattr(args, "renderer", "forward_plus")
+    print(f"capture: {len(todo)} shots, tier={args.tier}, renderer={renderer}, "
+          f"{workers} workers -> {out}")
 
     results: list[dict] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(_render, s, out, args.tier, args.timeout): s
+            pool.submit(_render, s, out, args.tier, args.timeout, renderer): s
             for s in todo
         }
         for fut in concurrent.futures.as_completed(futures):
@@ -158,8 +178,8 @@ def cmd_capture(args) -> int:
                     print(f"         {ln}")
 
     results.sort(key=lambda r: r["shot"])
-    report = {"tier": args.tier, "out": str(out), "shots": results,
-              "ok": all(r["ok"] for r in results)}
+    report = {"tier": args.tier, "renderer": renderer, "out": str(out),
+              "shots": results, "ok": all(r["ok"] for r in results)}
     (out / "report.json").write_text(json.dumps(report, indent=2))
     print(f"capture: {'OK' if report['ok'] else 'FAILED'} "
           f"({sum(r['ok'] for r in results)}/{len(results)})")
@@ -343,6 +363,11 @@ def main() -> int:
     c.add_argument("--kinds", help="comma-separated: world,game,menu")
     c.add_argument("--jobs", type=int, default=0)
     c.add_argument("--timeout", type=int, default=1800)
+    # The tier the owner actually plays is gl_compatibility — the web export on
+    # GitHub Pages. Capturing only forward_plus is how a white-out survived a
+    # round that fixed it.
+    c.add_argument("--renderer", default="forward_plus",
+                   choices=["forward_plus", "gl_compatibility", "mobile"])
     c.set_defaults(func=cmd_capture)
 
     d = sub.add_parser("diff", help="per-pixel gate between two capture dirs")
@@ -363,6 +388,8 @@ def main() -> int:
     v.add_argument("--tier", choices=TIERS, default="fast")
     v.add_argument("--shots")
     v.add_argument("--kinds")
+    v.add_argument("--renderer", default="forward_plus",
+                   choices=["forward_plus", "gl_compatibility", "mobile"])
     v.add_argument("--jobs", type=int, default=0)
     v.add_argument("--timeout", type=int, default=1800)
     v.add_argument("--workdir", default=work)

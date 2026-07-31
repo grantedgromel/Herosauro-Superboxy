@@ -12,11 +12,27 @@ extends Control
 ##   SUSTAIN  a slow throb that fades in below a health threshold and stays. It
 ##            is the ambient "someone is about to die" signal.
 ##
-## OVER DAYLIGHT THIS HAD TO GET LOUDER. The old values were tuned against a dim
-## golden-hour frame; a 34% crimson edge over a blown-out white river simply is
-## not visible. The sustain is deeper and more saturated, and the slam is the new
-## part — an alpha ramp alone cannot compete with a bright backdrop, but a shape
-## that changes size can.
+## AND THEN IT HAD TO COME BACK DOWN. What was here read:
+##
+##   "OVER DAYLIGHT THIS HAD TO GET LOUDER. The old values were tuned against a
+##    dim golden-hour frame; a 34% crimson edge over a blown-out white river
+##    simply is not visible."
+##
+## That was true when it was written and it stopped being true one commit later.
+## The white-out was a bug, `56dec3b` fixed it, and nobody came back here — so a
+## vignette calibrated to survive a broken frame kept running over a correct one.
+## Driven in a real browser at full strength it covered roughly 95% of the screen
+## in crimson: not feedback, a red filter you play the game through.
+##
+## THE GEOMETRY IS THE PART THAT WAS WRONG, not just the alpha. `inner_stop` is
+## where the gradient starts ramping, as a fraction of the radial fill's radius,
+## and the radius only reaches the frame EDGE — a screen corner sits at 1.41x
+## that, well past the end, so it is fully opaque whatever happens in between.
+## An inner_stop of 0.36 therefore leaves a clear ellipse about a fifth of the
+## screen wide and tints everything outside it. A vignette wants to be clear
+## across the whole area a player is actually looking at, which is most of the
+## frame; these now hold transparent to two-thirds of the radius and do their
+## work in the outer third, which is what the word means.
 ##
 ## All three are pure alpha over a gradient texture, so this costs three
 ## transparent quads and works identically on Forward+ and gl_compatibility.
@@ -24,7 +40,11 @@ extends Control
 
 const FLASH_IN := 0.04
 const FLASH_OUT := 0.46
-const SUSTAIN_MAX_ALPHA := 0.52
+## Peak alpha for a full-strength hit. 0.80 and 0.95 were the old values, and two
+## near-opaque layers stack.
+const FLASH_MAX_ALPHA := 0.42
+const SLAM_MAX_ALPHA := 0.55
+const SUSTAIN_MAX_ALPHA := 0.30
 ## How far the slam ring grows past the frame at its peak, as a fraction of the
 ## viewport. Scale, not alpha, is what carries the punch over a bright scene.
 const SLAM_OVERSCAN := 0.16
@@ -47,9 +67,9 @@ func _ready() -> void:
 
 	# Back to front. The sustain sits deepest and holds the widest, softest band;
 	# the slam is the tightest and the brightest, so it reads on top of it.
-	_sustain = _layer(UIStyle.DANGER.darkened(0.18), 0.26)
-	_flash = _layer(UIStyle.DANGER, 0.36)
-	_slam = _layer(UIStyle.DANGER.lightened(0.15), 0.54)
+	_sustain = _layer(UIStyle.DANGER.darkened(0.18), 0.60)
+	_flash = _layer(UIStyle.DANGER, 0.66)
+	_slam = _layer(UIStyle.DANGER.lightened(0.15), 0.76)
 
 	set_process(false)
 
@@ -75,7 +95,7 @@ func flash(strength: float = 1.0, tint: Color = UIStyle.DANGER) -> void:
 	_retint(_slam, tint.lightened(0.15))
 
 	var t := create_tween()
-	t.tween_property(_flash, "modulate:a", s * 0.80, FLASH_IN)
+	t.tween_property(_flash, "modulate:a", s * FLASH_MAX_ALPHA, FLASH_IN)
 	t.tween_property(_flash, "modulate:a", 0.0, FLASH_OUT).set_trans(Tween.TRANS_SINE)
 
 	# The slam. Starts oversized and outside the frame, collapses to fit, then
@@ -85,7 +105,7 @@ func flash(strength: float = 1.0, tint: Color = UIStyle.DANGER) -> void:
 	_slam.scale = Vector2(over, over)
 	var st := create_tween()
 	st.set_parallel(true)
-	st.tween_property(_slam, "modulate:a", s * 0.95, SLAM_IN)
+	st.tween_property(_slam, "modulate:a", s * SLAM_MAX_ALPHA, SLAM_IN)
 	st.tween_property(_slam, "scale", Vector2.ONE, SLAM_IN + SLAM_OUT * 0.5) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	st.chain().tween_property(_slam, "modulate:a", 0.0, SLAM_OUT) \
