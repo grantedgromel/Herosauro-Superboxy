@@ -198,6 +198,7 @@ func _check_sun() -> void:
 					% [elev, SUN_ELEVATION_DEG])
 		var azim := rad_to_deg(atan2(from.z, from.x))
 		print("  azimuth      %.1f deg east of +x (want %.1f)" % [azim, SUN_AZIMUTH_DEG])
+		_check_water_sun(state, from)
 		if absf(azim - SUN_AZIMUTH_DEG) > 2.0:
 			_fail("sun azimuth %.1f deg, not the %.1f this stream's files are written for"
 					% [azim, SUN_AZIMUTH_DEG])
@@ -277,6 +278,48 @@ func _check_sun() -> void:
 ## so their cuts (ssil_intensity 0.60 -> 0.32, radius 4.0 -> 2.4, sdfgi_energy
 ## 0.95 -> 0.80, bounce_feedback 0.3 -> 0.2) have to be confirmed in a render. The
 ## numbers printed here are the floor those cuts are landing on top of.
+## The river's own copy of the sun vector must equal the real one.
+##
+## Mat_river is a ShaderMaterial sub-resource inside bridge_arena.tscn, and
+## water_wave.gdshader takes `sun_direction` as a uniform rather than reading
+## LIGHT0 — so the glint path is authored by hand and nothing connects it to the
+## light it is supposed to be reflecting. It was left at the original sunset
+## vector through the daylight conversion and TWO subsequent rounds, 121 degrees
+## of azimuth away from where SunLight actually points, and this probe passed the
+## whole time because it was only ever checking the shader's DEFAULT value.
+##
+## A hand-copied constant that names another node's property is exactly the thing
+## a gate is for: it cannot drift silently, and nobody has to remember it.
+func _check_water_sun(state: SceneState, sun_from: Vector3) -> void:
+	for i in state.get_node_count():
+		for p in state.get_node_property_count(i):
+			var mat = state.get_node_property_value(i, p)
+			if not (mat is ShaderMaterial):
+				continue
+			var shader: Shader = (mat as ShaderMaterial).shader
+			if shader == null:
+				continue
+			var names := PackedStringArray()
+			for u in shader.get_shader_uniform_list():
+				names.append(String(u.get("name", "")))
+			if not names.has("sun_direction"):
+				continue
+			var authored = (mat as ShaderMaterial).get_shader_parameter("sun_direction")
+			var node_name := state.get_node_name(i)
+			if authored == null:
+				print("  %s.sun_direction unset — inherits the shader default" % node_name)
+				_fail("%s leaves sun_direction unset; it must name SunLight's own vector"
+						% node_name)
+				continue
+			var v: Vector3 = (authored as Vector3).normalized()
+			var off := rad_to_deg(acos(clampf(v.dot(sun_from), -1.0, 1.0)))
+			print("  %s.sun_direction %s   %.1f deg off SunLight"
+					% [node_name, str(v.snapped(Vector3.ONE * 0.001)), off])
+			if off > 2.0:
+				_fail("%s.sun_direction is %.1f deg from SunLight — the glint path points "
+						% [node_name, off] + "somewhere the sun is not")
+
+
 func _check_fill_rig(sun_color: Color, sun_energy: float, elev: float) -> void:
 	var env: Environment = load(ENV_PATH)
 	var sky_mat := env.sky.sky_material as ShaderMaterial

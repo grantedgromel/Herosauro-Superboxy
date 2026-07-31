@@ -254,7 +254,27 @@ ssao_radius = 0.9
 ssao_intensity = 1.6
 ssao_power = 1.2
 ssao_detail = 0.4
-ssao_light_affect = 0.15
+; 0.15 -> 0.50. This is the global half of Round 3's contact-darkening finding.
+;
+; ssao_light_affect decides how much of the occlusion term is allowed to touch
+; DIRECT light; the remainder lands only on ambient. At 0.15 essentially all of
+; it landed on ambient — and under a 2.8-energy key on sunlit granite, ambient is
+; a small fraction of what the surface returns, so the occlusion was being spent
+; where there was almost nothing to darken. Two independent critics measured the
+; result the same way: cast shadows are present and correct, but NOTHING has
+; contact darkening where it meets the ground, and every object reads as planted
+; by its cast shadow alone.
+;
+; The world stream did what geometry can — moulded feet, shaft swells, contact
+; patches — and moved one lamp's ground transition from 4/39/128/174 to
+; 4/21/66/180, a ramp instead of a step. That is a real but small win at a ten
+; pixel foot, and it correctly reported that the rest lives here.
+;
+; 0.50 rather than the 0.4-0.6 recommended midpoint: AO on direct light is not
+; physical (a shadow term already accounts for what the key cannot see), so this
+; is a deliberate art lever and half is as far as it should go before contact
+; shadows start reading as dirt in the crease of every sunlit corner.
+ssao_light_affect = 0.5
 ssil_enabled = true
 ssil_radius = 2.4
 ssil_intensity = 0.32
