@@ -82,13 +82,19 @@ func _ready() -> void:
 	get_tree().quit(1 if _fail > 0 else 0)
 
 
+## Order matters, once. The debris-lifetime and determinism checks run BEFORE the
+## first fight starts, because a live giant smashing barrels on the deck produces
+## fresh debris the whole time and a "does it free itself" measurement taken over
+## a running fight measures the fight. (Found the hard way: the first version of
+## this probe reported fourteen leaked shards, all of which turned out to be
+## three seconds old and made by the boss.)
 func _run() -> void:
 	await _check_layers()
 	_check_meshes()
 	await _check_break_ladder()
-	await _check_five_legs()
 	await _check_debris_budget()
 	await _check_determinism()
+	await _check_five_legs()
 	await _check_placement()
 	await _check_spawn_drop_margin()
 	await _check_settling()
@@ -433,7 +439,10 @@ func _check_debris_budget() -> void:
 	var host := _scratch()
 
 	# Smash twelve props back to back — four props' worth more than the budget
-	# can hold — and watch the ceiling.
+	# can hold — and watch the ceiling. Over the deck at |z| 4.4, i.e. in the prop
+	# lane, so the shards land on the surface they land on in a real fight rather
+	# than falling into the river and being culled early, which would flatter the
+	# "it frees itself" claim enormously.
 	var peak := 0
 	var peak_static := 0
 	for i in 12:
@@ -441,7 +450,7 @@ func _check_debris_budget() -> void:
 		var prop := scene.instantiate() as BreakableProp
 		prop.freeze = true
 		host.add_child(prop)
-		prop.global_position = Vector3(float(i) * 2.0 - 12.0, 6.0, -30.0)
+		prop.global_position = Vector3(float(i) * 2.4 - 30.0, 3.4, 4.4)
 		await _settle(1)
 		prop.shatter(Vector3.RIGHT)
 		await _thaw()
@@ -462,6 +471,16 @@ func _check_debris_budget() -> void:
 	await _settle(int(lifetime * TICK))
 	var left := get_tree().get_nodes_in_group("debris").size()
 	print("  -- %.1f s later: %d shards left, counter %d" % [lifetime, left, DebrisPiece.live_count()])
+	if left > 0:
+		# Anything still here has to say why, or the next person is guessing.
+		var sample := 0
+		for d in get_tree().get_nodes_in_group("debris"):
+			if sample >= 4:
+				break
+			sample += 1
+			print("     stuck shard: dying=%s life=%.2f y=%.2f asleep=%s frozen=%s"
+				% [d.get("_dying"), float(d.get("_life")), (d as Node3D).global_position.y,
+					(d as RigidBody3D).sleeping, (d as RigidBody3D).freeze])
 	_ok(left == 0, "every shard freed itself (%d left)" % left)
 	_ok(DebrisPiece.live_count() == 0,
 		"the budget is fully returned (counter %d)" % DebrisPiece.live_count())

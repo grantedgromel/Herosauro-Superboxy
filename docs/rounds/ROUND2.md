@@ -241,3 +241,67 @@ the process needs a second measurement before it spends a round.
 That is right, and it is the correct reading of the channel-correlation numbers.
 More dirt on a flat albedo produces measurable noise carrying no material
 information. Hue-varying albedo is the lever; grunge is not.
+
+## Both critics scored, and they disagree on the one thing that matters
+
+| shot | critic A2 | critic B2 |
+|---|---|---|
+| `03_rail_macro` | 2.8 | — |
+| `01_deck_mid` | 2.6 | — |
+| `02_deck_eye` | — | 2.6 |
+| `07_ribeira` | — | 3.1 |
+| `06_river_wide` | — | 2.9 |
+
+Round mean **2.8**, against Round 1's 2.5.
+
+Critic A2's leading claim was *"there is no directional light in this scene at
+all"*, in both its frames. Critic B2, reviewing three different frames of the
+same build with no knowledge of A2, wrote the opposite:
+
+> **The railing shadow dapple falling across the right kerb and walkway.**
+> Correct direction, correct softness falloff, correct scale. It is the best
+> lighting event in the frame and the only thing proving there is a real key
+> light. Protect it.
+
+and, on `06_river_wide`:
+
+> The cast shadow of the small red-roof house onto the orange building's left
+> face, and the chimney shadows on the roof planes. Correct direction, correct
+> softness, consistent with the pier shading. **This proves a real directional
+> key exists** — the problem is everywhere else is floating on ambient, not that
+> the key is wrong.
+
+Two independent critics, opposite conclusions, and the lead's own measurement —
+a 57% bimodal drop across one cobble row — settles it in B2's favour. A2's
+sampling method, row means along an axis the shadows run parallel to, explains
+the disagreement completely.
+
+**The useful form of A2's observation survives B2's correction:** nothing has
+*contact* darkening. Objects are planted by cast shadow alone and float where
+they meet the ground. That is a real defect, it is what A2 was actually seeing,
+and it is fixable — which "there is no directional light" was not.
+
+## New this round, and confirmed
+
+- **A regression the lead caused.** Raising the Gaia lodge signs out of the
+  roofline fixed their legibility and created the worst-made object in the game.
+  Both critics found it; B2 found it in **all three** of its frames and named it
+  the highest-leverage single fix available. It is a flat black quad with a
+  low-resolution blocky bitmap font, truncated mid-word, clipping through the
+  rooftops behind. The real Gaia signs are freestanding 3-D letter frames on
+  rooftop scaffolds; that is what it should have become, not a billboard.
+- **Undressed blockout in the hero foreground** of `06_river_wide` — a blank
+  orange prism, nearest object to camera, most saturated region in frame
+  (sat 0.506), with no windows, doors or balconies. `facade_builder.gd` produces
+  punched geometry elsewhere in the same frame, so something bypasses it.
+- **Two outright geometry bugs on the water**: a low-poly terrain sheet punching
+  through the granite quay and lying flat across the river, and a hard-edged
+  mottled decal floating on the surface with crisp polygonal edges.
+- **Aerial perspective runs backwards.** Same material class, left bank, near to
+  far: saturation 0.265 → 0.301 → 0.323. Saturation *rising* with distance is
+  the definition of an inverted atmospheric model. Worse, the haze is landing on
+  the **bridge** (sat 0.280) while buildings at the same depth ignore it
+  (0.323, 0.367) — the title landmark is the most washed-out object at its own
+  depth.
+- **Emissively lit yellow windows in full midday sun**, in two frames. A
+  lighting-logic error rather than a material one.
