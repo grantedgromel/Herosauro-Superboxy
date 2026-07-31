@@ -134,6 +134,10 @@ func _process(_delta: float) -> void:
 				_advance("start pressed")
 		6:
 			if _clock > 1.4:
+				# Wall time, minus the 1.4 s this step deliberately waits and the
+				# curtain fade inside it. What is left is main.gd's blocking arena
+				# build — the cost the title screen used to pay a second copy of.
+				_fight_ms = Time.get_ticks_msec() - _fight_ms - 1400.0
 				_note("fight running")
 				GameManager.go_to_menu()
 				_advance("back to menu")
@@ -295,8 +299,9 @@ func _count_current_cameras(node: Node) -> int:
 
 func _report() -> void:
 	_log.append("")
-	_log.append("  MENU -> PLAYING took %.0f ms of wall time, nearly all of it main.gd's"
-			% (Time.get_ticks_msec() - _fight_ms))
+	_log.append("  title screen up in %.0f ms; START then stalls ~%.0f ms in main.gd's"
+			% [_boot_ms, maxf(_fight_ms, 0.0)])
+	_log.append("  own arena build, which is the stall the menu used to pay TWICE.")
 	# The title screen is a picture. Not "one environment, carefully isolated" —
 	# none at all.
 	_ok(_menu_envs == 0, "no WorldEnvironment exists while the menu is up (peak %d)" % _menu_envs)

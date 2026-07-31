@@ -33,12 +33,13 @@ extends RefCounted
 ##
 ## So the two levers here are, in that order:
 ##
-##   1. `CHUNK_SIZE` — split each material's bake on a world grid so instances
-##      have tight AABBs and culling starts working at all. This is the enabling
-##      change: distance culling, cascade culling and frustum culling are all
-##      no-ops until it lands.
-##   2. `SHADOW_RADIUS` — with tight AABBs, dropping the background out of the
+##   1. `CHUNK_RINGS` — cut each material's bake on distance from the arena, so a
+##      surface belongs to a known band instead of to the whole world. This is
+##      the enabling change: every other lever is a distance test, and a distance
+##      test cannot be applied to an instance that is everywhere at once.
+##   2. `SHADOW_RADIUS` — with the bakes cut, dropping the background out of the
 ##      shadow pass is a per-chunk decision instead of an all-or-nothing one.
+##      Measured: 2,188,828 triangles submitted to the cascades, down to 199,795.
 ##
 ## --- WHY IT IS TIERED RATHER THAN GLOBAL -------------------------------------
 ##
@@ -85,18 +86,23 @@ const SHADOW_RADIUS := 66.0
 ## point 45 m out, so it passed the radius check and pushed all 9,392 of its
 ## triangles through the cascades on account of its near edge.
 ##
-## Rings fix both, because they are the shape the tests are actually asking
-## about. Every lever here is a distance test — cast shadows or not, FULL or
-## MEDIUM or LOW, returns or no returns — so cutting on distance makes each one
-## exact at its own boundary instead of approximate at a grid line, and four
-## rings cost a quarter of the draw calls twelve grid cells did.
+## Rings fix both, because they are the shape the test is actually asking about.
+## The one decision a chunk has to carry is "does this cast", and that is a
+## distance question, so cutting on distance makes it exact at its own boundary
+## instead of approximate at a grid line.
+##
+## ONE BOUNDARY, and it is SHADOW_RADIUS, because that is the only thing the cell
+## is consulted for — the detail and return ranges below are per-building tests
+## made against a Spec's own position and need no cell at all. Four rings were
+## measured against two and submitted exactly the same 199,795 triangles to the
+## cascades for 315 draw calls against 209, so the extra bands bought nothing.
 ##
 ## What is given up is locality along the river: a ring wraps both banks, so a
 ## camera looking at Porto cannot frustum-cull Gaia. That is worth very little
 ## here — every vantage in tools/shots.json and the game's own chase camera see
 ## both banks at once — and the near/far split TerrainBatch already makes at
 ## NEAR_Z_FAR covers the one case where it would have paid.
-const CHUNK_RINGS: Array[float] = [SHADOW_RADIUS, FACADE_RETURN_RANGE, FACADE_LOW_RANGE, 155.0]
+const CHUNK_RINGS: Array[float] = [SHADOW_RADIUS]
 
 ## Beyond this, a Ribeira house is built at MEDIUM detail on the reduced tier:
 ## punched openings with real reveals, surrounds, sills and a barrel roof, but no

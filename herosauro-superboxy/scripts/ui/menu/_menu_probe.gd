@@ -132,6 +132,11 @@ func _probe_menu_cost() -> void:
 	# For scale: what the backdrop used to cost, measured the same way. This is
 	# the number the title screen was paying before it went static, and it is
 	# still what main.gd pays on START — which is why the curtain is still there.
+	#
+	# It is a PRINT, never an assertion. The arena belongs to the world stream and
+	# it is routinely half-built while that stream is in flight; script errors from
+	# it landing in this probe's output are that, not a menu regression. Nothing
+	# below this line can fail the probe.
 	var arena_scene: PackedScene = load("res://scenes/world/bridge_arena.tscn")
 	var a0 := Time.get_ticks_usec()
 	var arena: Node = arena_scene.instantiate()
