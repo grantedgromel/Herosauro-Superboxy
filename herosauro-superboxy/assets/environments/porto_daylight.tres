@@ -237,33 +237,65 @@ reflected_light_source = 2
 ;
 ; --- WHAT THAT DOES TO THE FRAME, MEASURED ---------------------------------
 ;
-; 01_deck_mid and 02_deck_eye, before and predicted-then-confirmed after:
+; Same regions, same cameras, all three rounds. Luminance out of 255, and saturation
+; in brackets where it is the point:
 ;
-;                                    r3     before    after
-;     deck fascia (16.9% of 01)      104      187      167     the thing that was white
-;     02 playable deck               113      167      147
-;     far river / fog band           176      176      156     no longer level with the deck
-;     Ribeira facades                160      157      137
-;     sky zenith, luminance          141      141      124
-;     sky zenith, B channel          201      201      179
-;     parapet shadow                  91       58       37
+;                                     r3        before       after
+;     01 deck fascia, 16.9% of frame  104 (.29)  183 (.14)   160 (.16)   <- was white
+;     02 playable deck                105 (.18)  155 (.12)   132 (.14)
+;     02 far river / fog band         176        176         154        never moved
+;     01 Ribeira facades              155        157         132
+;     01 sky zenith, luminance        141        141         115
+;     01 sky zenith, B channel        201        201         178
+;     02 parapet shadow                52         58          41
 ;
-; The deck and the fog band had converged on 170-190 with nothing between them, which
-; is exactly "the bridge and the sky read as one white mass"; they are 11 levels apart
-; on the right side now. Note the fascia does NOT go back to r3's 104 and must not: the
-; corridor's albedo gain is RELATIVE and exposure is a global scale, so a global scale
-; cannot undo it. Deck-to-facade ratio was 0.65 at r3, 1.19 before, 1.22 after. The
-; corridor stays the brightest thing in frame, which is what the RUBRIC asks and what
-; the albedo work bought. All that comes off is the absolute lift that rode in with it.
+; Read the third row first: the fog band is IDENTICAL across r3 and before, to within a
+; tenth of a level, and so is every sky row. Nothing atmospheric moved. What moved was
+; the ground, 105 -> 155 and 104 -> 183, until the two largest masses in the frame sat
+; inside one narrow band at the top of the curve — and the deck's saturation halved on
+; the way up, because at u = 0.67 the transfer has stopped spending levels on
+; differences and colour is a difference. A large, bright, colourless surface next to
+; another one is what "the bridge and the sky read as one white mass" describes.
 ;
-; The sky gets BLUER rather than duller, which is the knee working in reverse: the
-; zenith's channels sit at u 0.122 / 0.286 / 0.600 and the lower two move onto the
-; steep part of the curve while the top one stays on the shallow part, so measured
-; saturation goes 0.57 -> 0.72.
+; TWO THINGS THIS DELIBERATELY DOES NOT DO, both of which are the same fact:
+;
+; The fascia does not go back to r3's 104, and must not. The corridor's albedo gain is
+; RELATIVE and exposure is a global scale, so a global scale cannot undo it — the
+; deck-to-facade ratio runs 0.67 at r3, 1.17 before, 1.20 after. The corridor stays the
+; brightest thing in frame, which is what the RUBRIC asks for and what the albedo work
+; bought; all that comes off is the absolute lift that rode in with it.
+;
+; And for the same reason the fog band still sits above the deck — 154 against 132,
+; essentially the ratio it already had (1.13 before, 1.16 after). That is NOT fixed
+; here and cannot be, and the instrument for it is the sky shader's horizon hem rather
+; than anything in this block. See the note above horizon_color in porto_sky.gdshader.
+;
+; The sky gets BLUER rather than duller, which is the knee running in reverse: the
+; zenith's three channels sit at u 0.122 / 0.286 / 0.600, so the two dark ones drop
+; onto the steep part of the curve while the bright one stays on the shallow part and
+; the gap between them widens. Measured zenith saturation, 0.572 -> 0.746 in
+; 01_deck_mid and 0.767 -> 0.869 in 02_deck_eye, i.e. up 13-30% while its luminance
+; came DOWN. That is the answer to the obvious objection, which is that dropping the
+; exposure must cost the one thing Round 1 said was working. The playable deck recovers
+; the same way for the same reason: its own saturation goes 0.119 -> 0.140, and its
+; local contrast — the thing a normal map and a detail layer exist to produce — comes
+; back 21%, CoV 0.117 -> 0.142 on the near deck and 0.097 -> 0.117 on the fascia. Not
+; one texture, material or map changed to buy that. It is entirely the surface being
+; moved back onto a part of the curve that still has levels to spend on differences.
+;
+; A NOTE ON HOW THE NUMBER WAS CHOSEN, because it is reusable and it is cheap. The
+; whole "after" column was PREDICTED before anything was rendered, by inverting the
+; measured transfer on the before-capture pixel by pixel — new = T(k * T-inverse(old))
+; with k the exposure ratio — and only then confirmed. Rendered against predicted, on
+; 01_deck_mid: mean 116.3 / 117.0, median 129 / 130, p99 190 / 191, fraction over 200
+; 0.43% / 0.43%, fascia 160.3 / 160.4. A capture on this hardware costs ten to fifteen
+; minutes; the prediction costs two seconds, and it is exact for any change that is
+; purely a change of transfer. It is not valid for anything scene-side — a fill energy,
+; sky_energy, an albedo — because those move the input rather than the curve.
 ;
 ; --- WHAT THIS DOES NOT FIX ------------------------------------------------
 ;
-; The 99th percentile lands at 191 and 180, i.e. the frame still contains nothing white.
+; The 99th percentile lands at 190 and 180, i.e. the frame still contains nothing white.
 ; That is the honest answer and the previous round already wrote it down before talking
 ; itself out of it: with no cloud, no sun disk and no glint in frame, the brightest
 ; object in the arena is a sunlit kerb, and a sunlit kerb is not white. Buying a white

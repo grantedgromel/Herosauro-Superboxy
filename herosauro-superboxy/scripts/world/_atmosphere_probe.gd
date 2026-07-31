@@ -493,11 +493,20 @@ func _luma(c: Color) -> float:
 #      and the curve has stopped spending levels on differences up there. That is the
 #      measured signature of the regression and not a guess: the near deck in
 #      02_deck_eye lost 41% of its local contrast (CoV 0.199 -> 0.117) and 41% of its
-#      saturation (0.124 -> 0.073) while gaining 55 levels of luminance.
+#      saturation (0.124 -> 0.073) while gaining 55 levels of luminance. Re-solving the
+#      exposure gave both back — CoV 0.142, saturation 0.081 — with no change to any
+#      material, because the surface stopped being asked to live above the knee.
 #
 # Both would have caught this the round it landed. At the shipped exposure of 0.72 the
 # grey card sat +0.50 EV hot and all three ground surfaces sat at u = 0.64-0.74,
 # a third of a stop past the knee.
+#
+# WHY NOT A BLOWN-HIGHLIGHT CEILING, which is the obvious gate to reach for and is the
+# wrong one. Fraction of the frame at or above 250, across all three rounds and both
+# shots: 0.00%, every time, including the round the owner called white. The frame never
+# clipped and a clipping gate would have passed it every round while it went white. A
+# blown frame and a frame whose mid-tones have climbed into the shoulder are different
+# defects and only the second one happened here.
 
 ## The tonemapper's own middle grey. Measured, not assumed: a full-frame flat field at
 ## u = 0.18 through this exact resource comes back at 125/255, which is where middle
@@ -601,15 +610,15 @@ func _check_exposure_anchor(env: Environment) -> void:
 	if _corridor_presents.is_empty():
 		_fail("the corridor's delivered albedos were not measured; the knee cannot be checked")
 		return
-	for name in _corridor_presents:
-		var u: float = float(_corridor_presents[name]) * e_h * env.tonemap_exposure
+	for surface in _corridor_presents:
+		var u: float = float(_corridor_presents[surface]) * e_h * env.tonemap_exposure
 		print("  knee         %-12s presents %.3f -> u %.3f  (knee %.2f)"
-				% [name, _corridor_presents[name], u, TRANSFER_KNEE])
+				% [surface, _corridor_presents[surface], u, TRANSFER_KNEE])
 		if u > TRANSFER_KNEE:
 			_fail(("the %s sits at u %.3f, past the transfer's knee at %.2f. Above it the "
 					+ "curve carries under 45 levels per stop, so the surface the game is "
 					+ "played on is spending its own texture and chroma on being bright.")
-					% [name, u, TRANSFER_KNEE])
+					% [surface, u, TRANSFER_KNEE])
 
 
 # --- Materials ---------------------------------------------------------------
