@@ -1352,10 +1352,14 @@ static func _emit_return_window(batch: Batch, face: Transform3D, spec: Spec,
 		return
 
 	var trim_b := batch.baker(Batch.trim())
-	# Surround: the flat frame plus the return round its outer edge, so it is a
-	# solid moulding standing off the wall rather than a card lying on it.
+	# Surround: the flat frame, the return round its outer edge and the return
+	# round its inner one — so it is a solid moulding standing off the wall rather
+	# than a card lying on it, and the opening reads as set 11 cm back inside it.
+	# Without the inner return the frame is open at the mouth and disappears the
+	# moment the camera is anywhere but square on.
 	Geo.ring(trim_b, face, x0, sill_y, x1, y1,
 			RETURN_BAND, RETURN_BAND, 0.0, RETURN_BAND, RETURN_PROUD)
+	Geo.tube(trim_b, face, x0, sill_y, x1, y1, 0.0, RETURN_PROUD, true)
 	var outer := Geo.ring_bounds(x0, sill_y, x1, y1, RETURN_BAND, RETURN_BAND, 0.0, RETURN_BAND)
 	Geo.tube(trim_b, face, outer.position.x, outer.position.y, outer.end.x, outer.end.y,
 			0.0, RETURN_PROUD, false)
