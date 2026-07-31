@@ -797,7 +797,7 @@ static func surface_voice(surface: int) -> Dictionary:
 				"surface": ToonFactory.Surface.GRANITE,
 				"modes": [[142.0, 0.055, 0.50], [356.0, 0.040, 0.40],
 					[790.0, 0.028, 0.30], [1480.0, 0.018, 0.16]],
-				"noise": 0.62, "noise_hz": 1500.0, "noise_q": 0.55, "noise_decay": 0.030,
+				"noise": 0.62, "noise_hz": 1500.0, "noise_q": 0.90, "noise_decay": 0.030,
 				"body": 0.45, "body_hz": 58.0, "body_decay": 0.10,
 				"hit_dur": 0.22, "break_dur": 0.55, "break_drop": 0.80,
 				"grains": 26, "grain_spread": 1.10, "grain_hz": Vector2(220.0, 900.0),
@@ -811,7 +811,7 @@ static func surface_voice(surface: int) -> Dictionary:
 				"surface": ToonFactory.Surface.COBBLE,
 				"modes": [[205.0, 0.045, 0.48], [520.0, 0.032, 0.40],
 					[1120.0, 0.022, 0.28], [2050.0, 0.014, 0.15]],
-				"noise": 0.66, "noise_hz": 2000.0, "noise_q": 0.50, "noise_decay": 0.026,
+				"noise": 0.66, "noise_hz": 2200.0, "noise_q": 0.85, "noise_decay": 0.026,
 				"body": 0.34, "body_hz": 70.0, "body_decay": 0.08,
 				"hit_dur": 0.20, "break_dur": 0.48, "break_drop": 0.84,
 				"grains": 30, "grain_spread": 1.00, "grain_hz": Vector2(300.0, 1200.0),
@@ -826,8 +826,12 @@ static func surface_voice(surface: int) -> Dictionary:
 			# hoop rolling away actually does.
 			return {
 				"surface": ToonFactory.Surface.IRON,
-				"modes": [[318.0, 1.35, 0.46], [742.0, 1.05, 0.38],
-					[1455.0, 0.80, 0.30], [2380.0, 0.55, 0.20], [3310.0, 0.35, 0.12]],
+				# Weighted UP the partial series rather than down it, unlike every
+				# other row here. A struck hoop is bright — the fundamental is
+				# what rings longest but the second and third partials are what
+				# make it read as metal in the first fifty milliseconds.
+				"modes": [[318.0, 1.35, 0.34], [742.0, 1.05, 0.40],
+					[1455.0, 0.80, 0.36], [2380.0, 0.55, 0.26], [3310.0, 0.35, 0.16]],
 				"noise": 0.22, "noise_hz": 3200.0, "noise_q": 1.20, "noise_decay": 0.010,
 				"body": 0.18, "body_hz": 96.0, "body_decay": 0.05,
 				"hit_dur": 1.15, "break_dur": 1.60, "break_drop": 0.93,
@@ -847,7 +851,7 @@ static func surface_voice(surface: int) -> Dictionary:
 			return {
 				"surface": ToonFactory.Surface.PLASTER,
 				"modes": [[158.0, 0.030, 0.42], [372.0, 0.022, 0.30], [700.0, 0.014, 0.18]],
-				"noise": 0.70, "noise_hz": 1150.0, "noise_q": 0.45, "noise_decay": 0.026,
+				"noise": 0.70, "noise_hz": 1150.0, "noise_q": 0.80, "noise_decay": 0.026,
 				"body": 0.40, "body_hz": 64.0, "body_decay": 0.09,
 				"hit_dur": 0.18, "break_dur": 0.44, "break_drop": 0.78,
 				"grains": 24, "grain_spread": 0.80, "grain_hz": Vector2(180.0, 700.0),
@@ -899,7 +903,7 @@ static func surface_voice(surface: int) -> Dictionary:
 			return {
 				"surface": ToonFactory.Surface.FLAT,
 				"modes": [[210.0, 0.045, 0.48], [440.0, 0.030, 0.34], [820.0, 0.018, 0.20]],
-				"noise": 0.45, "noise_hz": 1200.0, "noise_q": 0.70, "noise_decay": 0.022,
+				"noise": 0.45, "noise_hz": 1100.0, "noise_q": 0.80, "noise_decay": 0.022,
 				"body": 0.28, "body_hz": 76.0, "body_decay": 0.06,
 				"hit_dur": 0.22, "break_dur": 0.40, "break_drop": 0.86,
 				"grains": 14, "grain_spread": 0.70, "grain_hz": Vector2(280.0, 1200.0),

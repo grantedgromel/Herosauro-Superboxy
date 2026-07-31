@@ -44,12 +44,16 @@ extends Node
 ##
 ##   godot --headless --path . scripts/audio/_audio_probe.tscn
 
-## Frequencies the brightness analysis samples, log-spaced 60 Hz -> 6 kHz. Sixteen
-## Goertzel bins is a coarse spectrum, but it is more than enough to separate a
-## 142 Hz granite crack from a 3.3 kHz terracotta one and it costs one pass over
-## the buffer per bin.
+## Frequencies the brightness analysis samples, log-spaced 250 Hz -> 6 kHz.
+## Sixteen Goertzel bins is a coarse spectrum, but it is more than enough to
+## separate a granite crack from a terracotta one and it costs one pass over the
+## buffer per bin.
+##
+## It starts at 250 Hz to match the high-pass the ring-down uses, and for the
+## same reason: below that is the body sweep every impact puts into the deck, and
+## that is a property of the blow rather than of the material.
 const BANDS := 16
-const BAND_LO := 60.0
+const BAND_LO := 250.0
 const BAND_HI := 6000.0
 
 ## How much of a stream the brightness analysis looks at. The attack is where the
@@ -617,21 +621,30 @@ func _check_surface_voices() -> void:
 	# A break must be a bigger event than a hit, on every surface, or the props
 	# stream's two-tier destruction model has no audio counterpart.
 	#
-	# ENERGY, not RMS. A break is longer as well as louder, and RMS divides by
-	# length — measured that way a stretched-out fracture reports as quieter than
-	# the knock it is twice the size of, which is an artefact of the metric and
-	# not a property of the sound.
+	# Compared against BOTH VOICES a break dispatches, because both of them play:
+	# the fracture alone is only part of the event, and on the deadest materials
+	# it is the smaller part — plaster's fracture is 1.1x its knock while plaster's
+	# fracture plus the limewash coming down is 2.6x it.
+	#
+	# ENERGY, not RMS. A break is longer as well as louder and RMS divides by
+	# length, so measured that way a stretched-out fracture reports as quieter
+	# than the knock it is twice the size of — an artefact of the metric.
 	var not_bigger: Array = []
+	var ratios: Array = []
 	for s in ToonFactory.Surface.size():
 		var hit: AudioStreamWAV = lib[_am.call("_surface_key", "prop_hit", s)]
 		var brk: AudioStreamWAV = lib[_am.call("_surface_key", "prop_break", s)]
+		var deb: AudioStreamWAV = lib[_am.call("_surface_key", "prop_debris", s)]
 		var he: float = _energy(_pcm(hit))
-		var be: float = _energy(_pcm(brk))
-		if brk.get_length() <= hit.get_length() or be <= he * 1.2:
-			not_bigger.append("%s(%.2fx)" % [str(names[s]).to_lower(), be / maxf(1e-9, he)])
+		var be: float = _energy(_pcm(brk)) + _energy(_pcm(deb))
+		var r: float = be / maxf(1e-9, he)
+		ratios.append("%s %.1fx" % [str(names[s]).to_lower(), r])
+		if brk.get_length() <= hit.get_length() or r < 1.5:
+			not_bigger.append("%s(%.2fx)" % [str(names[s]).to_lower(), r])
+	print("  -- destruction against survival, by energy: ", " | ".join(PackedStringArray(ratios)))
 	_ok(not_bigger.is_empty(),
-		"a break is longer than a hit and carries at least 20%% more energy on every "
-			+ "surface (%s)" % ("all" if not_bigger.is_empty() else str(not_bigger)))
+		"a break is longer than a hit and carries at least half again its energy on "
+			+ "every surface (%s)" % ("all" if not_bigger.is_empty() else str(not_bigger)))
 
 	# The debris tail must actually be debris — many separate arrivals, not one
 	# smear. Counted as peaks in the 5 ms envelope.

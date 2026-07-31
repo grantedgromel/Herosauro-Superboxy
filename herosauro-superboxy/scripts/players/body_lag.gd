@@ -143,6 +143,9 @@ var _lean: Vector3 = Vector3.ZERO
 var _lean_vel: Vector3 = Vector3.ZERO
 var _twist: float = 0.0
 var _twist_vel: float = 0.0
+## Largest angle the last write actually MOVED a bone by, read back off the
+## skeleton rather than assumed. See `written_angle()`.
+var _written: float = 0.0
 
 
 func _ready() -> void:
@@ -204,6 +207,20 @@ func twist_angle() -> float:
 	return absf(_twist)
 
 
+## How far the last write actually moved a bone, in radians, measured by reading
+## the pose back off the skeleton after writing it.
+##
+## This is the assertion that the modifier is doing anything at all. A
+## `SkeletonModifier3D` that is in the wrong place in the stack, or whose
+## skeleton has already been committed for the frame, silently writes into
+## nothing — the spring keeps swinging, the numbers keep looking healthy, and the
+## hero never moves. Only a read-back can tell those two apart, and only from in
+## here: the AnimationMixer overwrites the pose before any outside observer gets
+## a look at it.
+func written_angle() -> float:
+	return _written
+
+
 ## Drop everything. Called from `PlayerBase.reset_state()`, so a hero rebuilt
 ## between runs does not come back mid-swing — and so the first frame after a
 ## teleport differences against the teleport rather than through it.
@@ -228,6 +245,7 @@ func _process_modification_with_delta(delta: float) -> void:
 	if _lean.length() < SLEEP and absf(_twist) < SLEEP:
 		# Neutral: write NOTHING. See the class doc — this is what makes an idle
 		# hero identical to one built before this file existed.
+		_written = 0.0
 		return
 	_apply(skel)
 
@@ -298,6 +316,7 @@ func _apply(skel: Skeleton3D) -> void:
 		frames[idx] = Basis.IDENTITY if parent < 0 \
 			else skel.get_bone_global_pose(parent).basis.orthonormalized().inverse()
 
+	_written = 0.0
 	for idx in _bones:
 		var share: float = _bones[idx]
 		var inv: Basis = frames[idx]
@@ -308,4 +327,7 @@ func _apply(skel: Skeleton3D) -> void:
 			q = q * Quaternion((inv * up_axis).normalized(), _twist * share)
 		# Pre-multiplied: the offset is applied in the parent's frame, so it tips
 		# the whole limb rather than spinning the bone about its own length.
-		skel.set_bone_pose_rotation(int(idx), q * skel.get_bone_pose_rotation(int(idx)))
+		var before: Quaternion = skel.get_bone_pose_rotation(int(idx))
+		skel.set_bone_pose_rotation(int(idx), q * before)
+		# Read back rather than trust: see written_angle().
+		_written = maxf(_written, absf(before.angle_to(skel.get_bone_pose_rotation(int(idx)))))

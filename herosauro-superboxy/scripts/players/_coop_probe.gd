@@ -1002,6 +1002,7 @@ func _check_secondary_motion() -> void:
 	# 32 m/s in one tick, and `_aim_at_camera` snaps the yaw on the same frame.
 	var peak_dash := 0.0
 	var peak_twist := 0.0
+	var peak_written := 0.0
 	Input.action_press(&"p2_ability")
 	await get_tree().physics_frame
 	Input.action_release(&"p2_ability")
@@ -1009,10 +1010,16 @@ func _check_secondary_motion() -> void:
 		await get_tree().physics_frame
 		peak_dash = maxf(peak_dash, boxy_lag.lean_angle())
 		peak_twist = maxf(peak_twist, boxy_lag.twist_angle())
+		peak_written = maxf(peak_written, boxy_lag.written_angle())
 	print("\n  -- secondary motion: a run peaks the chain at %.3f rad, "
 		% peak_lean
-		+ "the Boxy Dash at %.3f rad with %.3f rad of twist (caps %.2f / %.2f)"
-			% [peak_dash, peak_twist, BodyLag.MAX_LEAN, BodyLag.MAX_TWIST])
+		+ "the Boxy Dash at %.3f rad with %.3f rad of twist (caps %.2f / %.2f); "
+			% [peak_dash, peak_twist, BodyLag.MAX_LEAN, BodyLag.MAX_TWIST]
+		+ "the largest rotation that reached a bone was %.4f rad" % peak_written)
+	# The one that says the modifier is not writing into thin air: measured by
+	# reading the pose back off the skeleton, inside the modifier, after the write.
+	_ok(peak_written > 0.0,
+		"the lag actually reaches the skeleton (largest bone move %.4f rad)" % peak_written)
 	_ok(peak_dash <= BodyLag.MAX_LEAN + 0.001 and peak_twist <= BodyLag.MAX_TWIST + 0.001,
 		"the dash cannot drive the chain past its bound (%.3f / %.3f rad)"
 			% [peak_dash, peak_twist])
@@ -1028,6 +1035,9 @@ func _check_secondary_motion() -> void:
 			and is_zero_approx(boxy_lag.twist_angle()),
 		"a hero who stops settles back to EXACTLY neutral (%.5f / %.5f rad)"
 			% [lag.lean_angle(), boxy_lag.lean_angle()])
+	_ok(is_zero_approx(lag.written_angle()) and is_zero_approx(boxy_lag.written_angle()),
+		"...and writes nothing at all into the pose while neutral, so an idle "
+			+ "frame is what it was before the modifier existed")
 
 
 # --- Downed heroes do not slide ---------------------------------------------

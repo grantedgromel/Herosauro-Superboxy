@@ -237,5 +237,31 @@ light_color = Color(1, 0.935, 0.855, 1)
 light_energy = 2.8
 light_angular_distance = 0.53
 shadow_enabled = true
+; directional_shadow_max_distance was never set, so it sat on Godot's default of
+; 100 m — in a world that spans about 900 units of river with the Ribeira
+; terraces at 60-150 m and the photogrammetry backdrop out past 130. Everything
+; beyond 100 m therefore received NO shadow at all, which is why an adversarial
+; critic measured "no inter-building shading anywhere on a hillside of stacked
+; terraces" and "every mid-ground and background object is floating on ambient"
+; while simultaneously measuring correct, sky-filled, correctly-perspectived
+; shadows in the near field. Both readings were right; the cascades simply
+; stopped.
+;
+; 260 m reaches the far Gaia bank and the whole Ribeira stack while stopping
+; short of the backdrop scan, which is a photogrammetric surface with its own
+; baked lighting and gains nothing from a cascade.
+;
+; The cost is texel density: four cascades over 260 m instead of 100 spreads the
+; same 4096 map 2.6x thinner. Paid back two ways — pancake_size 0 removes the
+; depth-range compression that trades near precision for far, and the split
+; ratios below are pushed well under Godot's defaults (0.1/0.2/0.5) so cascade 0
+; still covers roughly the first 26 m, which is the whole playable corridor, at
+; better than the old density.
+directional_shadow_max_distance = 260.0
+directional_shadow_split_1 = 0.06
+directional_shadow_split_2 = 0.16
+directional_shadow_split_3 = 0.42
+directional_shadow_blend_splits = true
+directional_shadow_pancake_size = 0.0
 
 [node name="SkyBackground" parent="." instance=ExtResource("4_sky")]

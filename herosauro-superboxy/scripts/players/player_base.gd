@@ -68,6 +68,11 @@ const ABSOLUTE_KILL_Y := -60.0   # backstop if we somehow never touch a floor
 const RECOVERY_HALF_WIDTH := 5.0
 ## How far back from the partner, on the side away from the giant, a hero returns.
 const RECOVERY_GAP := 2.6
+## How far ABOVE the partner a returning hero is dropped in. Just enough to be
+## outside the deck rather than inside it, and small enough that the drop reads
+## as arriving rather than as a second fall. Named because `_respawn()` puts the
+## return's dust burst on the deck under it and the two must not drift apart.
+const RECOVERY_DROP := 1.0
 
 # --- Co-op leash -----------------------------------------------------------
 ## One shared camera can only hold so much ground, so the pair cannot be allowed
@@ -642,8 +647,8 @@ func _respawn() -> void:
 	# Straight to the recovery point's own soles: `_recovery_position()` drops the
 	# hero in from a metre up, so the burst goes on the deck under them rather
 	# than at the height they materialise at.
-	ImpactFX.ground(self, foot_position() - Vector3.UP * 1.0, ToonFactory.Surface.COBBLE,
-		RECOVER_FX_RADIUS, RECOVER_FX_POWER)
+	ImpactFX.ground(self, foot_position() - Vector3.UP * RECOVERY_DROP,
+		ToonFactory.Surface.COBBLE, RECOVER_FX_RADIUS, RECOVER_FX_POWER)
 	GameManager.request_shake(RECOVER_SHAKE, RECOVER_SHAKE_TIME)
 	AudioManager.play_land()
 	# Flattened, then sprung: the kick has to go through the spring rather than be
@@ -695,7 +700,7 @@ func _recovery_position() -> Vector3:
 
 	var pos: Vector3 = mate.global_position + away.normalized() * RECOVERY_GAP
 	pos.z = clampf(pos.z, -RECOVERY_HALF_WIDTH, RECOVERY_HALF_WIDTH)
-	pos.y = mate.global_position.y + 1.0    # drop in from just above, not inside the deck
+	pos.y = mate.global_position.y + RECOVERY_DROP   # just above the deck, not inside it
 	if not _ground_below(pos):
 		return spawn_position
 	return pos

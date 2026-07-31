@@ -165,6 +165,12 @@ func _uniforms(label: String, shader: Shader, expect_min: int) -> void:
 ## set its transform, colour and energy — so the reasoning in three separate files
 ## hangs off a vector that lives somewhere else entirely. Read it back out of the
 ## scene and check it is still what those files say it is.
+## Least shadow reach that still covers the Ribeira terraces. Below this the far
+## bank has no inter-building occlusion at all, which reads as every background
+## object floating on ambient no matter how good the near-field shadows are.
+const SHADOW_REACH_MIN := 200.0
+
+
 func _check_sun() -> void:
 	var packed: PackedScene = load(ARENA_PATH)
 	if packed == null:
@@ -179,11 +185,16 @@ func _check_sun() -> void:
 		var xf := Transform3D.IDENTITY
 		var color := Color.WHITE
 		var energy := 1.0
+		# Godot's default is 100 m and the property is absent from the scene when
+		# unset — which is exactly how this sat at 100 through three rounds while
+		# critics correctly reported the whole mid-ground floating on ambient.
+		var shadow_far := 100.0
 		for p in state.get_node_property_count(i):
 			match state.get_node_property_name(i, p):
 				"transform": xf = state.get_node_property_value(i, p)
 				"light_color": color = state.get_node_property_value(i, p)
 				"light_energy": energy = state.get_node_property_value(i, p)
+				"directional_shadow_max_distance": shadow_far = state.get_node_property_value(i, p)
 		# A DirectionalLight3D shines down its own -Z, so the direction light comes
 		# FROM is the basis's +Z column.
 		var from := xf.basis.z.normalized()
@@ -198,6 +209,11 @@ func _check_sun() -> void:
 					% [elev, SUN_ELEVATION_DEG])
 		var azim := rad_to_deg(atan2(from.z, from.x))
 		print("  azimuth      %.1f deg east of +x (want %.1f)" % [azim, SUN_AZIMUTH_DEG])
+		print("  shadow reach %.0f m" % shadow_far)
+		if shadow_far < SHADOW_REACH_MIN:
+			_fail("directional_shadow_max_distance is %.0f m; the Ribeira stack sits at "
+					% shadow_far + "60-150 m and receives no shadow below %.0f"
+					% SHADOW_REACH_MIN)
 		_check_water_sun(state, from)
 		if absf(azim - SUN_AZIMUTH_DEG) > 2.0:
 			_fail("sun azimuth %.1f deg, not the %.1f this stream's files are written for"
