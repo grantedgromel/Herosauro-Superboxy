@@ -107,6 +107,40 @@ All three are enforced in `ARCHITECTURE.md` and all three were found the hard wa
    and tween phase forward, so shot 7 depends on shot 6 and the set stops being
    reproducible even with 1 and 2 fixed.
 
+## The rubric is a proxy. Do not optimise the proxy.
+
+The critics score **frames**, because frames are the only thing an agent can be
+shown. A frame-scoring loop will therefore always ask for more *in the frame* —
+and past a certain point that stops being the same thing as a better game.
+
+This project walked into it. Three rounds of review kept reporting that the wide
+establishing shots were empty: *"across 2.76 million pixels of one of Europe's
+busiest riverfronts, at most two or three ambiguous specks that might be
+people"*. All true. It became a brief to populate Porto — crowds, market stalls,
+café patrons — and that brief was wrong, and the project owner was right to kill
+it.
+
+The game is a two-player fight on a bridge deck. The player spends effectively
+all of it looking at a nine-metre giant from about ten metres. The far banks are
+backdrop nobody studies. A crowd at 60–200 m resolves to 6–10 px specks and
+costs real geometry, real draw calls and real review time.
+
+So every critic finding gets a second question before it becomes work:
+
+> **Does a player ever look at this, and for how long?**
+
+Set dressing on a far bank fails that test. A wall tiling visibly fifteen metres
+from the camera passes it. The paving the hero runs across for the entire game
+passes it emphatically — which is why "the playable ground is half as bright as
+sunlit stone" was worth a stream and "nobody lives in Porto" was not.
+
+This is the same trap as briefing off an unverified critic diagnosis, one level
+up. There, the fix is to measure the cause before acting. Here, the fix is to
+weigh the finding against what the game actually is before acting. The rubric
+cannot do that for you: it does not know the deck is where the game happens, and
+writing that into the rubric would only teach the critics to under-report the
+background, which is not the same as knowing it matters less.
+
 ## Process findings worth keeping
 
 **Sequential single-owner beats parallel fan-out on coupled systems.** Claude of

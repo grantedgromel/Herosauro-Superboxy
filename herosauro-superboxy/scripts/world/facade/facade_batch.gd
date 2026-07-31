@@ -30,6 +30,18 @@ const TIMBER_BROWN := Color(0.34, 0.23, 0.15)
 const ROOF_TERRACOTTA := Color(0.60, 0.30, 0.21)
 const LIT_AMBER := Color(1.0, 0.80, 0.44)
 const LINEN_WHITE := Color(0.90, 0.88, 0.83)
+## Washing is not all white, and the colour is the point of hanging it here at
+## all: at 80-120 m a line of sheets is a row of 3-5 px flecks, and three tones
+## on one line is what makes those flecks read as cloth rather than as noise on
+## the render. Kept to two accents beside the white — a whole rainbow across
+## fifty facades reads as bunting, which is a different city.
+##
+## Both are pitched to sit INSIDE the wall palette's value range rather than
+## above it. A pure-white sheet on a mid-ochre wall at this distance is a
+## specular-looking blob; a laundered blue and a faded red are what is actually
+## on those lines and they land where the eye expects cloth.
+const LINEN_BLUE := Color(0.575, 0.655, 0.745)
+const LINEN_RED := Color(0.720, 0.435, 0.375)
 const AZULEJO_PALE := Color(0.83, 0.88, 0.92)
 ## The third tile value. A tiled front is a pale field, a coloured ground and a
 ## near-navy border, and two of those three read as one flat blue at 80 m —
@@ -58,7 +70,10 @@ const LINEN_TILE := 0.4
 const LIT_ENERGY := 1.7
 
 static var _iron_thin: StandardMaterial3D
-static var _linen_thin: StandardMaterial3D
+## Keyed by colour, so the three washing tones cost three materials for the whole
+## city rather than three per terrace. Same shape as the single cached copy this
+## replaces; see linen_thin().
+static var _linen_thin: Dictionary = {}
 
 ## Distant terraces cast a shadow the eye reads as a blob, and shadow passes are
 ## the one cost baking does not remove. The placement stream turns this off for
