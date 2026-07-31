@@ -69,41 +69,56 @@ jobs:
           test -f web/index.pck && test -f web/index.wasm
 
       # CACHE-BUST THE BUILD, because a stale one is indistinguishable from a
-      # broken one and the owner spent a session reporting bugs that had already
-      # been fixed. GitHub Pages serves index.pck and index.wasm with ordinary
-      # caching headers; the browser had a stale 18 MB pck and kept playing an
-      # old build while index.html said everything was current. There is no way
-      # to set cache headers on Pages, so the fix is to change the URL.
+      # broken one and the owner spent a session reporting bugs already fixed.
+      # GitHub Pages serves the payload with ordinary caching and offers no way
+      # to set headers, so the only fix is to change the URL every deploy.
       #
-      # Godot's loader derives BOTH payload paths from GODOT_CONFIG.executable
-      # and looks their sizes up in fileSizes by exact filename, so renaming the
-      # pair and rewriting those two fields is the whole job. index.js is left
-      # alone deliberately: it is the loader, it hardcodes no filenames (it reads
-      # them out of GODOT_CONFIG above), so a cached copy loads the fresh build
-      # correctly and there is nothing to bust.
+      # RENAME EVERY FILE THE LOADER DERIVES FROM `executable`, NOT JUST THE BIG
+      # TWO. index.js maps them all in locateFile():
       #
-      # Verified in a real browser: all three resources return 200, no request
-      # fails, and the engine boots to the title screen off the renamed payload.
+      #     godot.audio.worklet.js           -> ${loadPath}.audio.worklet.js
+      #     godot.audio.position.worklet.js  -> ${loadPath}.audio.position.worklet.js
+      #     godot.js                         -> ${loadPath}.js
+      #     godot.side.wasm                  -> ${loadPath}.side.wasm
+      #     godot.wasm                       -> ${loadPath}.wasm
       #
-      # Every deploy is therefore a URL no cache has ever seen. A stale build
-      # stops being possible rather than becoming less likely.
+      # The first version of this step renamed only .pck and .wasm and repointed
+      # `executable`. The loader then asked for index.<sha>.audio.worklet.js,
+      # which did not exist; AudioWorklet.addModule() rejected with AbortError;
+      # and THE WEB BUILD SHIPPED WITH NO SOUND, plus an uncaught exception on
+      # every animation frame because start_sample() keeps retrying against a
+      # worklet that never came up. A cache-bust that silently kills audio is a
+      # worse bug than the staleness it was fixing.
+      #
+      # The icons are deliberately left alone: index.html references those by
+      # literal name in <link>/<meta>, not through loadPath.
       - name: Cache-bust the payload
         working-directory: ${{ env.PROJECT_DIR }}/web
         run: |
           set -euo pipefail
           V="${GITHUB_SHA::12}"
-          mv index.pck  "index.${V}.pck"
-          mv index.wasm "index.${V}.wasm"
+          for ext in pck wasm side.wasm js audio.worklet.js audio.position.worklet.js; do
+            if [ -f "index.${ext}" ]; then
+              mv "index.${ext}" "index.${V}.${ext}"
+              echo "renamed index.${ext} -> index.${V}.${ext}"
+            fi
+          done
           sed -i \
             -e "s|\"executable\":\"index\"|\"executable\":\"index.${V}\"|" \
             -e "s|\"index\.pck\"|\"index.${V}.pck\"|" \
             -e "s|\"index\.wasm\"|\"index.${V}.wasm\"|" \
+            -e "s|src=\"index\.js\"|src=\"index.${V}.js\"|" \
             index.html
-          # Fail loudly rather than deploy a build whose loader points at files
-          # that are no longer there — that would be a black page, not a stale one.
+
+          # Fail the build rather than deploy a loader pointing at files that are
+          # not there. Every path locateFile() can produce must exist on disk.
+          grep -q "\"executable\":\"index.${V}\"" index.html
           grep -q "index.${V}.pck"  index.html
           grep -q "index.${V}.wasm" index.html
-          test -f "index.${V}.pck" && test -f "index.${V}.wasm"
+          grep -q "src=\"index.${V}.js\"" index.html
+          for ext in pck wasm js audio.worklet.js audio.position.worklet.js; do
+            test -f "index.${V}.${ext}" || { echo "::error::missing index.${V}.${ext}"; exit 1; }
+          done
           echo "cache-busted to index.${V}.*"
 
       # Publish the build to gh-pages so the live GitHub Pages preview always
