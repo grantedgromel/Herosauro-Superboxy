@@ -427,6 +427,21 @@ Roughly 12–15% headroom on a distribution flat enough that p99 to max is 726 �
 730 and 479 → 480. `nodes` gets more room than the rest because it is the one
 counter that grows with pooled FX rather than with the world.
 
+And the gate was watched failing, per ARCHITECTURE.md rule 9. Same scene, same
+30 frames, only `primitives_p99` changed:
+
+```
+  ceiling 3,700,000    budget applied : forward_plus
+                       === END PROFILE (PASS) ===
+
+  ceiling 1,000        BUDGET EXCEEDED: primitives p99 3288458 > 1000
+                       === END PROFILE (FAIL) ===
+```
+
+Worth stating plainly because of how this file got here: the ceilings above are
+the first ones this project has had that are attached to a gate anyone has seen
+go red.
+
 ### The ceilings are a ratchet
 
 They are set just above what the build measures today, so a regression trips
