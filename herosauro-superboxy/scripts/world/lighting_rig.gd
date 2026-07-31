@@ -259,17 +259,21 @@ const FALLBACK_LAMP_SPOTS := [
 # dominates the composite over the first tens of metres and is flat beyond it.
 #
 # So the fallback reproduces the composite curve instead of the depth term. All three
-# constants were re-solved this round against the resource's new fog (begin 18, end
-# 640, curve 0.62, density 1.0) and the new volumetric density 0.0008, by brute force
-# over eleven sample distances from 10 m to 410 m rather than by anchoring on two.
+# constants are re-solved whenever the Forward+ fog moves, by brute force over eleven
+# sample distances from 10 m to 410 m rather than by anchoring on two. This round's
+# target is the resource's fog after fog_depth_end came in 640 -> 520 to carry the
+# aerial perspective (begin 18, end 520, curve 0.62, density 1.0) composited with the
+# volumetric density 0.0008.
 #
-# Worst error against the Forward+ composite is now 0.6 points, anywhere from 10 m to
-# 410 m — against 3.7 points before, and the improvement is not cleverness, it is that
-# the Forward+ curve is a much easier shape to match since its own ramp was pulled in
-# to 18 m. _atmosphere_probe.gd prints both curves side by side and fails past 0.06.
-const COMPAT_FOG_BEGIN := 7.0
-const COMPAT_FOG_CURVE := 0.56
-const COMPAT_FOG_DENSITY := 0.98
+# Worst error against the Forward+ composite is 0.65 points, anywhere from 10 m to
+# 410 m — 7.0/0.56/0.98 against the old 640 m curve was 0.61, so the fallback tracks
+# the new one just as closely. _atmosphere_probe.gd prints both curves side by side
+# and fails past 0.06, which is what caught this needing re-solving at all: the compat
+# tier reads fog_depth_end off the resource, so shortening the range moved the
+# fallback and the target by different amounts.
+const COMPAT_FOG_BEGIN := 9.0
+const COMPAT_FOG_CURVE := 0.57
+const COMPAT_FOG_DENSITY := 0.99
 
 ## Compatibility extracts glow after tonemapping, so nothing ever exceeds ~1.0 and
 ## an HDR threshold above it would stop the sun and the water's glint blooming

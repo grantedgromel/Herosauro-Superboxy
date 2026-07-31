@@ -600,6 +600,228 @@ static func perched_gull(body: MeshBaker, dark: MeshBaker, at: Vector3, yaw: flo
 			Vector3(0.0, 0.31, -0.20)))
 
 
+# --- Deck fascia ---------------------------------------------------------------
+
+## The thickness of the cladding, i.e. how far a plain block stands off the deck
+## mass's own face. Everything else here is measured from that.
+const FASCIA_PROUD := 0.075
+## How far the drip course over it, and the plinth under it, reach further out.
+## The parapet coping above tops out at |z| = 7.055, so 0.17 puts the deck's own
+## cornice 11 cm proud of it — which is the way round a real bridge is built and
+## the reason the fascia throws a shadow onto itself.
+const FASCIA_CORNICE := 0.17
+const FASCIA_PLINTH := 0.13
+## The thin band immediately under the cornice. It exists to put a second, much
+## shallower step in the profile, so the cornice's shadow lands on stone that is
+## itself proud of the ashlar rather than straight onto the blocks — which is
+## what turns one hard line into a pair of them at the top of the fascia.
+const FASCIA_BAND := 0.115
+## Ashlar joint. Wide enough to be a shadow line rather than a coincident face
+## pair, matching MasonryKit's own 0.035 on the quay walls.
+const FASCIA_JOINT := 0.035
+
+
+## One run of coursed ashlar cladding over a deck edge, from `x0` to `x1` on the
+## face at `face_z`, facing outward along `sz`.
+##
+## WHY THIS EXISTS. The deck mass in bridge_arena.tscn is a 100 x 1.96 x 14
+## BoxMesh, so each of its long faces is ONE quad 100 m by 1.96 m. In 01_deck_mid
+## that quad is 16.9% of the frame and the largest single surface in it, and a
+## critic measured it tiling at a 214 px period with r = 0.864 — six repeats
+## visible at once — with "a 7% non-monotonic vertical swing across a 115 px
+## plane", i.e. no normal doing any work over the whole height of it.
+##
+## Both halves of that are structural rather than material. A single quad has one
+## UV rectangle, so whatever pattern is mapped onto it necessarily repeats at the
+## texture's own period and there is no geometry for the period to hide behind;
+## and a flat plane has one normal, so no amount of detail-map strength can
+## produce the value ramp the eye reads as relief. Retiling or restrengthening
+## the map — which belongs to the materials stream in any case — moves the
+## repeat, it does not remove it.
+##
+## What removes it is courses and joints that are really there: roughly 320
+## blocks a side, each with its own length, its own 2 cm of proud-or-shy, and its
+## bed joints offset course to course so no vertical joint runs more than two
+## courses. That is the same rule MasonryKit states for the quay walls, for the
+## same reason — a wall with aligned joints reads as tiling and not as masonry —
+## and it gives the surface a real 3 cm relief for the key to rake across
+## instead of a painted one.
+##
+## LODs are deliberately left off by the caller: a 36 cm course at the 70-120 m
+## these are seen from is exactly the feature decimation deletes first, and it is
+## the whole point of the geometry.
+static func fascia_run(block: MeshBaker, string: MeshBaker, x0: float, x1: float,
+		face_z: float, sz: float, y_bottom: float, y_top: float, seed: int) -> void:
+	var span := x1 - x0
+	if span < 1.0 or y_top - y_bottom < 0.5:
+		return
+	# Bands, bottom to top: a plinth, four ashlar courses, then the cornice pair.
+	var plinth_h := 0.26
+	var cornice_h := 0.26
+	var band_h := 0.08
+	var ash_low := y_bottom + plinth_h
+	var ash_high := y_top - cornice_h - band_h
+	var courses := 4
+	var course_h := (ash_high - ash_low) / float(courses)
+
+	# Continuous runs, in the paler dressed stone: a plinth at the foot and, at
+	# the head, a thin band under a deeper drip course. The pair is what draws
+	# the top of the fascia from across the river — one hard horizontal shadow
+	# line under an overhang, which is the read a coping exists for.
+	string.add_box(Vector3(span, plinth_h, FASCIA_PLINTH * 2.0),
+			Transform3D(Basis(), Vector3((x0 + x1) * 0.5, y_bottom + plinth_h * 0.5,
+				face_z + sz * FASCIA_PLINTH)))
+	string.add_box(Vector3(span, band_h, FASCIA_BAND * 2.0),
+			Transform3D(Basis(), Vector3((x0 + x1) * 0.5, ash_high + band_h * 0.5,
+				face_z + sz * FASCIA_BAND)))
+	string.add_box(Vector3(span, cornice_h, FASCIA_CORNICE * 2.0),
+			Transform3D(Basis(), Vector3((x0 + x1) * 0.5, y_top - cornice_h * 0.5,
+				face_z + sz * FASCIA_CORNICE)))
+
+	for c in courses:
+		var y_mid := ash_low + course_h * (float(c) + 0.5)
+		var x := x0
+		var k := 0
+		while x < x1 - 0.25:
+			var length := lerpf(0.85, 1.65, _fhash(seed + c * 7717, k))
+			# Break the vertical joint line: alternate courses start on a part
+			# block, so no two courses can share a run of joints. Without this the
+			# blocks line up into columns and the surface goes straight back to
+			# reading as a grid, which is the failure being fixed.
+			if k == 0 and c % 2 == 1:
+				length *= 0.45
+			length = minf(length, x1 - x)
+			if length < 0.25:
+				break
+			# Per-block projection. The distribution is deliberately skewed: most
+			# stones sit within a centimetre either side of the face line, and
+			# one in seven is set a further 1.5-2 cm back — a spalled or replaced
+			# block. Total relief across the run is 2.8 cm, which at the 74 px per
+			# metre 01_deck_mid resolves this surface at is two clean pixels of
+			# shading step per block, and it is what stops a hundred metres of
+			# ashlar looking machined.
+			var roll := _fhash(seed + c * 313, k + 91)
+			var proud := (roll - 0.45) * 0.030
+			if roll > 0.86:
+				proud -= 0.028
+			block.add_box(
+				Vector3(length - FASCIA_JOINT, course_h - FASCIA_JOINT,
+					(FASCIA_PROUD + proud) * 2.0),
+				Transform3D(Basis(), Vector3(x + length * 0.5, y_mid,
+					face_z + sz * (FASCIA_PROUD + proud)))
+			)
+			x += length
+			k += 1
+
+
+## The same integer hash MasonryKit uses, repeated here rather than imported: the
+## terrain kit is a different subtree of this stream and a bridge should not have
+## to load a masonry file to lay four courses. See masonry_kit.gd for the
+## derivation and for why this is a hash and not a sequential RNG.
+static func _fhash(a: int, b: int) -> float:
+	var h: int = (a * 73856093) ^ (b * 19349663)
+	h = h & 0x7FFFFFFF
+	h = (h ^ (h >> 13)) * 1274126177
+	h = h & 0x7FFFFFFF
+	h = h ^ (h >> 16)
+	return float(h & 0xFFFF) / 65536.0
+
+
+# --- The stopped tram ----------------------------------------------------------
+
+const TRAM_LENGTH := 17.4
+const TRAM_WIDTH := 2.62
+## Floor over rail head, roof over rail head. Real light rail, near enough.
+const TRAM_SKIRT := 0.44
+const TRAM_ROOF := 3.42
+
+
+## A Metro do Porto car standing dead on the tram bed, pantograph down.
+##
+## WHY THERE IS ONE AT ALL. The upper deck of the Dom Luís is a tram bridge —
+## that is what the whole tramway in bridge_arena.gd is for — and a tram bridge
+## with no tram on it is a specific, nameable miss in every wide shot. It is also
+## one object rather than a population: a pale body, a dark window band and a
+## folded pantograph, and it reads at seventy metres because a bright box with a
+## long dark stripe down it is a shape nothing else in this scene has.
+##
+## WHY IT IS STOPPED. The overhead line over the fighting span is built already
+## torn out (see bridge_arena.gd's WRECK_REACH) because a 5 m contact wire and a
+## 10.6 m giant cannot both be right. A car that has coasted to a stand at the
+## Porto end with its pantograph down is what that wire failing actually
+## produces, so the tram is not decoration hung next to the damage — it is the
+## consequence of it, and it says so without a line of dialogue.
+##
+## `dark` and `iron` are the bakers bridge_arena.gd already opens for the deck's
+## gully voids and its cast ironwork, so everything but the body shell costs no
+## draw call at all.
+static func tram_car(body: MeshBaker, dark: MeshBaker, iron: MeshBaker,
+		centre_x: float, deck_top: float) -> void:
+	var half := TRAM_LENGTH * 0.5
+	var floor_y := deck_top + TRAM_SKIRT
+	var roof_y := deck_top + TRAM_ROOF
+	var side_h := roof_y - floor_y
+
+	# Skirt, under the floor line and inboard of the body, so the car has a
+	# shadow gap under it rather than sitting flat on the paving.
+	dark.add_box(Vector3(TRAM_LENGTH - 0.5, TRAM_SKIRT - 0.04, TRAM_WIDTH - 0.22),
+			Transform3D(Basis(), Vector3(centre_x, deck_top + TRAM_SKIRT * 0.5, 0.0)))
+	# Body shell.
+	body.add_box(Vector3(TRAM_LENGTH, side_h, TRAM_WIDTH),
+			Transform3D(Basis(), Vector3(centre_x, floor_y + side_h * 0.5, 0.0)))
+	# Cab ends, raked back over the couplers. A tram with square ends is a
+	# shipping container; the rake is most of what identifies it in silhouette.
+	for sx: float in [-1.0, 1.0]:
+		body.add_box(Vector3(1.5, side_h * 0.62, TRAM_WIDTH - 0.14),
+				Transform3D(Basis(Vector3(0.0, 0.0, 1.0), sx * 0.17),
+					Vector3(centre_x + sx * (half + 0.32),
+						floor_y + side_h * 0.34, 0.0)))
+		# Windscreen: the dark end that makes the rake read as a cab.
+		dark.add_box(Vector3(0.16, side_h * 0.40, TRAM_WIDTH - 0.34),
+				Transform3D(Basis(Vector3(0.0, 0.0, 1.0), sx * 0.17),
+					Vector3(centre_x + sx * (half + 0.95),
+						floor_y + side_h * 0.58, 0.0)))
+
+	# The window band, both flanks. THIS is the read: one continuous dark stripe
+	# two thirds of the way up a pale body, running most of the length. Nothing
+	# else on this bridge has that signature, so it survives to six pixels.
+	for sz: float in [-1.0, 1.0]:
+		dark.add_box(Vector3(TRAM_LENGTH - 2.4, side_h * 0.44, 0.10),
+				Transform3D(Basis(), Vector3(centre_x, floor_y + side_h * 0.66,
+					sz * (TRAM_WIDTH * 0.5 - 0.02))))
+		# Doorways, breaking the band into bays. Full height, so the pale body is
+		# cut into four panels rather than reading as one long slab.
+		for i in 3:
+			var dx := centre_x + lerpf(-half + 2.6, half - 2.6, float(i) / 2.0)
+			dark.add_box(Vector3(1.15, side_h - 0.18, 0.08),
+					Transform3D(Basis(), Vector3(dx, floor_y + side_h * 0.5,
+						sz * (TRAM_WIDTH * 0.5 - 0.01))))
+
+	# Roof: a shallow cambered cap, the air-conditioning raft, and the pantograph
+	# folded flat on its base — which is the detail that says the line is dead.
+	iron.add_box(Vector3(TRAM_LENGTH - 0.3, 0.14, TRAM_WIDTH - 0.26),
+			Transform3D(Basis(), Vector3(centre_x, roof_y + 0.07, 0.0)))
+	iron.add_box(Vector3(4.2, 0.30, TRAM_WIDTH - 0.9),
+			Transform3D(Basis(), Vector3(centre_x + 3.4, roof_y + 0.28, 0.0)))
+	var pan_x := centre_x - 3.6
+	iron.add_box(Vector3(2.2, 0.12, 1.5),
+			Transform3D(Basis(), Vector3(pan_x, roof_y + 0.20, 0.0)))
+	# Two arms folded almost flat and the collector bar across them: a raised
+	# pantograph would be reaching for a wire that is on the floor of the Douro.
+	for sx: float in [-1.0, 1.0]:
+		iron.add_beam(Vector3(pan_x + sx * 1.0, roof_y + 0.26, 0.0),
+				Vector3(pan_x - sx * 0.15, roof_y + 0.52, 0.0), 0.07)
+	iron.add_box(Vector3(0.18, 0.09, 1.55),
+			Transform3D(Basis(), Vector3(pan_x - 0.15, roof_y + 0.56, 0.0)))
+
+	# Bogies. Only the outer face of each shows past the skirt, but at this scale
+	# the two dark blocks under the ends are what stop the car floating.
+	for sx: float in [-1.0, 1.0]:
+		dark.add_box(Vector3(2.4, 0.34, TRAM_WIDTH - 0.62),
+				Transform3D(Basis(), Vector3(centre_x + sx * (half - 3.2),
+					deck_top + 0.17, 0.0)))
+
+
 ## A litter scatter: flat scraps lying on the paving, each with its own yaw and
 ## a millimetre of lift so it never z-fights the stone.
 ##

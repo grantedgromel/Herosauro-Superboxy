@@ -40,81 +40,78 @@ subdivide_depth = 178
 ; --- Mat_river ---
 ; Uniform-by-uniform against assets/shaders/water_wave.gdshader.
 ;
-; ROUND 3. This block was three rounds stale, and the whole of it described a sunset
-; that the scene stopped having when SunLight was re-keyed. The shader's own header
-; has been saying so for two rounds — "STILL BROKEN AND STILL NOT MINE TO FIX", with
-; the correct numbers listed — because these sub-resources belong to the world stream
-; and the shader belongs to atmosphere. Acted on now.
+; Round 3 caught this block three rounds stale — it described a sunset the scene
+; stopped having when SunLight was re-keyed — and fixed shallow_color, glint_color,
+; glint_sharpness and sun_direction. Those were bug fixes. ROUND 4 is the water.
 ;
-; A critic scored the region x 520-780, y 540-640 of 06_river_wide as "a hard-edged
-; dark brown/blue mottled decal floating on the water surface... crisp polygonal
-; edges", and called it a geometry bug. It is not geometry: a ray cast from that
-; vantage through 24 pixels of that region hits NOTHING in the scene but this plane.
-; It is this material. The fragment stage does
+; Two adversarial critics reported independently that the Douro does not read as
+; water and one made it their blind-test tell. Three measurements:
 ;
-;     mirror = clamp(pow(1 - dot(N, V), horizon_falloff) + h * 0.18, 0, 1) * 0.30
-;     ALBEDO = mix(deep_color, shallow_color, mirror)
+;   * NO REFLECTION. Water under bright terraces L 114.6, open mid-span 119.7, under
+;     a dark cliff 123.7 — under 8% spread, and BACKWARDS. A large iron arch stands
+;     over calm water in 06_river_wide and returns nothing.
+;   * VISIBLE TILING. Autocorrelation along x peaks at lag 17 px (r = 0.41) far and
+;     27 px (r = 0.50) mid: fifteen repeats of one streak across the river.
+;   * NO SHORELINE. A column at x = 1000 cuts granite L 134.6 to water L 51.7 in TWO
+;     pixels — no foam, no lapping, nothing.
 ;
-; so with shallow_color at the old sunset amber (0.86, 0.685, 0.47) the river's own
-; grazing term mixes BROWN into BLUE, and pow(., 5.2) makes that mix swing hard over
-; the small changes in N that the 5.03-unit wave quads produce. Brown/blue mottling
-; with polygonal edges is the literal output of those two lines. Give the mirror term
-; the pale estuary sky it is actually reflecting and the same maths produces a value
-; step in one hue instead of a two-hue stain.
+; Two of the three causes are in the shader and in porto_daylight.tres (see both).
+; What is HERE is the third: the water's own body.
 ;
-; shallow_color (0.86, 0.685, 0.47) -> (0.72, 0.80, 0.87). This is what a grazing
-; sightline returns, i.e. what the river is mirroring, and the sky shader's
-; horizon_color is now (0.66, 0.76, 0.85). A mirror cannot out-hue what it reflects.
-; Kept a shade above horizon_color so the far water still reads as water.
+; deep_color (0.115, 0.205, 0.245) -> (0.042, 0.081, 0.086). The old value is 0.185
+; luminance — the diffuse albedo of damp concrete. A surface whose own body returns
+; 19% of the key cannot show a reflection worth 4-15% Fresnel, so the Douro was a
+; painted blue sheet with a reflection invisibly on top of it, and its brightness
+; could not depend on what was above it. That is the whole of the flat 8% spread the
+; critics measured. A silty estuary channel returns nearer 6%; dark and reflective is
+; what makes water read as water, and it is also what makes the surface go dark under
+; a dark bank and bright under a lit one. _atmosphere_probe.gd gates the ratio of
+; this against shallow_color rather than the number, so a palette retune is free and
+; a slide back to a bright body is not.
 ;
-; glint_color (1, 0.8, 0.55) -> (1, 0.97, 0.9). The glitter path is specular
-; sunlight, so it is the sun's colour: SunLight is 5100 K warm white (1, 0.935,
-; 0.855), not 3200 K amber.
+; foam_strength 0.18 -> 0.30, and it goes UP only because the shader stopped firing
+; foam on every crest in the field. It is now gated by two noise fields — one deciding
+; which stretches of river are breaking at all, one jittering the height they break at
+; — plus a steepness test, so 0.30 of a patchy mask is far less foam on screen than
+; 0.18 of a continuous one, and what is there is in patches rather than in a comb.
 ;
-; sun_direction (-0.859785, 0.19995, -0.469882) -> (0.337181, 0.559193, 0.757364).
-; The old value is the ORIGINAL sunset sun: 11.5 degrees up over the -x/-z quadrant.
-; SunLight now stands at 34 degrees over +x/+z, and a DirectionalLight3D shines down
-; its own -Z, so the direction *towards* the sun is its +Z basis column — read as the
-; third element of each Transform3D ROW, because the twelve floats in that literal are
-; rows and not axes. The glitter path was consequently ~121 degrees of azimuth away
-; from every other highlight in the frame.
+; water_roughness 0.07 -> 0.06: with the reflection finally arriving, the sharper lobe
+; is worth having, and MSAA 4x + FXAA handles the sub-pixel chop it was insuring
+; against. The shader raises it to 0.62 in foam and against the quay, where broken
+; water is genuinely not a mirror.
 ;
-; glint_sharpness 165 -> 200. 165 was chosen for an 11.5-degree sun, which lays a very
-; long soft glitter path because the reflected angle sweeps slowly near the horizon. At
-; 34 degrees the lobe tightens, though not back to the 240 a high sun would want.
+; shore_* are NEW and describe where the bank is, because a shader cannot ask the
+; terrain. They are left at the shader's defaults deliberately — one authoritative
+; copy — and _atmosphere_probe.gd evaluates them against TerrainBuilder.front_x()
+; along the whole modelled reach and fails when the two stop describing the same wall.
+; That is the same gate Mat_river's sun vector now has, for the same reason.
 ;
-; glint_strength 1.2, kept. The shader writes the glitter as EMISSION specifically so it
-; blooms in the HDR buffer, and the environment's glow_hdr_threshold is 1.05 — under
-; about 1.1 it could never reach the glow pass at all.
+; shallow_color (0.72, 0.80, 0.87), kept. This is the HINT of what the water is
+; mirroring — silt tinting the surface return — not the mirror; mirror_albedo is 0.14
+; and the other 86% is SSR and the radiance cubemap reflecting the real sky and arch.
 ;
-; water_roughness 0.07, kept: the plane is 14x its original area, most of it grazing,
-; and this project has MSAA + FXAA but no TAA, neither of which touches shading
-; aliasing. A slightly wide lobe is cheap insurance against sub-pixel chop sparkling.
+; glint_color (1, 0.97, 0.9) and sun_direction (0.337181, 0.559193, 0.757364), kept:
+; the glitter path is specular sunlight, so it is SunLight's own 5100 K colour and
+; SunLight's own +Z basis column — read as the third element of each Transform3D ROW,
+; because the twelve floats in that literal are rows and not axes.
+;
+; glint_sharpness 200 and glint_strength 1.2, kept. The shader writes the glitter as
+; EMISSION specifically so it blooms in the HDR buffer, and glow_hdr_threshold is 1.0.
 ;
 ; horizon_falloff 5.2, kept. fresnel = pow(1 - facing, horizon_falloff) and a HIGH
-; fresnel selects shallow_color, so the authored 3.0 counted almost the whole surface
-; as grazing and rendered the Douro as a flat pale sheet — a sandbank, not a river.
-; 5.2 keeps the mirror term on the far water and lets deep_color own the near field.
+; fresnel selects the mirror, so the authored 3.0 counted almost the whole surface as
+; grazing and rendered the Douro as a flat pale sheet — a sandbank, not a river.
 ;
-; deep_color (0.115, 0.205, 0.245), kept: Douro silt-green, an estuary channel with
-; depth rather than open-ocean blue.
-;
-; foam_strength 0.18, kept: whitecaps key off smoothstep(0.45, 0.95, h) on the
-; unit-amplitude swell, so they fire on every crest however calm the water is set to
-; be. The Douro at Porto is a tidal pool between two banks; foam belongs on the near
-; water as a hint.
-;
-; wave_speed/height/scale/chop_strength/flow are Wave 1's, deliberately untouched —
+; wave_speed/height/scale/chop_strength/flow are Wave 1's, deliberately untouched:
 ; they were tuned against a render and the resubdivision above means the bigger plane
-; samples them just as well. One caveat for whoever owns the shader: field_pos() drifts
-; the wave field along (12, 4) in xz, i.e. mostly +x, but this arena's banks are the
-; masses at |x| >= 50, so the Douro here runs along Z. The downstream drift is 90
-; degrees out. At flow = 0.02 it is 0.24 units/s and reads as general movement rather
-; than a sideways river, so it is left alone here.
+; samples them just as well. The shader's field_pos() no longer drifts them 90 degrees
+; out of the channel — that drift ran along +x, across a Douro that runs along Z, and
+; a critic reported the surface streaks as "unrelated to current". It runs downstream
+; now, which costs nothing here.
 [sub_resource type="ShaderMaterial" id="Mat_river"]
 shader = ExtResource("3_water")
 shader_parameter/shallow_color = Color(0.72, 0.8, 0.87, 1)
-shader_parameter/deep_color = Color(0.115, 0.205, 0.245, 1)
+shader_parameter/deep_color = Color(0.042, 0.081, 0.086, 1)
 shader_parameter/wave_speed = 0.5
 shader_parameter/wave_height = 0.35
 shader_parameter/wave_scale = 0.18
@@ -124,10 +121,10 @@ shader_parameter/glint_strength = 1.2
 shader_parameter/sun_direction = Vector3(0.337181, 0.559193, 0.757364)
 shader_parameter/glint_sharpness = 200.0
 shader_parameter/chop_strength = 1.0
-shader_parameter/water_roughness = 0.07
+shader_parameter/water_roughness = 0.06
 shader_parameter/horizon_falloff = 5.2
 shader_parameter/foam_color = Color(0.93, 0.95, 0.96, 1)
-shader_parameter/foam_strength = 0.18
+shader_parameter/foam_strength = 0.3
 
 [node name="BridgeArena" type="Node3D"]
 script = ExtResource("1_arena")

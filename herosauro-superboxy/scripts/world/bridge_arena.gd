@@ -239,6 +239,16 @@ const LITTER_COLOR := Color(0.640, 0.575, 0.440)
 const GULL_COLOR := Color(0.930, 0.925, 0.900)
 const GULL_MARK_COLOR := Color(0.150, 0.155, 0.170)
 const JOINT_COLOR := Color(0.340, 0.330, 0.310)
+## The deck's own edge cladding. Deliberately GREYER than ABUTMENT_COLOR and
+## KERB_COLOR: round 2 measured the surface this replaces at (110, 93, 77) and
+## called it sandstone where Porto is grey granite, and it is the largest single
+## surface in the game's most-looked-at side view. Channels within 0.02 of each
+## other, so the hue comes from the detail layer rather than from the base.
+const FASCIA_COLOR := Color(0.455, 0.450, 0.435)
+## The tram's body shell. Metro do Porto runs white cars with a dark glazing
+## band; the value gap between the two is the whole read at seventy metres, so
+## the body sits high and the band is the deck's existing void black.
+const TRAM_BODY_COLOR := Color(0.790, 0.795, 0.780)
 const STEEL_COLOR := Color(0.400, 0.430, 0.470)
 const DARK_STEEL_COLOR := Color(0.280, 0.300, 0.340)
 const LAMP_IRON_COLOR := Color(0.200, 0.220, 0.260)
@@ -248,6 +258,7 @@ func _ready() -> void:
 	_build_roadway()
 	_build_tramway()
 	_build_footways()
+	_build_fascia()
 	_build_parapets()
 	_build_ends()
 	_build_arch_foundations()
@@ -422,6 +433,56 @@ func _build_footways() -> void:
 
 	SceneryKit.repeat(walk, "Kerbstones", kerb_size, kerbs, kerb_mat)
 	SceneryKit.repeat(walk, "Flagstones", flag_size, flags, flag_mat)
+
+
+# --- Deck fascia ---------------------------------------------------------------
+
+## Coursed granite cladding over both long faces of the deck mass.
+##
+## The mass in the .tscn is a BoxMesh, so each of its 100 x 1.96 m flanks is one
+## quad — and in 01_deck_mid the near one is 16.9% of the frame and the largest
+## surface in it. A critic measured that quad tiling at a 214 px period with
+## r = 0.864, six repeats visible at once, over a 7% non-monotonic vertical swing
+## that is no normal response at all.
+##
+## Neither number is fixable on the material. One quad has one UV rectangle, so
+## any map on it repeats at its own period with no geometry for the period to
+## hide behind, and one plane has one normal, so nothing in a detail map can put
+## a value ramp across it. What fixes both is that the courses and the joints
+## become real: see BridgeDeckKit.fascia_run().
+##
+## TWO DRAW CALLS FOR A HUNDRED METRES, both sides, ~7.7k triangles: one bake for
+## the 640 ashlar blocks and one for the three continuous runs, which are a
+## different stone and cannot share a surface with them. LODs are off on the
+## blocks — a 36 cm course at the 70-120 m the wide shots see this from is the
+## first thing decimation deletes, and it is the entire point of the geometry.
+##
+## Stops at |x| = 49.4, a hair inside ABUTMENT_INNER, so the abutment cornice
+## overhangs the cladding rather than butting into it.
+func _build_fascia() -> void:
+	var fascia := Node3D.new()
+	fascia.name = "Fascia"
+	add_child(fascia)
+
+	var blocks := MeshBaker.new()
+	var strings := MeshBaker.new()
+	var end_x := ABUTMENT_INNER - 0.1
+	for sz: float in [-1.0, 1.0]:
+		# Seeded per side, so the two flanks are not mirror images of each other
+		# — 06_river_wide sees one and 01_deck_mid the other, and a shared bond
+		# pattern would be visible the moment both appear in a review set.
+		DeckKit.fascia_run(blocks, strings, -end_x, end_x, sz * DECK_HALF_WIDTH, sz,
+				DECK_BOTTOM, STRUCTURE_TOP, 18_86 + int(sz) * 4093)
+
+	# World-mapped, like every other large coplanar stone surface on this deck:
+	# ToonFactory maps in OBJECT space, which would stamp the identical patch of
+	# noise onto all 640 blocks and hand the repeat straight back.
+	fascia.add_child(blocks.commit(
+			SceneryKit.world_mapped(ToonFactory.stone(FASCIA_COLOR, 2.2)),
+			"FasciaAshlar", false))
+	fascia.add_child(strings.commit(
+			SceneryKit.world_mapped(ToonFactory.stone(KERB_COLOR, 1.5)),
+			"FasciaCourses", false))
 
 
 # --- Parapets ----------------------------------------------------------------
@@ -629,11 +690,12 @@ func _build_deck_dressing() -> void:
 	dressing.name = "DeckDressing"
 	add_child(dressing)
 
-	var iron := MeshBaker.new()      # catenary, gratings, bollards
+	var iron := MeshBaker.new()      # catenary, gratings, bollards, tram roof
 	var stone := MeshBaker.new()     # benches
-	var dark := MeshBaker.new()      # grating voids, gull markings
+	var dark := MeshBaker.new()      # grating voids, gull markings, tram glazing
 	var feather := MeshBaker.new()   # gull bodies
 	var scrap := MeshBaker.new()     # litter
+	var tram := MeshBaker.new()      # the stopped car's body shell
 
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 18_86    # the year the bridge opened; seeded, see ARCHITECTURE.md
@@ -644,6 +706,7 @@ func _build_deck_dressing() -> void:
 	_build_gratings(iron, dark)
 	_build_perched_gulls(feather, dark, rng)
 	_build_litter(scrap, rng)
+	_build_stopped_tram(dressing, tram, dark, iron)
 
 	# Same cast iron as the lampposts, so the two share a cached material even
 	# though they are separate bakes.
@@ -658,6 +721,12 @@ func _build_deck_dressing() -> void:
 	# Paper, leaves and torn ticket stock. Cloth at a tight tile is the closest
 	# thing in the factory to a scrap of something on stone.
 	dressing.add_child(scrap.commit(ToonFactory.cloth(LITTER_COLOR, 0.22), "DeckLitter", false))
+	# The tram's shell is the only new material this pass adds to the deck; its
+	# glazing, skirt and roof gear went into `dark` and `iron` above, so the whole
+	# car costs one draw call. LODs off — the doors and the window band are
+	# 8-10 cm features and they are the entire silhouette.
+	dressing.add_child(tram.commit(ToonFactory.plaster(TRAM_BODY_COLOR, 1.6),
+			"TramCar", false))
 
 
 ## Masts, span wires, messenger and contact wire, station by station — and, over
@@ -831,6 +900,54 @@ func _build_furniture(iron: MeshBaker, stone: MeshBaker, dark: MeshBaker,
 			# hero-width slot between a bench and the railing behind it.
 			SceneryKit.solid_shape(bodies, Vector3(2.0, 0.55, 0.86),
 					Vector3(bx, WALKWAY_TOP + 0.275, sx * (WALKWAY_OUTER - 0.05)))
+
+
+## Where the stopped tram stands, measured off the three things it has to clear.
+##
+## THE SHELL IS 17.4 m; WITH THE TWO RAKED CAB NOSES IT OCCUPIES x IN
+## [-48.7, -29.1].
+##
+##   * prop_spawner.gd scatters barrels and crates over x in [-32, 32] at
+##     |z| = 4.2 +- 0.35, and keeps the middle six metres of the deck clear. The
+##     car is 2.62 m wide, so it reaches |z| = 1.31 — two and a half metres clear
+##     of the near edge of that lane. The 2.9 m of X the two ranges share is
+##     therefore not a conflict in any axis, and a barrel that rolls does so in
+##     that lane.
+##   * adamastor.gd's arena is x in [-14, 24] and main.gd spawns the heroes at
+##     -12 and -8. The nearest point of the car is 15 m outside both.
+##   * The abutment face the player is stopped at is x = -49.5, so the cab nose
+##     clears it by 0.8 m.
+##   * BridgeIronwork's masts stand on the footway at |z| = 6.25. This bay is
+##     OUTSIDE the wrecked span, so its contact wire is still up at y = 7.0 and
+##     its messenger at 7.72; the tram's roof gear tops out at 6.03, so the car
+##     stands under a live wire with a metre to spare — which is what a car that
+##     coasted to a stand under a dead section should look like.
+##
+## IT HAS A COLLIDER, AND THAT IS A DELIBERATE EXCEPTION to the "static dressing
+## does not collide" rule at the top of this file. The rule exists so a swept
+## camera sphere is not chattering off a hundred small objects and so the
+## broadphase is not paying for decoration; the granite benches already break it
+## for the one reason that outranks both, which is that a solid object tall
+## enough to stand in the player's way must not be walked through. A 3.4 m tram
+## is that reason at seventeen times the size. One body, one box, mask 0, sixteen
+## metres outside the arena.
+func _build_stopped_tram(dressing: Node3D, body: MeshBaker, dark: MeshBaker,
+		iron: MeshBaker) -> void:
+	var centre := -38.9
+	DeckKit.tram_car(body, dark, iron, centre, DECK_TOP)
+
+	var hull := StaticBody3D.new()
+	hull.name = "TramBody"
+	hull.collision_layer = PhysicsLayers.WORLD
+	hull.collision_mask = 0
+	dressing.add_child(hull)
+	# One box over the whole car, cab noses included, with the rakes squared off:
+	# a swept camera sphere resolves badly against a tilted face and nobody can
+	# tell the difference at this end of the deck.
+	var boxed := DeckKit.TRAM_LENGTH + 2.2
+	SceneryKit.solid_shape(hull,
+			Vector3(boxed, DeckKit.TRAM_ROOF, DeckKit.TRAM_WIDTH),
+			Vector3(centre, DECK_TOP + DeckKit.TRAM_ROOF * 0.5, 0.0))
 
 
 ## Gully gratings in the kerb line, where the carriageway drains. Flush with the

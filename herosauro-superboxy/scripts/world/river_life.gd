@@ -579,13 +579,27 @@ const MOORING_STANDOFF := 1.55
 ## the frame — so a fleet moored only alongside the near reach is a fleet nobody
 ## ever sees from the bridge. The near ones still earn their place in the water
 ## shots, which look along the river rather than across it.
+## Three added this round, and their Z values are not decoration. Sighting down
+## the gorge from 07_ribeira, the deck's own near parapet cuts the frame off at
+## z = -67, and the modelled river runs out into the photogrammetry backdrop at
+## about -190 — so every metre of water that shot can see is between those two,
+## and only seven of the seventeen boats above were inside it. -116 and -110 fill
+## the far end of both quays, where the fleet used to stop while the wall ran on
+## for another twenty metres, and -62 closes the twenty-metre hole in the Gaia
+## line between -74 and -42.
+##
+## Twelve metres apart is deliberate and is as tight as this goes: a rabelo is
+## 12.3-15.7 m over the scale range, so boats at this pitch lie all but touching,
+## which is what a working quay looks like and what makes a line of them read as
+## a fleet rather than as scattered craft.
 const MOORINGS := [
-	Vector2(-104.0, -1.0), Vector2(-92.0, -1.0), Vector2(-81.0, -1.0),
-	Vector2(-70.0, -1.0), Vector2(-58.0, -1.0), Vector2(-47.0, -1.0),
-	Vector2(-36.0, -1.0), Vector2(-24.0, -1.0), Vector2(-15.5, -1.0),
-	Vector2(16.0, -1.0), Vector2(25.0, -1.0),
-	Vector2(-98.0, 1.0), Vector2(-86.0, 1.0), Vector2(-74.0, 1.0),
-	Vector2(-42.0, 1.0), Vector2(-19.0, 1.0), Vector2(20.0, 1.0),
+	Vector2(-116.0, -1.0), Vector2(-104.0, -1.0), Vector2(-92.0, -1.0),
+	Vector2(-81.0, -1.0), Vector2(-70.0, -1.0), Vector2(-58.0, -1.0),
+	Vector2(-47.0, -1.0), Vector2(-36.0, -1.0), Vector2(-24.0, -1.0),
+	Vector2(-15.5, -1.0), Vector2(16.0, -1.0), Vector2(25.0, -1.0),
+	Vector2(-110.0, 1.0), Vector2(-98.0, 1.0), Vector2(-86.0, 1.0),
+	Vector2(-74.0, 1.0), Vector2(-62.0, 1.0), Vector2(-42.0, 1.0),
+	Vector2(-19.0, 1.0), Vector2(20.0, 1.0),
 ]
 
 
@@ -661,6 +675,20 @@ func _build_rabelo(hull: MeshBaker, canvas: MeshBaker, at: Transform3D, scale: f
 					at * Transform3D(Basis(Vector3.RIGHT, PI * 0.5),
 						Vector3(sx * 0.55 * scale, 0.62 * scale,
 							(float(i) - 1.0) * 1.05 * scale)), 7)
+	# A tarpaulin lashed over the after cargo. One box, into the canvas bake that
+	# is already open for the furled sails, so it costs no draw call and twelve
+	# triangles a boat.
+	#
+	# It is here because the fleet's problem was never the count. HULL_DARK is
+	# (0.17, 0.22, 0.24) against a river the shader renders at deep_color
+	# (0.115, 0.205, 0.245) — at ninety metres a rabelo was a dark shape on dark
+	# water separated by about one value step, which is how a critic came to
+	# report "no boats but one" with seventeen of them in frame. A pale patch
+	# amidships is a few pixels of near-white inside that silhouette, and a value
+	# break INSIDE a shape is what makes it an object rather than a smudge.
+	canvas.add_box(Vector3(beam * 0.72, 0.30 * scale, 2.3 * scale),
+			at * Transform3D(Basis(Vector3.RIGHT, 0.06),
+				Vector3(0.0, 0.72 * scale, l * 0.10)))
 
 
 # --- Static water surface ----------------------------------------------------

@@ -1,6 +1,6 @@
 extends Control
-## The game's logo lockup: two stacked display lines, a gold rule and a
-## letterspaced strapline, treated so it survives being laid over a bright,
+## The game's logo lockup: two stacked display lines and a letterspaced
+## strapline, treated so it survives being laid over a bright,
 ## saturated, MOVING midday sky. There is no tone behind it we can rely on: over
 ## seventy-four seconds of camera move the same letter crosses blue sky, white
 ## river glare and sunlit granite, so the lockup has to carry its own contrast.
@@ -57,9 +57,15 @@ const SIZE_ONE := 84
 const SIZE_TWO := 84
 const SIZE_STRAP := 20
 const GAP_LINES := -12.0          # display faces overlap slightly; Bangers has deep bearing
-const GAP_RULE := 22.0
+## Air between the lockup and the strapline. This used to be split by a gold
+## gradient rule, which was cut: a horizontal divider under a title, over a
+## letter-spaced subtitle, is the single most recognisable piece of generated-
+## layout furniture there is. The lockup and the strapline are already separated
+## by a face change, a size change, a colour change and 34 px of air — the rule
+## was decorating a distinction the type had already made, which is what made it
+## read as filler rather than design.
+const GAP_RULE := 34.0
 const GAP_STRAP := 12.0
-const RULE_HEIGHT := 4.0
 const SHADOW_OFFSET := Vector2(6.0, 7.0)
 ## Outline weights, as fractions of the font size. The keyline is the outer black
 ## stroke that defines the letterform; the face's own rim sits inside it and is a
@@ -124,7 +130,6 @@ void fragment() {
 """
 
 var _rows: Array[Dictionary] = []      # {face, shadow, size, px}
-var _rule: TextureRect
 var _strap: Label
 var _strap_font: FontVariation
 var _materials: Array[ShaderMaterial] = []
@@ -136,8 +141,6 @@ func _ready() -> void:
 	_rows.append(_display_row(LINE_ONE, SIZE_ONE))
 	_rows.append(_display_row(LINE_TWO, SIZE_TWO))
 
-	_rule = _gold_rule()
-	add_child(_rule)
 
 	_strap_font = FontVariation.new()
 	_strap_font.base_font = UIStyle.UI_BOLD
@@ -234,10 +237,7 @@ func relayout(max_width: float, ui_scale: float) -> float:
 		shadow.position = Vector2(0.0, y) + offset
 		y += px * 1.34 + GAP_LINES * ui_scale * fit
 
-	var rule_w := max_width * 0.88
 	y += GAP_RULE * ui_scale
-	_rule.position = Vector2(0.0, y)
-	_rule.size = Vector2(rule_w, maxf(2.0, RULE_HEIGHT * ui_scale))
 
 	# The strapline gets its own fit, separate from the display lines' shared one.
 	# It is tracked out through spacing_glyph, and get_string_size() measures the
@@ -259,7 +259,7 @@ func relayout(max_width: float, ui_scale: float) -> float:
 		track = maxi(1, roundi(strap_size * 0.34))
 	_strap_font.spacing_glyph = track
 	_strap.add_theme_font_size_override("font_size", strap_size)
-	y += _rule.size.y + GAP_STRAP * ui_scale
+	y += GAP_STRAP * ui_scale
 	_strap.position = Vector2(0.0, y)
 	_strap.size = Vector2(max_width, strap_size * 1.5)
 	y += _strap.size.y
@@ -279,31 +279,6 @@ func _push_rect_size() -> void:
 					Vector2(face.size.x, float(row["px"]) * GRADIENT_SPAN))
 
 
-## The rule fades out to the right instead of stopping dead. A hard bar under a
-## logo laid over a moving photographic backdrop reads as a UI divider; a fade
-## reads as part of the lockup.
-func _gold_rule() -> TextureRect:
-	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
-	grad.colors = PackedColorArray([
-		UIStyle.GOLD,
-		Color(UIStyle.GOLD_DEEP.r, UIStyle.GOLD_DEEP.g, UIStyle.GOLD_DEEP.b, 0.55),
-		Color(UIStyle.GOLD_DEEP.r, UIStyle.GOLD_DEEP.g, UIStyle.GOLD_DEEP.b, 0.0),
-	])
-	var gt := GradientTexture2D.new()
-	gt.gradient = grad
-	gt.width = 256
-	gt.height = 2
-	gt.fill_from = Vector2(0, 0)
-	gt.fill_to = Vector2(1, 0)
-	var tr := TextureRect.new()
-	tr.texture = gt
-	tr.stretch_mode = TextureRect.STRETCH_SCALE
-	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	return tr
-
-
-# --- Shine -------------------------------------------------------------------
 
 func _start_shine() -> void:
 	if _materials.is_empty():

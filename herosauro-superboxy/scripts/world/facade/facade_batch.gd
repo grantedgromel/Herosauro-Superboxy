@@ -205,8 +205,17 @@ static func lit() -> StandardMaterial3D:
 
 
 ## Hung washing and shopfront awnings — single quads, so culling off.
-static func linen_thin() -> StandardMaterial3D:
-	if _linen_thin == null:
-		_linen_thin = ToonFactory.cloth(LINEN_WHITE, LINEN_TILE).duplicate()
-		_linen_thin.cull_mode = BaseMaterial3D.CULL_DISABLED
-	return _linen_thin
+##
+## A sheet on a line is seen from both sides over the course of a fight and from
+## behind in half the shot vantages, so a back-face-culled one disappears exactly
+## when it is doing its job. The duplicate is mandatory — factory materials are
+## shared and cached project-wide — and the result is memoised per colour so the
+## whole city still shares one material per tone.
+static func linen_thin(color: Color = LINEN_WHITE) -> StandardMaterial3D:
+	var cached: StandardMaterial3D = _linen_thin.get(color)
+	if cached != null:
+		return cached
+	var m: StandardMaterial3D = ToonFactory.cloth(color, LINEN_TILE).duplicate()
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_linen_thin[color] = m
+	return m

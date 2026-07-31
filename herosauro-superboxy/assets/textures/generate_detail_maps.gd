@@ -474,21 +474,31 @@ func _recipes() -> Array[Dictionary]:
 		# THE FIELD. Cellular, DISTANCE2_SUB, so the value is 0 exactly on a cell border
 		# and rises into the cell — the borders become the mortar joints, the interiors
 		# the block faces, and the bump conversion cuts the joints in as real grooves.
-		# Frequency 0.0176 over a 256-px map is a 57-texel cell.
+		# Frequency 0.03125 over a 256-px map is a 32-texel cell, i.e. 8 x 8 = 64 blocks
+		# per tile. Sixty-four is chosen against the repeat rather than by eye: fewer
+		# blocks means a shorter tile in metres for the same block size, and the tile
+		# length in metres IS the repeat period.
 		#
 		# The block PROPORTION comes from the material rather than from here, and that
 		# is the second half of the fix. toon_bridge.tres tiles this ANISOTROPICALLY —
-		# uv1_scale (0.16, 0.5, 0.16), i.e. 6.25 m across and 2.0 m up — so a square
-		# 57-texel cell lands as a block 1.39 m long and 0.45 m high. That is coursed
+		# uv1_scale (0.125, 0.25, 0.125), i.e. 8.0 m across and 4.0 m up — so a square
+		# 32-texel cell lands as a block 1.00 m long and 0.50 m high. That is coursed
 		# granite ashlar at the size a real bridge spandrel is built from, and it is
 		# only reachable because BaseMaterial3D's uv1_scale is a Vector3 and triplanar
 		# forms a z-facing surface's UV out of (x * scale.x, y * scale.y).
 		#
 		# The same anisotropy is what kills the 214 px repeat: the horizontal period
-		# goes 2.94 m to 6.25 m, so the repeat lands at ~455 px instead of 214 and the
-		# frame holds 2.8 of them instead of 6. Vertically the tile is 2.0 m against a
-		# 1.96 m fascia, so the band shows just under ONE tile and has no vertical
-		# repeat at all.
+		# goes 2.94 m to 8.00 m, and the fascia images at 72.8 px per metre in that
+		# shot, so the repeat lands near 580 px instead of 214 and the frame holds 2.2
+		# of them instead of 6. Vertically the tile is 4.0 m against a 1.96 m fascia, so
+		# the band shows HALF a tile and has no vertical repeat at all.
+		#
+		# The one cost of the anisotropy, stated rather than hidden: a tangent-space
+		# normal stretched 2:1 encodes a slope that is twice as steep across the long
+		# axis as it should be, so the vertical perpend joints read a little deeper and
+		# about twice as wide (9 cm against the bed joints' 5 cm) as a mason would cut
+		# them. On raked granite rubble that is inside the range of the real thing, and
+		# it buys a repeat period nobody can find.
 		#
 		# JITTER 0.42, not the cobble's 0.90 and not zero. Zero gives a perfect lattice,
 		# which is the RUBRIC's "nothing perfectly straight, clean or repeated" failure
@@ -510,13 +520,29 @@ func _recipes() -> Array[Dictionary]:
 		# construction and it is here for the same reason — it is the only way a single
 		# scalar noise field produces per-object identity rather than a wash.
 		#
-		# Six stops, three value levels crossed with warm and cool, which makes value and
-		# hue orthogonal over an equal-share cell field (see the cobble note for the dot
-		# product). Value ratio 1.52 (0.638 -> 0.972 linear) and chroma +-0.062 linear:
-		# both TIGHTER than the cobble's, because a dressed and coursed spandrel is
-		# quarried from one bed and a calcada is swept up from several. Read as stone:
-		# iron-stained block, damp blue-grey block, buff block, grey block, sun-bleached
-		# block, quartz-pale block.
+		# Six stops on THREE orthogonal axes rather than the cobble's two, and the third
+		# one is here because this surface has a second measurement to answer. The
+		# fascia's variation was already 75% hue by the (R-G) sd / L sd ratio, so this
+		# recipe must NOT buy its channel decorrelation with more colour — the colour is
+		# the thing being complained about. It buys it with an extra AXIS instead:
+		#
+		#   value        v = 0.80 +- 0.075 linear   V = [-1 -1  0  0 +1 +1]
+		#   warm / cool  +-0.075 on r against b     S = [+1 -1 +1 -1 +1 -1]
+		#   green / mag  +-0.040 on g against both  P = [+1 -1  0  0 -1 +1]
+		#
+		# All three sum to zero and are mutually orthogonal over equal shares, which is
+		# what drives the correlations down (predicted r-g +0.38, r-b -0.08 against the
+		# +0.83 / +0.33 a two-axis version of the same ramp measured). And the total
+		# per-texel chroma is 0.155 linear, LOWER than the granite map it replaces
+		# (0.174) — so the surface ends up less colourful and less monochrome at the
+		# same time, which is only possible because the axes are orthogonal.
+		#
+		# The VALUE variation the surface reads at distance is therefore meant to come
+		# from the joints, not from here: block-to-block value is a 1.21 ratio, while
+		# the mask's AO runs 0.50-1.00 and the normal cuts a real groove. That is the
+		# right split for the "hue rather than form" finding — form is what a joint is.
+		# Read as stone: iron-stained block, damp blue-grey block, buff block, grey
+		# block, lichen-yellowed block, quartz-blue block.
 		{
 			"name": "masonry",
 			"noise": _cellular(0.03125, 0.42, 9137),
@@ -528,19 +554,29 @@ func _recipes() -> Array[Dictionary]:
 			# STOP OFFSETS ARE THE FIELD'S OWN k/6 QUANTILES, read off the deciles
 			# _report() prints (0.03 .12 .19 .33 .50 .55 .66 .71 .78 .89 1.00). A
 			# cellular RETURN_CELL_VALUE field is only uniform when its jitter is high —
-			# at 0.42 the cells vary in area, so cell VALUE is uniform but cell AREA is
+			# at 0.42 the cells vary in AREA, so cell value is uniform and cell area is
 			# not, and evenly spaced stops give the six stones shares of 22/15/18/17/22/6
-			# per cent instead of a sixth each. That imbalance is not cosmetic: the value
-			# and hue axes are orthogonal only over EQUAL shares (the dot product in the
-			# cobble note), so an uneven split re-correlates the channels. Measured
-			# r-g +0.826 / r-b +0.302 on even stops, against +0.45 / +0.02 on these.
+			# per cent instead of a sixth each.
+			#
+			# WHAT THAT ACTUALLY BOUGHT, measured rather than assumed, because the
+			# obvious story is wrong. Three runs on this same field:
+			#   even stops,     two-axis ramp    r-g +0.826  r-b +0.302
+			#   quantile stops, two-axis ramp    r-g +0.838  r-b +0.327
+			#   quantile stops, three-axis ramp  r-g +0.436  r-b -0.064
+			# So the offsets moved the correlation by nothing at all — the third colour
+			# axis did the whole of it. What the quantiles DID buy is the delivered
+			# per-channel MEAN: (0.796, 0.804, 0.796), i.e. neutral to half a percent,
+			# where an uneven split leaves the map with a tint the material has to
+			# divide back out. Both are worth having and they are not the same property,
+			# and writing down which one each change bought is the only way the next
+			# person does not credit the wrong one.
 			"albedo_ramp": [
-				[0.000, Color(0.887, 0.854, 0.820)],
-				[0.167, Color(0.820, 0.854, 0.887)],
-				[0.387, Color(0.939, 0.909, 0.877)],
-				[0.550, Color(0.877, 0.909, 0.939)],
-				[0.693, Color(0.988, 0.959, 0.930)],
-				[0.817, Color(0.930, 0.959, 0.988)],
+				[0.000, Color(0.926, 0.846, 0.849)],
+				[0.167, Color(0.804, 0.889, 0.886)],
+				[0.387, Color(0.943, 0.906, 0.868)],
+				[0.550, Color(0.868, 0.906, 0.943)],
+				[0.693, Color(0.959, 0.962, 0.886)],
+				[0.817, Color(0.926, 0.924, 0.996)],
 			],
 		},
 		# Barrel roof tiles: rounded cells with a gritty clay surface. Rain-polished

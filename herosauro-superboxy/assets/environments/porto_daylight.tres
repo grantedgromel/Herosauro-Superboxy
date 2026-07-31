@@ -206,19 +206,45 @@ tonemap_agx_contrast = 1.62
 
 ; --- Screen-space reflections ---
 ; The Douro reflecting the arch and the lit city is THE Porto image, so this is tuned
-; for one specific case: a near-mirror plane (the water shader runs ROUGHNESS 0.07)
+; for one specific case: a near-mirror plane (the water shader runs ROUGHNESS 0.06)
 ; seen at a grazing angle from 17 m up, with rays that have to travel most of the
 ; screen. max_steps 112 for that reach; depth_tolerance 0.22 because 0.3 is wider than
-; the lattice members are thick and smears them into a smudge; fade_in 0.05 so the
-; reflection starts at the waterline instead of leaving a gap under the piers; fade_out
-; 6.0 so the far half of the reflection survives instead of dissolving mid-river.
-; Untouched by the daylight pass: none of it is about the time of day, and the
-; reflection matters MORE now that what it reflects is a blue sky with an iron arch
-; across it rather than an amber wash.
+; the lattice members are thick and smears them into a smudge.
+;
+; ROUND 4. fade_out 6.0 -> 1.5, and the old value was a units error of exactly the
+; kind Round 2's detail_blend_mode was.
+;
+; NEITHER fade_in NOR fade_out IS A DISTANCE. Both are exponents on the ray march's
+; own progress: Godot computes the blend of a hit found at fraction g along the march
+; as pow(g, ssr_fade_in) * pow(1 - g, ssr_fade_out). The comment here used to read
+; "fade_out 6.0 so the far half of the reflection survives instead of dissolving
+; mid-river", which is the opposite of what 6.0 does — a hit at the halfway point kept
+; 0.5^6 = 0.016 of itself, and a hit three quarters along kept 0.00024. It did not
+; dissolve the far half of the reflection, it deleted everything except the first
+; sixth.
+;
+; That is the wrong end to delete for water specifically. A reflection off a
+; horizontal plane seen at a grazing angle has a reflected ray that is ALSO nearly
+; horizontal, so it crawls across the screen and finds whatever it finds late in the
+; march by construction. Two critics measured the consequence independently: a
+; three-band sample of the Douro in shot 07 varied under 8% between water under bright
+; terraces, open mid-span and water under a dark cliff, and a large iron arch stood
+; over calm water in shot 06 and returned nothing. What DID survive was the reflection
+; of things within a few metres of the surface — the near bank's own facades in shot
+; 09 — which is exactly the signature of a fade that kills long rays.
+;
+; 1.5 keeps a midpoint hit at 0.354 and still rolls a hit in the last tenth of the
+; march off to 0.03, which is the part that genuinely wants suppressing: at the end of
+; the march the ray is off-screen or behind something and the sample is a smear.
+; _atmosphere_probe.gd asserts the midpoint survival rather than the number.
+;
+; fade_in 0.05 is kept and was always right: pow(g, 0.05) is within 20% of 1.0 by the
+; first step, so the reflection starts at the waterline instead of leaving a gap under
+; the piers.
 ssr_enabled = true
 ssr_max_steps = 112
 ssr_fade_in = 0.05
-ssr_fade_out = 6.0
+ssr_fade_out = 1.5
 ssr_depth_tolerance = 0.22
 
 ; --- SSAO / SSIL ---
@@ -254,26 +280,54 @@ ssao_radius = 0.9
 ssao_intensity = 1.6
 ssao_power = 1.2
 ssao_detail = 0.4
-; 0.15 -> 0.50. This is the global half of Round 3's contact-darkening finding.
+; 0.15 -> 0.50 in Round 3, and HELD at 0.50 in Round 4 after the question was
+; finally measured instead of argued. Do not raise it again; the reason follows,
+; because three rounds have now spent effort here on a premise that is false.
 ;
 ; ssao_light_affect decides how much of the occlusion term is allowed to touch
-; DIRECT light; the remainder lands only on ambient. At 0.15 essentially all of
-; it landed on ambient — and under a 2.8-energy key on sunlit granite, ambient is
-; a small fraction of what the surface returns, so the occlusion was being spent
-; where there was almost nothing to darken. Two independent critics measured the
-; result the same way: cast shadows are present and correct, but NOTHING has
-; contact darkening where it meets the ground, and every object reads as planted
-; by its cast shadow alone.
+; DIRECT light; the remainder lands only on the indirect terms. Round 3 raised it
+; to 0.50 for contact darkening under the lamp standards and the deck bollard, and
+; the capture that followed still showed no dip in the paving under any of them.
 ;
-; The world stream did what geometry can — moulded feet, shaft swells, contact
-; patches — and moved one lamp's ground transition from 4/39/128/174 to
-; 4/21/66/180, a ramp instead of a step. That is a real but small win at a ten
-; pixel foot, and it correctly reported that the rest lives here.
+; MEASURED, in an isolated render rather than in the arena where texture noise
+; hides everything: a plane, three posts of 0.12 / 0.30 / 0.80 m diameter, a wall
+; corner, this exact key, ambient and grade, rendered with SSAO on and off and
+; differenced.
 ;
-; 0.50 rather than the 0.4-0.6 recommended midpoint: AO on direct light is not
-; physical (a shadow term already accounts for what the key cannot see), so this
-; is a deliberate art lever and half is as far as it should go before contact
-; shadows start reading as dirt in the crease of every sunlit corner.
+;   ambient-only control (key off)    post 0.12 m  -2.55 L (3.0%)   corner -7.90 L
+;   this rig, as shipped              post 0.12 m  -0.19 L (0.2%)   corner -1.96 L
+;   5x intensity, light_affect 1.0    post 0.12 m  -0.78 L (0.7%)   corner -8.82 L (17%)
+;
+; SSAO IS generating occlusion at radius 0.9, and its SHAPE is right — amplify the
+; difference and there is a clean contact halo at every post base, thin one
+; included. Its MAGNITUDE under this rig is 0.2% of the pixel, on paving whose own
+; texture deviation is 10-15 L. It is a sixth of one standard deviation of the
+; noise it is drawn on. That is why raising light_affect changed nothing
+; measurable, and the third row is why raising it further cannot help: at the
+; setting that finally plants a lamp post, every inside corner in the frame has
+; become a dirt ring.
+;
+; The cause is structural, not a value. AO occludes INDIRECT light plus whatever
+; fraction of DIRECT light this number concedes — and this rig has spent three
+; rounds deliberately deleting the indirect (ambient 0.55 -> 0.20, ssil 0.60 ->
+; 0.32, sdfgi 0.95 -> 0.80) because directionless light is what killed normal-map
+; relief inside shadows. Those cuts were right and are not being reversed. The
+; consequence is that AO has almost nothing left to take away: the same AO is 13x
+; stronger in the ambient-only control purely because there is light there for it
+; to occlude.
+;
+; The obvious alternative was tried in the same harness and is worse: giving
+; LightingRig's SkyFill a shadow map with a 30-degree angular diameter puts a
+; second CAST SHADOW streaking away from every object in a direction the sun is
+; not, plus shadow acne across open paving. Two suns beats no contact patch only
+; if you are not looking at the frame.
+;
+; So contact under a sunlit object is not this stream's to give. It has to come
+; from geometry or a decal — the world stream's moulded feet and contact patches,
+; which moved one lamp's ground transition from 4/39/128/174 to 4/21/66/180, are
+; the right instrument and want more of the same. _atmosphere_probe.gd now gates
+; the only thing that is genuinely this file's: that enough occludable indirect
+; light survives for AO to darken a crease at all.
 ssao_light_affect = 0.5
 ssil_enabled = true
 ssil_radius = 2.4
@@ -357,30 +411,57 @@ glow_hdr_luminance_cap = 8.0
 ; chord — cobalt, vermilion, ochre, cream — is the right chord for Porto and is not
 ; what is wrong.
 ;
-; begin 40 -> 18 and curve 0.90 -> 0.62, which roughly doubles the veil right across
-; the mid-ground while leaving the playable corridor alone. Composited with the
-; volumetric pass below, at the distances this scene actually has geometry:
+; begin 40 -> 18 and curve 0.90 -> 0.62 in Round 3, which roughly doubled the veil
+; right across the mid-ground while leaving the playable corridor alone.
 ;
-;                             was     now
-;     deck / hero      0-40 m  <4%     <6%    nothing playable is veiled
-;     bridge ends      50 m     6%      9%
-;     arch, abutments  70 m     9%     14%
-;     Ribeira terraces 100 m   12%     20%    where the over-bright facades are
-;     Clerigos, Serra  130 m   16%     27%
-;     scan, near edge  168 m   22%     35%
-;     scan, far edge   340 m   57%     69%
-;     horizon          640 m+ 100%    100%    the water reaches sky colour before its
-;                                             geometry runs out, so the river plane's
-;                                             far edge stops being visible at all
+; ROUND 4: fog_depth_end 640 -> 520, and it is the RANGE that moves rather than the
+; density or the curve, deliberately. Round 3's critics measured the same-material
+; saturation series up the left bank of shot 07 running near-to-far 0.265 -> 0.301 ->
+; 0.323 — saturation RISING with distance, which is an inverted atmospheric model —
+; and separately measured background saturation (0.32) sitting at two and a half
+; times the playable deck's (0.13). The correct instrument for that is more veil in
+; the 80-200 m band where the Ribeira terraces stand, because a veil is what strips
+; chroma: mixing a terracotta facade 24% toward the pale hem takes its saturation
+; from 0.55 to 0.40, and 42% takes it to 0.28. Density cannot deliver that (it is
+; already 1.0 and it only scales the far end) and curve cannot (it lifts the near
+; field at the same rate, and the playable corridor has a 9% ceiling in the probe).
+;
+; Composited with the volumetric pass below, at the distances this scene has geometry:
+;
+;                            r2      r3      r4
+;     deck / hero      0-40 m  <4%     6.1%    7.0%   nothing playable is veiled
+;     bridge ends      50 m     6%     8.6%   10.0%
+;     arch, abutments  70 m     9%    13.6%   15.9%
+;     Ribeira terraces 100 m   12%    20.4%   24.4%   where the over-bright facades are
+;     Clerigos, Serra  130 m   16%    26.6%   32.3%
+;     scan, near edge  168 m   22%    34.7%   42.3%
+;     scan, far edge   340 m   57%    69.2%   81.8%
+;     horizon          520 m+ 100%    100%   100%    the water reaches sky colour before
+;                                                    its geometry runs out, so the river
+;                                                    plane's far edge is never a seam
 ;
 ; The ramp is monotone at every sample, which is the whole depth cue — a dip anywhere
-; means near geometry hazier than something behind it. _atmosphere_probe.gd checks it.
+; means near geometry hazier than something behind it. _atmosphere_probe.gd checks it,
+; and LightingRig's three COMPAT_FOG_* constants were re-solved against this curve in
+; the same edit (worst mismatch 0.0065 over 10-410 m, against a 0.06 gate).
+;
+; What this does NOT fix, and should not be asked to: the veil BRIGHTENS as well as
+; desaturates, because with aerial_perspective at 0.90 it converges on the sky and the
+; horizon hem of a clear sky is genuinely bright. A critic measured the far river in
+; shot 02 at L 176-184 against a mean deck of 110 and called the eye to it, correctly.
+; That gap closes from the other end — by the playable corridor getting brighter, which
+; is the materials stream's albedo work — and NOT by dimming the sky, which would make
+; a clear Porto morning read as overcast. Adding veil without that is the milky-screen
+; failure this project already shipped once, so the two halves have to land together.
 ;
 ; Two more numbers here changed earlier, when the sunset went:
 ;
-; fog_light_color, warm haze amber -> pale sky blue. This is the 10% of the veil that
-; is NOT the sky behind the geometry, and an amber tint in it was putting a gold cast
-; on every distant surface in a frame lit at 5100 K.
+; fog_light_color, warm haze amber -> pale sky blue -> (0.706, 0.769, 0.824). This is
+; the 10% of the veil that is NOT the sky behind the geometry — the airlight's own
+; colour rather than the dome's — and it comes down in both value and chroma this
+; round for the same reason the range came in: it is the one part of the veil that can
+; desaturate without also brightening. B-R stays +0.118, so it is still decisively a
+; daylight haze rather than a cream one.
 ; fog_sun_scatter 0.42 -> 0.10. This adds the sun's own colour to the fog along
 ; sightlines near it. It existed because looking down the gorge was looking within 30
 ; degrees of an 11.5-degree sun, which is the glare that sells a low sun over water.
@@ -394,14 +475,14 @@ glow_hdr_luminance_cap = 8.0
 ; sky_affect stays 0: at anything above that the fog fogs the sky itself.
 fog_enabled = true
 fog_mode = 1
-fog_light_color = Color(0.741, 0.827, 0.902, 1)
+fog_light_color = Color(0.706, 0.769, 0.824, 1)
 fog_sun_scatter = 0.1
 fog_density = 1.0
 fog_aerial_perspective = 0.9
 fog_sky_affect = 0.0
 fog_depth_curve = 0.62
 fog_depth_begin = 18.0
-fog_depth_end = 640.0
+fog_depth_end = 520.0
 
 ; --- Volumetric fog: the light shafts ---
 ; This existed for one shot: an 11.5 degree sun raking through the arch lattice. A
