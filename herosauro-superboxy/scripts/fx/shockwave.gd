@@ -284,6 +284,30 @@ func _draw(radius: float, k: float, t: float) -> void:
 		mm.set_instance_color(i, Color(tint.r, tint.g, tint.b, a))
 
 
+# --- Probe surface ------------------------------------------------------------
+
+## The radius that can HIT you. Read by `_fx_probe`.
+func wave_radius() -> float:
+	return _shape.radius if _shape else 0.0
+
+
+## The radius you can SEE. The two must agree to within a hair at every instant:
+## a wave whose ring is ahead of its collider teaches the player to dodge too
+## late, and one whose ring is behind it teaches them to dodge something that
+## already hit them. `_fx_probe` measures the gap every frame of a full sweep.
+func ring_radius() -> float:
+	if _ring == null or not is_instance_valid(_ring):
+		return 0.0
+	return _ring.scale.x
+
+
+## Puffs in the dust wall, for the budget assertions.
+func wall_instances() -> int:
+	if _wall == null or not is_instance_valid(_wall):
+		return 0
+	return _wall.multimesh.instance_count
+
+
 # --- Damage -------------------------------------------------------------------
 
 func _on_body_entered(body: Node) -> void:

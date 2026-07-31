@@ -147,10 +147,27 @@ func _check_layers() -> void:
 ## SurfaceTool.append_from precisely so it cannot get this wrong — and it is
 ## measured anyway.
 ##
-## The test: for a shape roughly centred on its own origin, an OUTWARD normal
-## points the same way as the vertex it belongs to. A hollow or inside-out mesh
-## scores near zero.
+## HOW, and why the obvious test is wrong. The intuitive check — "an outward
+## normal points away from the mesh origin" — only holds for a shape centred on
+## that origin. A crate's corner batten is a box offset to a corner, and its
+## inner faces correctly point back TOWARD the origin, so the intuitive test
+## scores a perfectly good crate at 69% and a torus at 43%. It measures
+## centredness, not winding.
+##
+## What is actually invariant is the relationship Round 2 settled four ways:
+## Godot's front face is the one whose right-hand normal points INTO the solid,
+## so the stored shading normal is -RH. That is position-independent, and it is
+## calibrated here against a plain Godot BoxMesh in the same run rather than
+## hard-coded — so if the engine's convention ever changed, this reports it as a
+## changed baseline instead of silently inverting every prop in the game.
 func _check_meshes() -> void:
+	var reference := _winding_agreement(_as_array_mesh(BoxMesh.new()))
+	print("\n  -- winding baseline: Godot's own BoxMesh stores -RH on %.0f%% of its triangles"
+		% (100.0 * reference))
+	_ok(reference > 0.99,
+		"the engine convention is what Round 2 measured: stored normal = -RH (%.0f%%)"
+			% (100.0 * reference))
+
 	var cases := {
 		"crate body": PropMeshKit.crate_body(Vector3(0.9, 0.9, 0.9)),
 		"crate brackets": PropMeshKit.crate_brackets(Vector3(0.9, 0.9, 0.9)),
@@ -164,12 +181,13 @@ func _check_meshes() -> void:
 	}
 	for label in cases:
 		var mesh: ArrayMesh = cases[label]
-		var out := _outward_fraction(mesh)
-		print("  -- %-16s %5d tris, %.0f%% of stored normals point outward"
-			% [label, out["tris"], 100.0 * out["fraction"]])
-		_ok(int(out["tris"]) > 0, "%s has geometry" % label)
-		_ok(float(out["fraction"]) >= 0.75,
-			"%s is not inside out (%.0f%% outward)" % [label, 100.0 * out["fraction"]])
+		var agree := _winding_agreement(mesh)
+		print("  -- %-16s %5d tris, %.0f%% of triangles wound to the engine convention"
+			% [label, _tri_count(mesh), 100.0 * agree])
+		_ok(_tri_count(mesh) > 0, "%s has geometry" % label)
+		_ok(agree >= reference - 0.02,
+			"%s is wound like a BoxMesh, so it lights and faces correctly (%.0f%%)"
+				% [label, 100.0 * agree])
 		_ok(mesh.get_surface_count() == 1,
 			"%s is ONE surface, i.e. one draw call" % label)
 
@@ -180,23 +198,47 @@ func _check_meshes() -> void:
 		"the crate is a slatted frame, not a bare cube (%d tris)" % _tri_count(crate))
 
 
-func _outward_fraction(mesh: ArrayMesh) -> Dictionary:
+## Fraction of triangles whose stored shading normal is -RH, i.e. that obey the
+## engine convention. Position-independent, so it is just as valid on a batten
+## bolted to a corner as on a box around the origin.
+func _winding_agreement(mesh: ArrayMesh) -> float:
 	if mesh == null or mesh.get_surface_count() == 0:
-		return {"tris": 0, "fraction": 0.0}
+		return 0.0
 	var arrays := mesh.surface_get_arrays(0)
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var norms: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 	if verts.is_empty() or norms.size() != verts.size():
-		return {"tris": 0, "fraction": 0.0}
+		return 0.0
+	if idx.is_empty():
+		idx = PackedInt32Array()
+		for i in verts.size():
+			idx.append(i)
+
 	var good := 0
-	for i in verts.size():
-		var v := verts[i]
-		if v.length() < 0.0001:
-			good += 1
+	var total := 0
+	for t in idx.size() / 3:
+		var a := idx[t * 3]
+		var b := idx[t * 3 + 1]
+		var c := idx[t * 3 + 2]
+		var rh := (verts[b] - verts[a]).cross(verts[c] - verts[a])
+		if rh.length() < 1.0e-9:
+			continue     # degenerate sliver, no opinion either way
+		var n := (norms[a] + norms[b] + norms[c])
+		if n.length() < 1.0e-6:
 			continue
-		if norms[i].dot(v.normalized()) > 0.0:
+		total += 1
+		if rh.normalized().dot(n.normalized()) < 0.0:
 			good += 1
-	return {"tris": _tri_count(mesh), "fraction": float(good) / float(verts.size())}
+	return float(good) / float(maxi(1, total))
+
+
+## Godot's primitive meshes are not ArrayMeshes. Bake one so the same reader
+## works on the engine's baseline and on the kit's output.
+func _as_array_mesh(src: Mesh) -> ArrayMesh:
+	var out := ArrayMesh.new()
+	out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, src.surface_get_arrays(0))
+	return out
 
 
 func _tri_count(mesh: ArrayMesh) -> int:
@@ -270,13 +312,21 @@ func _blows_to_break(scene: PackedScene, impulse: float) -> Dictionary:
 	await _settle(1)
 	var label := prop.name
 	var blows := 0
+	var broke := false
 	for i in 8:
-		if prop.has_shattered() or not is_instance_valid(prop):
+		# is_instance_valid FIRST: shatter() calls queue_free(), and _thaw()
+		# awaits enough frames for the free to land, so asking a destroyed prop
+		# whether it shattered is a segfault rather than a false.
+		if not is_instance_valid(prop):
+			broke = true
+			break
+		if prop.has_shattered():
+			broke = true
 			break
 		blows += 1
 		prop.apply_hit_impulse(Vector3.RIGHT * impulse, prop.global_position)
 		await _thaw()
-	if not prop.has_shattered():
+	if not broke:
 		blows = 0
 	_free(host)
 	await _settle(2)
@@ -460,7 +510,16 @@ func _check_determinism() -> void:
 
 ## Position, orientation and launch velocity of every shard, read on the frame
 ## they are created and before physics touches them.
+##
+## The shards are found through the "debris" group rather than under the scratch
+## node, because BreakableProp deliberately parents debris to the "spawn_root"
+## group so main.gd's between-runs sweep collects it — which is the right
+## behaviour and would have made a parent-based scan silently measure nothing.
 func _burst_signature(seed_value: int) -> String:
+	var before := {}
+	for d in get_tree().get_nodes_in_group("debris"):
+		before[d.get_instance_id()] = true
+
 	var host := _scratch()
 	var prop := BarrelScene.instantiate() as BreakableProp
 	prop.freeze = true
@@ -470,19 +529,28 @@ func _burst_signature(seed_value: int) -> String:
 	prop.global_position = Vector3(0.0, 8.0, -40.0)
 	await _settle(1)
 	prop.shatter(Vector3.RIGHT * 2.0)
+
 	var sig := ""
-	for d in host.get_children():
-		if d is DebrisPiece:
-			var t := (d as DebrisPiece).global_transform
-			sig += "%.4f,%.4f,%.4f|%.4f,%.4f,%.4f|%.3f;" % [
-				t.origin.x, t.origin.y, t.origin.z,
-				(d as DebrisPiece).linear_velocity.x,
-				(d as DebrisPiece).linear_velocity.y,
-				(d as DebrisPiece).linear_velocity.z,
-				t.basis.get_euler().x]
+	var fresh: Array[Node] = []
+	for d in get_tree().get_nodes_in_group("debris"):
+		if before.has(d.get_instance_id()):
+			continue
+		fresh.append(d)
+		var piece := d as DebrisPiece
+		var t := piece.global_transform
+		sig += "%.4f,%.4f,%.4f|%.4f,%.4f,%.4f|%.3f;" % [
+			t.origin.x, t.origin.y, t.origin.z,
+			piece.linear_velocity.x, piece.linear_velocity.y, piece.linear_velocity.z,
+			t.basis.get_euler().x]
+
 	await _thaw()
+	# Freed outright rather than waited out: this check does not care what the
+	# shards do next, and four seconds of lifetime times three signatures is
+	# twelve seconds of simulation for nothing.
+	for d in fresh:
+		d.free()
 	_free(host)
-	await _settle(int(6.0 * TICK))
+	await _settle(2)
 	return sig
 
 
@@ -574,8 +642,8 @@ func _check_spawn_drop_margin() -> void:
 			if not is_instance_valid(prop):
 				break
 			peak = maxf(peak, absf(prop.linear_velocity.y))
-		var name := prop.name if is_instance_valid(prop) else "(shattered!)"
-		var threshold: float = prop.break_delta_v if is_instance_valid(prop) else 0.0
+		var name: String = str(prop.name) if is_instance_valid(prop) else "(shattered!)"
+		var threshold: float = float(prop.break_delta_v) if is_instance_valid(prop) else 0.0
 		print("  -- %-12s arrives at %.2f m/s against a break_delta_v of %.2f (%.0f%% margin)"
 			% [name, peak, threshold, 100.0 * (threshold - peak) / maxf(0.01, threshold)])
 		_ok(is_instance_valid(prop) and not (prop as BreakableProp).has_shattered(),
@@ -635,10 +703,11 @@ func _check_settling() -> void:
 	_ok(spinniest < 0.05, "nothing is still vibrating (%.4f rad/s)" % spinniest)
 
 	# And it settles again after being disturbed, which is the case that actually
-	# happens mid-fight.
+	# happens mid-fight. Deliberately just under the softest break_impulse in the
+	# arena (6.0), so this measures SETTLING and not destruction.
 	for p in props:
 		if p is PropBody:
-			(p as PropBody).apply_hit_impulse(Vector3(6.0, 3.0, 0.0) * 4.0, p.global_position)
+			(p as PropBody).apply_hit_impulse(Vector3(4.0, 1.8, 0.0), p.global_position)
 	await _thaw()
 	var resettle := -1.0
 	t = 0.0
@@ -802,6 +871,7 @@ func _watch() -> void:
 	_shakes = 0
 	_shake_peak = 0.0
 	_score_delta = 0
+	_score_base = GameManager.score
 	GameManager.camera_shake_requested.connect(_on_shake)
 	GameManager.score_changed.connect(_on_score)
 
@@ -818,17 +888,16 @@ func _on_shake(strength: float, _duration: float) -> void:
 	_shake_peak = maxf(_shake_peak, strength)
 
 
-var _score_seen: int = -1
+var _score_base: int = 0
 
 func _on_score(new_score: int) -> void:
-	if _score_seen < 0:
-		_score_seen = new_score - _score_delta
-	_score_delta = new_score - _score_seen
+	_score_delta = new_score - _score_base
 
 
 ## The logical name of the last sample AudioManager was asked to play. Read off
 ## the pool's own stream assignment, because there is no public "what did you
-## just play" and this probe's job is to prove leg three fires at all.
+## just play" — and there is no material-keyed prop entry point to ask for
+## either, which is this pass's one request of the audio stream.
 func _last_sfx_name() -> String:
 	var am := get_node_or_null("/root/AudioManager")
 	if am == null:
@@ -845,6 +914,24 @@ func _last_sfx_name() -> String:
 		if lib[key] == last.stream:
 			return str(key)
 	return "(unnamed)"
+
+
+## Where AudioManager's round-robin pool cursor is sitting. Comparing it before
+## and after an event counts how many samples were actually dispatched, which is
+## the only observable "an audio transient fired" this project offers.
+func _sfx_cursor() -> int:
+	var am := get_node_or_null("/root/AudioManager")
+	return int(am.get("_next_player")) if am != null else 0
+
+
+func _sfx_since(before: int) -> int:
+	var am := get_node_or_null("/root/AudioManager")
+	if am == null:
+		return 0
+	var size: int = (am.get("_players") as Array).size()
+	if size <= 0:
+		return 0
+	return (_sfx_cursor() - before + size) % size
 
 
 ## Let a hit-stop run out. Engine.time_scale is global and a probe that measured
@@ -870,13 +957,16 @@ func _free(n: Node) -> void:
 		n.queue_free()
 
 
+## Begin (or restart) a fight. Deliberately never passes through MENU: that
+## tears the 900k-triangle world down and rebuilds it, and this probe restarts a
+## fight six times. start_game() on a live world with the right roster reuses it
+## and repopulates the deck through the spawner's own game_started handler, which
+## is also the path a player takes when they press PLAY AGAIN.
 func _start() -> void:
 	if _main == null:
 		_main = MainScene.instantiate()
 		add_child(_main)
 		await _settle(4)
-	GameManager.go_to_menu()
-	await _settle(2)
 	GameManager.set_player_count(2)
 	GameManager.start_game()
 	await _settle(6)

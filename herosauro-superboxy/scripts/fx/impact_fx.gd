@@ -547,9 +547,20 @@ func emitter_count() -> int:
 ## and per-piece scale. The determinism check compares these between two
 ## identically-seeded bursts.
 func shard_transform(i: int) -> Transform3D:
+	return sample_shard(i, _t)
+
+
+## Where shard `i` WOULD be at age `t`, whatever its current age happens to be.
+##
+## This is the wall-clock check made testable. The whole simulation is a closed
+## form in the burst's own accumulated age, so this question has exactly one
+## answer and it does not change with when it is asked. Anything that reached for
+## `Time.get_ticks_msec()` could not answer it twice the same way, and
+## `_fx_probe` asks it twice.
+func sample_shard(i: int, t: float) -> Transform3D:
 	if i < 0 or i >= _sh_pos.size():
 		return Transform3D.IDENTITY
-	return _shard_xform(i, _t)
+	return _shard_xform(i, t)
 
 
 # --- Construction -------------------------------------------------------------

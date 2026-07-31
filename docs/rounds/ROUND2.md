@@ -163,3 +163,81 @@ and it hit the wide establishing shots hardest, which are the ones critics
 score. Success is now "a decodable PNG exists": `png.read()` inflates the IDAT
 and unfilters every scanline, so a file truncated by a killed process raises
 rather than passing. Verified against a deliberately truncated frame.
+
+---
+
+# Round 2 scored: AMATEUR again, and a second critic diagnosis refuted
+
+`03_rail_macro` **2.8/10**, `01_deck_mid` **2.6/10** — against Round 1's 3.0 and
+2.3. Essentially flat, which is the honest read: the round fixed causes, and
+causes are upstream of the things a critic scores.
+
+## The top systemic finding was wrong, and was checked before it was acted on
+
+The critic's number-one claim, stated for both frames and offered as the thing
+to fix before anything else:
+
+> **There is no directional light in this scene at all.** … the balustrade casts
+> no shadow … a ±6% ripple where a hard lattice shadow would be a 40–60% drop.
+
+It sampled the pale granite band, `y470–560`, and reported "L=132.8–136.3 across
+90 rows". Those are **row means**, and the balustrade's shadows run roughly
+parallel to the rows, so averaging along them destroys precisely the evidence
+being looked for. Its own band is not flat either: sd 26.2, min 7.2, max 216.8.
+
+Measured on the cobble, where the shadows visibly fall — one row, full width:
+
+```
+y=640   min 5.0   max 93.2
+        dark population 38% (mean 30.7)  |  lit population 45% (mean 71.6)
+        drop from lit to shadow: 57%
+```
+
+**57%, cleanly bimodal** — inside the 40–60% the critic itself nominated as
+proof. The sun is there, it is directional, and it casts hard shadows. The
+51°→34° re-key worked.
+
+This is the second round running where the leading critic finding was a correct
+observation with a wrong cause, and the second time the proposed fix would have
+changed nothing. Round 1: "no cast shadows exist" (they did; the sun was too
+high to make them visible). Round 2: "there is no directional light" (there is;
+it was sampled in the wrong place, along the wrong axis).
+
+The lesson is not that the critics are bad — their *observations* keep being
+right and their measurements keep being reproducible. It is that a critic sees
+one frame and infers a cause, and inference from a single frame is exactly where
+the process needs a second measurement before it spends a round.
+
+## What survived verification, and is worth acting on
+
+- **Every stone surface has monochrome-only variation.** Measured channel
+  deviation correlations: cobbles rg=0.945/rb=0.894, granite rg=0.987/rb=0.882,
+  kerb rg=0.995/rb=0.975, parapet rg=0.994/rb=0.964, walkway rg=0.995/rb=0.952.
+  Every one is a single flat albedo multiplied by a grey mask. Not one surface
+  in either frame has hue variation across it. Real granite decorrelates its
+  channels — feldspar warm, quartz white, mica black. **This is one authoring
+  habit producing the same failure on every surface, and it is the single most
+  actionable finding of the round.**
+- **The tan parapet band** is the largest near surface in `01_deck_mid` at ~15%
+  of the frame and measures **1.98% unique colours** — flat tan with airbrushed
+  blotches, no courses, no joints, no chamfer, no wear at the coping line. It is
+  also sandstone-coloured (110, 93, 77) where Porto is grey granite.
+- **An untextured pure-white cube prop** sits on the walkway at x≈1075. A
+  greybox placeholder that shipped.
+- **The "QUIN CORV" lodge sign** is now the highest-contrast element in the
+  frame (sd=63) while sitting in the deep background, cut off mid-word at both
+  ends. Raising it out of the roofline last round fixed legibility and created a
+  focal competitor. The fix needs finishing, not reverting.
+- The near field is empty in both frames, and composition is horizontal banding
+  with nothing breaking the horizon.
+
+## The critic's own opposite-fix warning, which is correct
+
+> The lever being pulled on materials appears to be *adding grey grunge*. The
+> granite already carries sd=19.6 and the walkway sd=40.6 — those are not low
+> numbers, and the surfaces still read as cardboard, because the variation is
+> monochrome so it never becomes albedo.
+
+That is right, and it is the correct reading of the channel-correlation numbers.
+More dirt on a flat albedo produces measurable noise carrying no material
+information. Hue-varying albedo is the lever; grunge is not.

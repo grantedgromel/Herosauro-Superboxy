@@ -2,9 +2,25 @@
 
 [ext_resource type="Script" path="res://scripts/abilities/boxy_dash.gd" id="1_trail"]
 
-[sub_resource type="BoxMesh" id="Box_ghost"]
-size = Vector3(1.1, 1.7, 1.1)
+; The after-image's silhouette. A 1.1 x 1.7 x 1.1 BOX used to stand in for Super
+; Boxy, which is neither his shape nor his footprint — a dash left a row of red
+; cubes down the deck. This is his ACTUAL collision capsule from superboxy.tscn
+; (radius 0.4, height 1.7, centred on the body origin), so the ghosts trace the
+; volume he really swept through.
+;
+; It is still not a true after-image: that needs a copy of the rigged model, which
+; only the players stream can hand over — see this pass's report. A capsule at
+; least reads as a body.
+[sub_resource type="CapsuleMesh" id="Capsule_ghost"]
+radius = 0.4
+height = 1.7
+radial_segments = 12
+rings = 4
 
+; Shadows off. Nine ghosts over a quarter-second dash, each casting into the sun
+; cascade, is nine shadow-map draws for something that is meant to be a smear of
+; light rather than a body standing in the light.
 [node name="DashTrail" type="MeshInstance3D"]
-mesh = SubResource("Box_ghost")
+cast_shadow = 0
+mesh = SubResource("Capsule_ghost")
 script = ExtResource("1_trail")

@@ -1,9 +1,44 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/abilities/dino_energy.gd" id="1_dino"]
 
 [sub_resource type="SphereShape3D" id="Sphere_shape"]
 radius = 0.5
+
+; The trail's particle mesh. CPUParticles3D has NO default mesh in Godot 4 —
+; `set_mesh(null)` hands the RenderingServer an empty RID — so this node was
+; emitting twenty-four invisible particles every frame of every cast since it was
+; written. Chunky and low-poly on purpose: N. Sane's energy trails are solid
+; shapes, not soft sprites, and 6 x 3 segments is 36 triangles a mote.
+[sub_resource type="SphereMesh" id="Mesh_mote"]
+radial_segments = 6
+rings = 3
+radius = 0.13
+height = 0.26
+
+; Unshaded and emissive, because the trail is LIGHT rather than matter — it is the
+; one thing in the frame that should not take the key. `vertex_color_use_as_albedo`
+; is what makes the emitter's own `color` and `color_ramp` reach the pixel at all:
+; without it the particle colour is written into the instance buffer and then
+; ignored, which is the second half of why this trail was not on screen.
+[sub_resource type="StandardMaterial3D" id="Mat_mote"]
+transparency = 1
+shading_mode = 0
+vertex_color_use_as_albedo = true
+albedo_color = Color(0.24, 1, 0.36, 1)
+emission_enabled = true
+emission = Color(0.16, 0.95, 0.3, 1)
+emission_energy_multiplier = 3.2
+disable_receive_shadows = true
+
+; Bright and solid at birth, gone by the end of the mote's third of a second. The
+; alpha ramp is what makes a trail taper instead of ending in a hard edge.
+[sub_resource type="Gradient" id="Grad_mote"]
+offsets = PackedFloat32Array(0, 0.35, 1)
+colors = PackedColorArray(0.75, 1, 0.8, 1, 0.24, 1, 0.36, 0.85, 0.1, 0.7, 0.2, 0)
+
+[sub_resource type="GradientTexture1D" id="Ramp_mote"]
+gradient = SubResource("Grad_mote")
 
 [node name="DinoEnergy" type="ShapeCast3D"]
 shape = SubResource("Sphere_shape")
@@ -12,11 +47,20 @@ max_results = 4
 collide_with_areas = false
 script = ExtResource("1_dino")
 
+; Emitted in GLOBAL space (local_coords defaults false), so the motes stay where
+; they were born and the orb pulls away from them — which is what makes a trail a
+; trail rather than a halo dragged along with the projectile.
 [node name="Trail" type="CPUParticles3D" parent="."]
+cast_shadow = 0
 emitting = false
 amount = 24
 lifetime = 0.35
 explosiveness = 0.0
+randomness = 0.4
+mesh = SubResource("Mesh_mote")
+material_override = SubResource("Mat_mote")
+emission_shape = 1
+emission_sphere_radius = 0.34
 spread = 12.0
 direction = Vector3(-1, 0, 0)
 gravity = Vector3(0, 0, 0)
@@ -25,3 +69,4 @@ initial_velocity_max = 1.5
 scale_amount_min = 0.25
 scale_amount_max = 0.45
 color = Color(0.2, 1, 0.3, 1)
+color_ramp = SubResource("Ramp_mote")
