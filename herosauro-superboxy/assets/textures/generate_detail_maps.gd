@@ -461,10 +461,11 @@ func _write_pair(recipe: Dictionary) -> void:
 ##     albedo at roughly this scale, and one multiplicative map delivers all four
 ##     because the base colour underneath decides which it reads as.
 ##
-## The albedo values are sRGB (the shader's detail sampler carries source_color), and
-## they run 0.68 -> 1.00, which is 0.42 -> 1.00 in linear. At the 0.55 blend weight
-## that lands as a 0.68-1.00 multiplier on albedo: a 32% swing, deep enough to see
-## across a facade and shallow enough that no surface loses its identity.
+## The albedo values are sRGB (the shader's detail sampler carries source_color) and
+## run 0.45 -> 0.99 in linear. At the 0.55 blend weight that lands as a 0.70-1.00
+## multiplier on albedo: a 30% swing, deep enough to see across a facade and shallow
+## enough that no surface loses its identity. Since Round 3 it also carries hue —
+## see _fine_ramp() for what that costs and what it may not break.
 func _write_fine() -> void:
 	var normal := _base_texture()
 	normal.as_normal_map = true

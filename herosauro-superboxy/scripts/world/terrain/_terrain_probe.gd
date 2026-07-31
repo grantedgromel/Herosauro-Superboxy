@@ -172,7 +172,12 @@ func _check_heights() -> void:
 		var x := -190.0
 		while x <= 190.0:
 			var y := TB.ground_height(x, z)
-			if is_nan(y) or is_inf(y) or y < TB.WATER_Y - 0.01 or y > 26.0:
+			# The headland's toe deliberately continues BELOW the water plane, so
+			# the shoreline is an intersection with the river rather than an edge
+			# coincident with it. Its floor is the same WALL_FOOT_Y everything else
+			# on the bank foots at.
+			var floor_y := TB.WALL_FOOT_Y if z > TB.BANK_Z_NEAR else TB.WATER_Y
+			if is_nan(y) or is_inf(y) or y < floor_y - 0.01 or y > 26.0:
 				bad += 1
 			x += 2.0
 		z += 3.0

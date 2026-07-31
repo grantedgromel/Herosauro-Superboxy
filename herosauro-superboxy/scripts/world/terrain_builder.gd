@@ -1175,13 +1175,6 @@ static func _crown(level: int) -> float:
 	return 0.14 if level == 0 else 0.07
 
 
-## 1 inside the modelled reach, easing to 0 across the headland.
-static func _end_fade(z: float) -> float:
-	if z <= BANK_Z_NEAR:
-		return 1.0
-	return 1.0 - smoothstep(BANK_Z_NEAR, HEADLAND_Z, z)
-
-
 ## Open hillside above the top terrace, both banks.
 static func _upland_y(side: float, ax: float, z: float) -> float:
 	var levels := _levels(side)
@@ -1198,7 +1191,10 @@ static func _upland_y(side: float, ax: float, z: float) -> float:
 			var t := clampf((ax - back) / maxf(crest_x - back, 1.0), 0.0, 1.0)
 			var plateau := lerpf(BLUFF_PLATEAU_Y, crest_y, smoothstep(0.30, 1.0, t))
 			y = lerpf(y, maxf(plateau, y), w)
-	return lerpf(WATER_Y, y, _end_fade(z))
+	# The headland used to be applied here as a whole-width fade toward the water.
+	# It is now a plan-space shoreline in _headland_y(), applied once in
+	# ground_height() so terraces and hillside go under together.
+	return y
 
 
 ## How much of the Serra do Pilar bluff is present at `z` — 1 across the middle
