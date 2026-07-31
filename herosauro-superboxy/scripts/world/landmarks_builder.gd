@@ -1053,6 +1053,41 @@ static func _lodge_sign(batch: Batch, at: Transform3D, spec: LodgeSpec, ridge_y:
 static func sign_text(b: MeshBaker, at: Transform3D, text: String, x0: float, y0: float,
 		cell: float) -> void:
 	var face := at * Transform3D(Basis(), Vector3(0.0, 0.0, 0.06))
+	for r in glyph_rects(text, x0, y0, cell):
+		Geo.rect(b, face, r.position.x, r.position.y, r.end.x, r.end.y, 0.0)
+
+
+## The same string as SOLID LETTERS standing `depth` proud of the frame.
+##
+## Flat lettering was the whole reason round 2's hoardings scored as "a debug
+## texture that was never replaced": a zero-thickness glyph has one value at every
+## sun angle, so a word is a stencil rather than a row of objects. Extruded, each
+## letter has a lit face, a shadow side and a cast shadow on whatever is behind
+## it — which at ninety metres is the only thing that separates a sign from a
+## decal. The real port-house hoardings are exactly this: individual steel letters
+## standing off an open frame, and you can see daylight between them.
+##
+## Cost is the reason this is not the default: a box is twelve triangles where a
+## quad is two. glyph_rects() merges vertically as well as horizontally, so a
+## capital I is one box rather than seven, and a five-letter word lands around
+## fifty boxes rather than a hundred and seventy-five.
+static func sign_text_solid(b: MeshBaker, at: Transform3D, text: String, x0: float,
+		y0: float, cell: float, depth: float) -> void:
+	for r in glyph_rects(text, x0, y0, cell):
+		Geo.box(b, at, r.position.x + r.size.x * 0.5, r.position.y + r.size.y * 0.5,
+				depth * 0.5, r.size.x, r.size.y, depth)
+
+
+## The 5x7 bitmap of `text`, reduced to as few axis-aligned rectangles as a greedy
+## row-then-column merge finds. Face space: +X along the baseline, +Y up, the
+## first glyph's left edge at `x0` and its baseline at `y0`.
+##
+## Merging both ways rather than only along the row matters more than it looks:
+## the alphabet is mostly vertical stems, so a row-only merge emits seven
+## one-cell rectangles for every upright and the letter comes out as a stack of
+## stripes the moment it has any thickness.
+static func glyph_rects(text: String, x0: float, y0: float, cell: float) -> Array[Rect2]:
+	var out: Array[Rect2] = []
 	var pen := x0
 	for i in text.length():
 		var ch := text[i]
@@ -1060,20 +1095,39 @@ static func sign_text(b: MeshBaker, at: Transform3D, text: String, x0: float, y0
 			pen += cell * 6.0   # space, and anything unmapped
 			continue
 		var rows: Array = SIGN_FONT[ch]
-		for r in rows.size():
-			var row: String = rows[r]
-			# Rows run top to bottom; the glyph is 7 cells tall.
-			var cy := y0 + cell * float(rows.size() - 1 - r)
-			var run := -1
-			for c in range(row.length() + 1):
-				var on := c < row.length() and row[c] == "1"
-				if on and run < 0:
-					run = c
-				elif not on and run >= 0:
-					Geo.rect(b, face, pen + float(run) * cell, cy,
-							pen + float(c) * cell, cy + cell, 0.0)
-					run = -1
+		var height := rows.size()
+		# open[(start, end)] -> the row index the run started on. Rows are walked
+		# top to bottom, so a run that repeats simply grows downward and is only
+		# emitted once it stops.
+		var open: Dictionary = {}
+		for r in range(height + 1):
+			var seen: Dictionary = {}
+			if r < height:
+				var row: String = rows[r]
+				var run := -1
+				for c in range(row.length() + 1):
+					var on := c < row.length() and row[c] == "1"
+					if on and run < 0:
+						run = c
+					elif not on and run >= 0:
+						seen[Vector2i(run, c)] = true
+						run = -1
+			# Close every open run this row did not repeat.
+			for key: Vector2i in open.keys():
+				if seen.has(key):
+					continue
+				var from: int = open[key]
+				# Row 0 is the TOP of the glyph, so a run spanning rows
+				# [from, r) occupies cells (height - r) .. (height - from).
+				out.append(Rect2(
+					pen + float(key.x) * cell, y0 + float(height - r) * cell,
+					float(key.y - key.x) * cell, float(r - from) * cell))
+				open.erase(key)
+			for key: Vector2i in seen.keys():
+				if not open.has(key):
+					open[key] = r
 		pen += cell * 6.0
+	return out
 
 
 # --- Detail helpers ----------------------------------------------------------

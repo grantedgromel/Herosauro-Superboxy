@@ -649,7 +649,8 @@ func _notification(what: int) -> void:
 ## fraction of the whole sphere: 0 is a needle, 1 is a ball.
 func _build_shards(row: Dictionary, surface: int, aim: Vector3, spread: float,
 		power: float, size_scale: float, trim: int) -> void:
-	var want: int = mini(MAX_SHARDS, int(round(float(row["chips"]) * clampf(power, 0.3, 2.0))))
+	var force: float = clampf(power, 0.3, 2.0)
+	var want: int = mini(MAX_SHARDS, int(round(float(row["chips"]) * force)))
 	if want <= 0:
 		return
 	# A prop with trim gives a bit over a quarter of its pieces to the trim
@@ -726,15 +727,41 @@ func _build_shards(row: Dictionary, surface: int, aim: Vector3, spread: float,
 func _shard_xform(i: int, t: float) -> Transform3D:
 	var span: float = _sh_life[i]
 	var k: float = clampf(t / maxf(0.001, span), 0.0, 1.0)
-	var pos: Vector3 = _sh_pos[i] + _sh_vel[i] * t
-	pos.y -= 0.5 * SHARD_GRAVITY * t * t
+	var p0: Vector3 = _sh_pos[i]
+	var v: Vector3 = _sh_vel[i]
 
-	# One bounce, reflected rather than stepped: below the floor the piece is
-	# mirrored back through it and damped, which reads as a skitter and costs two
-	# multiplies. A second bounce needs a second solve and is not legible at the
-	# speed these live at.
-	if pos.y < _floor_y:
-		pos.y = _floor_y + (_floor_y - pos.y) * _sh_bounce
+	# When this piece first reaches the surface it is going to land on: the
+	# positive root of `p0.y + v.y t - g t^2 / 2 = floor`. For a spark the floor is
+	# effectively minus infinity, so the root lands hours away and the second
+	# branch is simply never taken; for a piece that starts below its own floor
+	# there is no root and it falls freely, which is the right answer too.
+	var drop := p0.y - _floor_y
+	var t_hit := INF
+	if drop >= 0.0:
+		var disc := v.y * v.y + 2.0 * SHARD_GRAVITY * drop
+		if disc > 0.0:
+			t_hit = (v.y + sqrt(disc)) / SHARD_GRAVITY
+
+	var pos: Vector3
+	if t <= t_hit:
+		pos = p0 + v * t
+		pos.y -= 0.5 * SHARD_GRAVITY * t * t
+	else:
+		# ONE bounce, integrated from the contact: the vertical is reflected and
+		# damped by the surface's own `chip_bounce`, the horizontal is scrubbed
+		# against the deck, and the second arc runs from there. It settles on the
+		# floor rather than sinking through it.
+		#
+		# Not by mirroring the whole path about the floor, which is what the first
+		# version of this did — that costs two multiplies and looks right for about
+		# a tenth of a second, and then the reflected path keeps accelerating
+		# upward and every chip in the game climbs away off the deck for ever.
+		var dt := t - t_hit
+		var land := p0 + v * t_hit
+		var vy: float = -(v.y - SHARD_GRAVITY * t_hit) * _sh_bounce
+		var slide := Vector3(v.x, 0.0, v.z) * (1.0 - _sh_bounce * 0.5)
+		pos = Vector3(land.x, _floor_y, land.z) + slide * dt
+		pos.y = maxf(_floor_y, _floor_y + vy * dt - 0.5 * SHARD_GRAVITY * dt * dt)
 	var basis := Basis(_sh_axis[i], _sh_phase[i] + _sh_rate[i] * t)
 	# Shrink out over the last quarter, so a piece recedes instead of popping.
 	var shrink: float = 1.0
