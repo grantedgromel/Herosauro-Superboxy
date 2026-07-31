@@ -43,21 +43,34 @@ const MainScene: PackedScene = preload("res://scenes/main.tscn")
 ## into a rubber stamp — if a change needs more, it needs a measurement and a
 ## line in the round doc saying what was bought.
 ##
-## Measured with tools/budget.tscn (static arena) and this file (live fight) on
-## llvmpipe. Every counter here is hardware-independent, so the numbers hold on
-## a real card even though the frame times would not.
+## MEASURED, 600 frames of the ROUTE below, one run per tier, on llvmpipe. Every
+## counter here is hardware-independent, so the numbers hold on a real card even
+## though the frame times would not. Resolution-independent too: these were taken
+## at 640x360 purely so 600 frames would finish on a software rasteriser, and
+## they agree with the 1280x720 static sweep in tools/budget.tscn.
+##
+##                     Forward+                GL Compatibility
+##   draw calls p99         726                     479
+##   primitives p99   3,312,473                 621,172
+##   nodes max              739                     768
+##   peak static        146.6 MiB               114.7 MiB
+##
+## Ceilings are set roughly 12-15% above those, which is generous against a
+## distribution this flat — p99 to max is 726 -> 730 and 479 -> 480. `nodes` gets
+## more room than the rest because it is the one counter that grows with pooled
+## FX rather than with the world.
 const BUDGETS := {
 	"forward_plus": {
-		"draw_calls_p99": 1400,
-		"primitives_p99": 5_000_000,
-		"nodes_max": 6000,
-		"static_memory_mib": 900.0,
+		"draw_calls_p99": 820,
+		"primitives_p99": 3_700_000,
+		"nodes_max": 900,
+		"static_memory_mib": 175.0,
 	},
 	"gl_compatibility": {
-		"draw_calls_p99": 700,
-		"primitives_p99": 900_000,
-		"nodes_max": 6000,
-		"static_memory_mib": 500.0,
+		"draw_calls_p99": 540,
+		"primitives_p99": 700_000,
+		"nodes_max": 900,
+		"static_memory_mib": 140.0,
 	},
 }
 

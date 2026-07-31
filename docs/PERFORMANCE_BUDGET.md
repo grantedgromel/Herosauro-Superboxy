@@ -225,6 +225,35 @@ Nothing about the conclusion changes; the size of it does. Quoting a number
 four times too big to justify a change that was right anyway is how a rubric
 ends up being optimised instead of a game.
 
+### Which of them can actually take the compression
+
+`19b521d` moved all eight to `compress/mode=2` on the argument that painterly
+plates give block artifacts "nothing crisp to chew on". That is the failure mode
+of block compression inverted — it is good at busy detail and bad at smooth
+gradients and hard edges — and it shipped without a render. Measured against
+lossless baselines:
+
+| shot | what it exercises | frame changed | RMSE (changed px) | >16 levels | max |
+|---|---|---|---|---|---|
+| `13_menu` | `key_art` full-bleed | 88.6% | 11.83 | 13.2% | 209 |
+| `14_hud` | the three portraits | 0.751% | 4.37 | 0.5% | 35 |
+
+`harness.py verify` returns IDENTICAL on both shots, so these are signal.
+`compress/high_quality=true` (BC7/ASTC) was measured on `13_menu` and bought
+0.5 dB for double the bytes — not worth it.
+
+So the split follows the measurement, not the file type:
+
+* **`key_art.png` → Lossless.** It is the frame that took the damage, and
+  `menu_backdrop.gd` `load()`s it at runtime rather than preloading, so its
+  6 MiB is resident only while the title screen is up — never during the fight,
+  which is when frame rate matters. `13_menu` renders IDENTICAL again.
+* **The three portraits → VRAM Compressed.** `ui_style.gd` preloads them, so
+  they are resident for the whole process, and at ~200 px from 900 px sources
+  minification averages the block error away.
+* **The four `art/` plates → VRAM Compressed**, and excluded from the web pck,
+  so the setting only affects a desktop download.
+
 ## Texture compression and the export preset
 
 One texture in the whole project is VRAM-compressed (`compress/mode=2`):
@@ -260,20 +289,33 @@ its own measurement.
 
 ## Where the remaining web cost is
 
-Geometry is no longer the top of this list. In order:
+Geometry is no longer the top of this list.
 
-1. **Fill rate.** 1280×720 at `msaa_3d=2` (which is 4×) is 3.7M samples a frame
-   on a WebGL2 context. `anti_aliasing/quality/msaa_3d.web=0` is the single
-   biggest remaining win and costs desktop nothing.
-2. **The shadow atlas.** `lights_and_shadows/directional_shadow/size=4096` is a
-   64 MiB depth texture, allocated whatever the tier. With 2 cascades over 96 m,
-   `directional_shadow/size.web=2048` is more texels than the web tier can
-   resolve and saves 48 MiB.
-3. **Transparent overdraw.** 24 cloud clusters, 37,632 triangles, alpha-blended
-   over most of the sky, plus the Douro's per-pixel fresnel and foam over roughly
-   a third of the frame. Both are `atmosphere`-owned.
-4. **Shader compilation**, which on GL Compatibility happens on first use and on
+**Landed in `19b521d`,** both keyed `.web` so desktop keeps them:
+
+- **Fill rate.** 1280×720 at `msaa_3d=2` (which is 4×) resolves 3.7M samples a
+  frame on a WebGL2 context. `anti_aliasing/quality/msaa_3d.web=0`. The
+  Compatibility tier still gets FXAA, which is nearly free.
+- **The shadow atlas.** `directional_shadow/size=4096` is a 64 MiB depth
+  texture. With 2 cascades over 96 m the web tier cannot resolve that many
+  texels, so `size.web=2048` — 48 MiB back, against a 52 MiB world.
+
+**Still open, in order:**
+
+1. **Transparent overdraw.** 24 cloud clusters, 37,632 triangles, alpha-blended
+   over most of the sky, plus the Douro's per-pixel fresnel and foam over
+   roughly a third of the frame. Both `atmosphere`-owned, and this is now the
+   largest untouched item on the web tier.
+2. **Load time.** The world is built in GDScript at runtime on a single-threaded
+   WASM build, so the whole build blocks the browser's main thread. See the
+   `thread_support` note in `export_presets.cfg` for why threads are not simply
+   switched on, and why the GDScript build is the lever that does not need them.
+3. **Shader compilation**, which on GL Compatibility happens on first use and on
    the web shows as hitching through the first fight.
+
+Nothing on that list is verifiable from this container — there is no browser
+here. The web-tier numbers above are what can be measured; whether the build is
+*fast enough* is a question only a real browser answers.
 
 ## The budget gate
 
@@ -330,9 +372,17 @@ like a tool that runs and finds nothing wrong.**
 
 ### What a live fight actually costs
 
-The first run the profiler has ever completed. 600 frames of the scripted route
+The first runs the profiler has ever completed. 600 frames of the scripted route
 in `scenes/main.tscn` — closing on the giant, swinging, the ability, taking the
-slam — Forward+, 640×360, llvmpipe:
+slam — one per tier, 640×360, llvmpipe. The resolution was chosen purely to make
+600 frames finish on a software rasteriser.
+
+Counts are resolution-independent, and that is checked rather than assumed: the
+same scene profiled at **320×180** reports primitives p99 3,288,458 against
+3,312,473 at 640×360, a 0.7% difference explained by the shorter run, and both
+agree with the 1280×720 static sweep above once the actors are added.
+
+**Forward+**
 
 | | p50 | p95 | p99 | max |
 |---|---|---|---|---|
@@ -340,8 +390,20 @@ slam — Forward+, 640×360, llvmpipe:
 | primitives | 3,305,102 | 3,311,709 | 3,312,473 | 3,342,749 |
 | nodes | 667 | 727 | 735 | 739 |
 
-Peak static memory 146.6 MiB. Counts are resolution-independent, so 640×360 was
-chosen purely to make 600 frames finish on a software rasteriser.
+Peak static memory 146.6 MiB.
+
+**GL Compatibility**
+
+| | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| draw calls | 441 | 474 | 479 | 480 |
+| primitives | 611,638 | 619,806 | 621,172 | 628,498 |
+| nodes | 696 | 756 | 764 | 768 |
+
+Peak static memory 114.7 MiB. In a live fight the web tier costs **18.7% of the
+desktop tier's primitives and 66% of its draw calls** — the draw-call ratio is
+worse than the geometry ratio because chunking the bakes deliberately trades
+draw calls for cullability.
 
 **Two heroes, a nine-metre giant and every combat effect add 51,016 primitives
 to a 3,261,457-primitive static world — 1.5%.** Draw calls tell the same story
@@ -351,6 +413,19 @@ resubmitted to the shadow cascades.
 
 That is the number that should have driven the last four rounds. Whatever is
 making a frame expensive, it is not the fight.
+
+### The ceilings, and how much of each is spent
+
+| | Forward+ p99 | ceiling | used | Compat p99 | ceiling | used |
+|---|---|---|---|---|---|---|
+| draw calls | 726 | 820 | 88.5% | 479 | 540 | 88.7% |
+| primitives | 3,312,473 | 3,700,000 | 89.5% | 621,172 | 700,000 | 88.7% |
+| nodes (max) | 739 | 900 | 82.1% | 768 | 900 | 85.3% |
+| static memory | 146.6 MiB | 175 MiB | 83.8% | 114.7 MiB | 140 MiB | 81.9% |
+
+Roughly 12–15% headroom on a distribution flat enough that p99 to max is 726 →
+730 and 479 → 480. `nodes` gets more room than the rest because it is the one
+counter that grows with pooled FX rather than with the world.
 
 ### The ceilings are a ratchet
 

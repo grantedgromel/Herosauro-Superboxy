@@ -1,4 +1,4 @@
-# Round 4 — performance, and three of my own numbers that were wrong
+# Round 4 — performance, and the measurements that were measuring nothing
 
 Round 4 was not scored by a critic. It started from four criticisms the user
 made directly, which is a better signal than a rubric and is worth saying out
@@ -14,8 +14,13 @@ The four:
 4. the rule under the title "screams AI slop"
 
 (1) and (4) landed in `bb1ac7f`, (2) in `56dec3b`, (3) across `32adce7`,
-`19b521d` and `4b20430`. This document is about what measuring (3) turned up,
-including three numbers I published that were wrong.
+`19b521d`, `4b20430`, `9799d2d` and `2c2e155`.
+
+This document is about what measuring (3) turned up. Most of it is corrections
+to my own work, and they fall into two kinds. Three published numbers were
+simply wrong. Worse, and the reason this round is worth reading: **three of this
+project's measurement tools were not measuring anything**, and one of those was
+the tool written this round to catch the other two.
 
 ## Corrections
 
@@ -40,8 +45,9 @@ anything, so the resident figure is **9.9 MiB**. The other 24 MiB was never in
 VRAM at all — it was pck weight, which is a different problem with a different
 fix, and I gave it the wrong one's number.
 
-The compression change in `19b521d` is still right; it just bought about a
-fifth of what I claimed. `4b20430` handles the real problem with the four
+The compression change in `19b521d` bought about a fifth of what I claimed, and
+`2c2e155` later reverted the largest of the eight for reasons that had nothing
+to do with size — see below. `4b20430` handles the real problem with the four
 unreferenced plates: they are excluded from the web pck.
 
 ### I had the texture-compression argument backwards
@@ -76,10 +82,15 @@ BC7 is not the answer: 0.5 dB for double the bytes. The split that is:
   screen is up, never during the fight, which is when frame rate matters. Six
   MiB is not worth degrading the title screen, and the user has art-directed
   that screen twice. `13_menu` now renders IDENTICAL to the lossless baseline.
-* **The three portraits stay compressed.** They are `preload` constants in
-  `ui_style.gd`, so they are resident for the whole process including the fight,
-  and they are drawn at roughly 200 px where the measured artifacts are below
-  the sampling.
+* **The three portraits stay compressed**, and that half was measured too
+  rather than argued. They are `preload` constants in `ui_style.gd`, so they are
+  resident for the whole process including the fight. `14_hud` against a
+  lossless-portrait baseline: **0.751% of the frame changes, and within those
+  6,925 pixels RMSE is 4.37, only 5.3% exceed 8 levels, 0.5% exceed 16, and the
+  worst is 35.** Against the backdrop's 11.83 / 13.2% / 209, that is three times
+  cleaner on RMSE and twenty-six times smaller in the tail — the portraits are
+  drawn at roughly 200 px from 900 px sources, and minification averages the
+  block error away.
 * **The four `art/` plates stay compressed** and are excluded from the web pck
   entirely, so the setting only affects a desktop download.
 
@@ -177,13 +188,20 @@ tiers is in `docs/PERFORMANCE_BUDGET.md`.
 ### And the fight itself is 1.5% of the frame
 
 `tools/profile.tscn`, once it could run at all, over 600 frames of the scripted
-route on Forward+:
+route, one run per tier:
 
 ```
-draw calls   p50   693   p95   721   p99       726   max       730
-primitives   p50 3,305,102   p95 3,311,709   p99 3,312,473   max 3,342,749
-nodes        p50   667   p95   727   p99       735   max       739
-peak static memory 146.6 MiB
+Forward+          p50         p95         p99         max
+  draw calls      693         721         726         730
+  primitives  3,305,102   3,311,709   3,312,473   3,342,749
+  nodes           667         727         735         739
+  peak static memory 146.6 MiB
+
+GL Compatibility  p50         p95         p99         max
+  draw calls      441         474         479         480
+  primitives    611,638     619,806     621,172     628,498
+  nodes           696         756         764         768
+  peak static memory 114.7 MiB
 ```
 
 **Two heroes, a nine-metre giant and every combat effect add 51,016 primitives

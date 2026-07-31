@@ -19,6 +19,8 @@ critic whose job is to find the frame amateur.
 | `tools/harness.py sheet` | Contact sheet — the whole set as one image a critic can read in one look. |
 | `tools/harness.py verify` | Captures twice and diffs the two runs. Proves the gate is real. |
 | `tools/harness.py check` | Fast pre-commit smoke: import clean, boot, render one frame. |
+| `tools/parsecheck.tscn` | Every `.gd` in the project compiles. Three seconds. Run it. |
+| `tools/budget.tscn` | Static-world cost at every canonical vantage, per tier. |
 | `tools/profile.tscn` | Frame-cost **distribution** over a live fight, plus the budget gate. |
 | `tools/playtest.tscn` | Scripted playthrough; asserts the fight actually functions. |
 | `tools/critic/RUBRIC.md` | What the critic scores against, and the rules it must follow. |
@@ -68,8 +70,40 @@ A probe that needs a scene tree **must** be launched as a scene. On the
 `GameManager`, `AudioManager` or `InputManager` fails to resolve and the probe
 dies before it asserts anything. The same trap makes
 `godot --check-only --script <file>` useless for validating a single file here:
-untouched, correct scripts fail it identically. Whole-project `--import` is the
-only single-file-level check that means anything, and CI runs it.
+untouched, correct scripts fail it identically.
+
+For "does everything still compile", use `tools/parsecheck.tscn` — three seconds
+for the whole project, and it exists because `--import` is *not* the check it
+looks like. Godot compiles the scripts reachable from the resources it imports,
+so a script referenced only by a `.tscn` that no import step loads is never
+compiled and the import log stays clean. `tools/profile.gd` sat unparseable that
+way for its entire life.
+
+## Gates
+
+A gate does not exist until you have watched it fail. Write the check, put the
+fault back, confirm it goes red, then keep it.
+
+This is not a formality. Four tools in this project have reported a clean result
+while measuring nothing:
+
+| tool | reported | actually |
+|---|---|---|
+| `_menu_probe` | 0.1 ms, 9 nodes | measured a scene it had failed to add to the tree — really 3062 ms, 268 nodes |
+| `tools/budget.gd` | 0 objects, 0 draw calls, 0 primitives | its scene had no `Camera3D`, so nothing rendered 3D |
+| `tools/profile.gd` | nothing, and the budget "kept passing" | did not parse; had never run; and `quit(0)` was unconditional so it could not have failed |
+| `tools/parsecheck.gd` | PASS | tested `load() == null`; Godot returns a Script object for a file that did not compile |
+
+Three of those four were written by this loop, to check this loop. The failure
+mode is structural, not careless: **a tool that does not run looks exactly like a
+tool that runs and finds nothing wrong.** Only a demonstrated failure tells them
+apart.
+
+The same applies to a *number* as to a gate. Plausible reasoning is routinely
+backwards — the case for compressing the UI art ("painterly plates, nothing
+crisp for block artifacts to chew on") had the failure mode of block compression
+precisely inverted, and only a render showed it. If a change alters what reaches
+the screen, it goes through `diff` against a baseline before it is defended.
 
 ## This container has no GPU
 
