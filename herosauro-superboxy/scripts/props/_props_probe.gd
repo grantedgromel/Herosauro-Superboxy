@@ -434,15 +434,25 @@ func _check_five_legs() -> void:
 
 ## The claim the brief asks for by name: bounded, and it actually frees itself
 ## rather than accumulating across a fight.
+##
+## Run in a QUIESCENT scene — no world, no giant — with a static floor of its
+## own. The shards must land on something (a shard falling into the river is
+## culled early, which would flatter the result enormously) and nothing else may
+## be making debris while the count is being watched.
 func _check_debris_budget() -> void:
-	await _start()
 	var host := _scratch()
+	var floor_body := StaticBody3D.new()
+	floor_body.collision_layer = PhysicsLayers.WORLD
+	var fs := CollisionShape3D.new()
+	var fb := BoxShape3D.new()
+	fb.size = Vector3(60.0, 1.0, 12.0)
+	fs.shape = fb
+	floor_body.add_child(fs)
+	host.add_child(floor_body)
+	floor_body.global_position = Vector3(0.0, 1.5, 0.0)
 
 	# Smash twelve props back to back — four props' worth more than the budget
-	# can hold — and watch the ceiling. Over the deck at |z| 4.4, i.e. in the prop
-	# lane, so the shards land on the surface they land on in a real fight rather
-	# than falling into the river and being culled early, which would flatter the
-	# "it frees itself" claim enormously.
+	# can hold — and watch the ceiling.
 	var peak := 0
 	var peak_static := 0
 	for i in 12:
@@ -450,7 +460,7 @@ func _check_debris_budget() -> void:
 		var prop := scene.instantiate() as BreakableProp
 		prop.freeze = true
 		host.add_child(prop)
-		prop.global_position = Vector3(float(i) * 2.4 - 30.0, 3.4, 4.4)
+		prop.global_position = Vector3(float(i) * 2.4 - 13.0, 3.4, 0.0)
 		await _settle(1)
 		prop.shatter(Vector3.RIGHT)
 		await _thaw()
@@ -499,7 +509,7 @@ func _check_debris_budget() -> void:
 		var p := CrateScene.instantiate() as BreakableProp
 		p.freeze = true
 		host.add_child(p)
-		p.global_position = Vector3(float(i) * 2.0 - 6.0, 6.0, -34.0)
+		p.global_position = Vector3(float(i) * 2.0 - 6.0, 3.4, 0.0)
 		props.append(p)
 	await _settle(2)
 	for p in props:
