@@ -145,12 +145,95 @@ const SQUASH_LIMIT := 0.45
 const JUMP_STRETCH := 0.24            ## push-off: the body elongates as it leaves
 const LAND_SQUASH := -0.32            ## compression at LAND_FULL_SPEED of descent
 const LAND_FULL_SPEED := 20.0
-const ATTACK_ANTICIPATION := -0.15    ## the coil before the swing
-const ATTACK_FOLLOW := 0.14           ## the extension after it
+## The coil before the swing and the extension after it.
+##
+## Raised from -0.15 / 0.14. The spring's envelope is `exp(-SQUASH_DAMPING/2 * t)`,
+## which is a 90 ms half-life, so a kick is essentially gone a fifth of a second
+## after it lands and the ONLY frame that shows the full amplitude is the one it
+## was applied on. At -0.15 that is a 15% squash for one frame on a 2 m hero seen
+## from the co-op camera's ~16 m: about 2% of frame height, which is below the
+## threshold at which the eye reads a deformation at all. The rubric asks for
+## "squash and stretch on everything that moves" and scores a character that
+## translates without deforming as a prop being slid around, so anticipation and
+## follow-through have to be legible, not merely present.
+##
+## -0.22 / 0.20 is still well inside SQUASH_LIMIT even when the follow-through
+## lands on top of an undecayed anticipation (worst case ~0.30 of the 0.45 cap),
+## so the two never clip each other.
+const ATTACK_ANTICIPATION := -0.22    ## the coil before the swing
+const ATTACK_FOLLOW := 0.20           ## the extension after it
 const ATTACK_FOLLOW_FRACTION := 0.35  ## where in the hold the follow-through lands
 const HURT_SQUASH := -0.26            ## taking one flattens you too
 ## How fast the model rights itself out of the downed tilt.
 const TILT_LAMBDA := 14.0
+
+# --- The impact contract ---------------------------------------------------
+## ARCHITECTURE.md, "Weight — every action": a visual FX at the point of contact,
+## a camera response, an audio transient, a hit-stop, and a UI acknowledgement.
+## Every one of the numbers below is one of those five legs for an impact a hero
+## is on one end of. `ImpactFX` is leg one everywhere; `GameManager.request_shake`
+## is two, `AudioManager` three, `GameManager.hit_stop` four, and the HUD picks up
+## five off `GameManager.player_damaged` / `boss_damaged`.
+
+## Seconds of freeze per point of damage a hero takes.
+##
+## Anchored, not invented: `Adamastor.SLAM_DAMAGE` (18) x this is exactly
+## `Adamastor.SLAM_HIT_STOP` (0.09), so the heaviest single blow in the fight
+## keeps the freeze the boss stream tuned for it while every other route to a
+## hero — the giant's body contact, the shockwave, a thrown rock, going over the
+## side — gets one at all. `GameManager.hit_stop` refuses to nest, and `take_hit`
+## runs BEFORE the `Hitbox.landed` handlers, so this is now the call that decides
+## the freeze for a hit on a hero; see the report.
+const HURT_STOP_PER_DAMAGE := 0.005
+## Floor and ceiling on that. The floor keeps the giant's 6-damage body contact
+## from being a freeze so short it reads as a dropped frame; the ceiling stops a
+## phase-two slam (25) from stopping the game dead for an eighth of a second.
+const HURT_STOP_MIN := 0.025
+const HURT_STOP_MAX := 0.11
+
+## Damage that `ImpactFX` power 1.0 corresponds to on a hero-hit spark. The same
+## number the hurt squash normalises by, so the burst and the deformation agree
+## about how big the hit was.
+const HURT_FX_REFERENCE := 20.0
+
+## Where a hero-hit spark sits: back along the incoming blow by roughly the
+## collision capsule's radius, so the chips come off the side that was struck
+## rather than out of the middle of the body, and lifted to upper-chest height
+## where the camera is actually looking.
+const HURT_FX_INSET := 0.45
+const HURT_FX_LIFT := 0.35
+
+## Radius of the dust ring a hero's own landing rolls out, in metres. Small: this
+## is a hero's boots, not the giant's fists (his slam ring is 15 m).
+const LAND_FX_RADIUS := 1.2
+
+# --- Going over the side ---------------------------------------------------
+## The worst-rated impact in the game before this pass: it cost twenty health in
+## complete silence. `_respawn()` is now two beats, and each carries all five.
+
+## The name the `audio` stream is adding for the fall. Called through
+## `has_method` rather than directly: `players` and `audio` are separate streams,
+## and a hero must not fail to come back because a sample has not landed yet.
+## The fallback is the hurt transient, so leg three is covered either way and
+## upgrades to the real sound the moment `AudioManager.play_fall()` exists.
+const FALL_SFX := "play_fall"
+## Camera punch as the hero goes over, and as they drop back in. The loss is the
+## bigger of the two on purpose: losing a fifth of your health off the deck
+## should hit harder than the recovery that follows it.
+const FALL_SHAKE := 0.42
+const FALL_SHAKE_TIME := 0.34
+const RECOVER_SHAKE := 0.16
+const RECOVER_SHAKE_TIME := 0.18
+## How hard the burst at the point of loss throws. Above a jab's 1.0 — this is a
+## whole hero leaving the deck, and it is the last thing the player sees of them.
+const FALL_FX_POWER := 1.5
+## The drop back in. A hero arriving on the calçada is a landing like any other,
+## so it gets the same shape of burst a heavy landing does.
+const RECOVER_FX_RADIUS := 1.6
+const RECOVER_FX_POWER := 1.1
+## The pop out of the recovery. Same idea as `_get_up()`: the body springs onto
+## the deck rather than materialising at rest scale.
+const RECOVER_SQUASH := -0.30
 
 var spawn_position: Vector3 = Vector3.ZERO
 var facing_dir: Vector3 = Vector3(1, 0, 0)
@@ -175,6 +258,8 @@ var _partner_ref: PlayerBase = null     # the other hero, re-resolved when it go
 var _downed: bool = false
 var _down_timer: float = 0.0
 
+var _feet_drop: float = 1.0             # body origin -> soles, measured from the collider
+
 var _stretch: float = 0.0
 var _stretch_vel: float = 0.0
 var _impact_speed: float = 0.0          # descent speed banked before move_and_slide()
@@ -187,6 +272,8 @@ var _follow_timer: float = 0.0          # counts down to the attack's follow-thr
 var _anim: AnimationPlayer = null
 var _anim_clips: Dictionary = {}
 var _tree: AnimationTree = null
+## Secondary motion. Null on a model with no skeleton; every call site guards.
+var _lag: BodyLag = null
 var _action_node: AnimationNodeAnimation = null
 var _action_timer: float = 0.0
 var _blend_speed: float = 0.0
@@ -212,6 +299,7 @@ func _ready() -> void:
 	slide_on_ceiling = false              # bonking a ceiling drops you, it doesn't shunt you sideways
 	safe_margin = SAFE_MARGIN
 
+	_measure_feet()
 	_model_root = get_node_or_null("Model")
 	if _model_root == null:
 		_model_root = Node3D.new()
@@ -269,6 +357,26 @@ func _process_downed(delta: float) -> void:
 	_wish_dir = Vector3.ZERO
 	_knockback = _knockback.move_toward(Vector3.ZERO, knockback_decay * delta)
 	_handle_gravity(delta)
+	# ------------------------------------------------------------------------
+	# HERE IS WHERE AN IMPULSE ON A DOWNED HERO IS DROPPED. These two lines run
+	# every frame while `_downed`, so anything `apply_knockback` put in the
+	# reservoir above — a shockwave, a slam, a hazard, anything an unwritten
+	# system does later — is scrubbed to zero before `move_and_slide` can act on
+	# it. `take_hit` already refuses while downed, so the only route in is a
+	# direct `apply_knockback` call, and that call is silently a no-op.
+	#
+	# INTENDED, and it is the whole point of the pose. A hero at zero health in
+	# co-op is a landmark: their partner has four seconds to keep fighting near a
+	# body that is flat on the deck and stays where it fell. A downed hero who
+	# slides reads as a dropped ragdoll, and one who is blown off the bridge by a
+	# wave they cannot dodge turns a knockdown into a second death sentence.
+	#
+	# If a system genuinely needs to move a downed hero, move it POSITIONALLY —
+	# `global_position += ...`, rate-capped — the way Adamastor's push-out and
+	# `_clamp_separation` both already do. Gravity is deliberately still applied
+	# above, so a body dropped in mid-air still falls, and `_handle_fall` below
+	# still takes it over the side if that is where it lands.
+	# ------------------------------------------------------------------------
 	velocity.x = move_toward(velocity.x, 0.0, ground_decel * delta)
 	velocity.z = move_toward(velocity.z, 0.0, ground_decel * delta)
 	move_and_slide()
@@ -358,6 +466,32 @@ func _handle_jump(delta: float) -> void:
 		_kick_squash(JUMP_STRETCH)
 
 
+## Measure the body origin -> soles distance off the collision shape.
+##
+## Read rather than hard-coded because the two heroes are different sizes:
+## Herosauro's capsule is 2.0 m and Super Boxy's 1.7, so a single constant would
+## float one hero's landing dust half a metre off the deck and bury the other's
+## in it. A dust ring that does not sit on the surface it was thrown off is the
+## RUBRIC's "objects floating on their own ambient" failure applied to FX.
+func _measure_feet() -> void:
+	for child in get_children():
+		var col := child as CollisionShape3D
+		if col == null or col.shape == null:
+			continue
+		if col.shape is CapsuleShape3D:
+			_feet_drop = (col.shape as CapsuleShape3D).height * 0.5 - col.position.y
+			return
+		if col.shape is BoxShape3D:
+			_feet_drop = (col.shape as BoxShape3D).size.y * 0.5 - col.position.y
+			return
+
+
+## Where this hero's soles are, in world space. Public because every ground-plane
+## FX a hero throws has to start here rather than at the body origin.
+func foot_position() -> Vector3:
+	return global_position - Vector3.UP * _feet_drop
+
+
 ## Minimum time off the ground before touching down counts as a landing. Walking
 ## the bridge drops is_on_floor() for a frame here and there over seams; without
 ## this gate every one of those would chirp.
@@ -380,6 +514,14 @@ func _handle_landing(delta: float) -> void:
 			# have the frame twitching constantly.
 			if force > 0.6:
 				GameManager.request_shake(0.10 * force, 0.14)
+				# ...and leg one, at the point of contact, on the same gate. The
+				# deck between the tram rails is calçada, so COBBLE: the loose
+				# lime grout between the setts is what comes up first when
+				# anything lands on it, and it is what makes a hero landing on
+				# the bridge look different from one landing on a granite kerb.
+				# Thrown from the SOLES, not the body origin — see foot_position().
+				ImpactFX.ground(self, foot_position(), ToonFactory.Surface.COBBLE,
+					LAND_FX_RADIUS, force)
 		_air_time = 0.0
 	else:
 		_air_time += delta
@@ -455,14 +597,77 @@ func _ground_below(from: Vector3 = global_position) -> bool:
 	return not space.intersect_ray(query).is_empty()
 
 
+## Going over the side of the Dom Luís.
+##
+## This used to cost twenty health and happen in complete silence: no FX, no
+## camera response, no hit-stop, and the only leg of the five that fired was the
+## UI's, off `damage_player`. It was the worst-rated impact in the game, and it
+## is not a small one — a hero leaving the bridge is the single most dramatic
+## thing that can happen to them without the run ending.
+##
+## It is now TWO beats, because it is two events and reading them as one is what
+## made it feel like a teleport:
+##
+##   THE LOSS, at the hero's own position out over the Douro. A downward burst
+##   (they are being swallowed, so the chips go with them), the biggest camera
+##   punch either hero takes, the fall transient, a freeze proportional to the
+##   twenty health it costs, and the damage itself for the HUD.
+##
+##   THE RETURN, on the deck beside their partner. A ground burst under the
+##   soles, a smaller punch, the landing transient, and a squash kicked the wrong
+##   way so the body springs onto the calçada instead of appearing at rest scale.
+##   Same treatment `_get_up()` gives a revive, for the same reason.
+##
+## Order matters twice over. The loss is drawn from `lost_at`, captured BEFORE
+## the body moves, or the burst appears at the recovery point and the fall reads
+## as the hero blinking. And `damage_player` goes LAST of the loss beat, because
+## it can knock the hero down or end the run, and whatever it does has to have
+## the final word.
 func _respawn() -> void:
+	var lost_at := global_position
+
+	# --- the loss ---------------------------------------------------------
+	# FLAT rather than a material: what left the deck is a hero, and there is
+	# nothing here for them to have chipped. Thrown DOWN, along the fall.
+	ImpactFX.spark(self, lost_at, Vector3.DOWN, ToonFactory.Surface.FLAT, FALL_FX_POWER)
+	GameManager.request_shake(FALL_SHAKE, FALL_SHAKE_TIME)
+	_play_fall_sfx()
+	GameManager.hit_stop(_hurt_stop_for(GameManager.FALL_PENALTY))
+
+	# --- the return -------------------------------------------------------
 	global_position = _recovery_position()
 	velocity = Vector3.ZERO
 	_knockback = Vector3.ZERO
 	_ground_y = global_position.y
+	# Straight to the recovery point's own soles: `_recovery_position()` drops the
+	# hero in from a metre up, so the burst goes on the deck under them rather
+	# than at the height they materialise at.
+	ImpactFX.ground(self, foot_position() - Vector3.UP * 1.0, ToonFactory.Surface.COBBLE,
+		RECOVER_FX_RADIUS, RECOVER_FX_POWER)
+	GameManager.request_shake(RECOVER_SHAKE, RECOVER_SHAKE_TIME)
+	AudioManager.play_land()
+	# Flattened, then sprung: the kick has to go through the spring rather than be
+	# assigned, or the body would sit squashed until something else disturbed it.
+	_stretch = RECOVER_SQUASH
+	_stretch_vel = 0.0
+	_kick_squash(JUMP_STRETCH)
+
 	GameManager.damage_player(player_id, GameManager.FALL_PENALTY)
 	_start_iframes()
 	GameManager.notify_player_respawned(player_id)
+
+
+## Leg three of the fall.
+##
+## `AudioManager.play_fall()` is the sound the `audio` stream is adding for this
+## moment and this is its call site; until it lands the hurt transient stands in,
+## so the fall is never silent. Duck-typed rather than preloaded, per
+## ARCHITECTURE.md rule 2 — `players` does not get to reach into `audio`'s script.
+func _play_fall_sfx() -> void:
+	if AudioManager.has_method(FALL_SFX):
+		AudioManager.call(FALL_SFX)
+	else:
+		AudioManager.play_hurt()
 
 
 ## Where a hero comes back in.
@@ -498,24 +703,71 @@ func _recovery_position() -> Vector3:
 
 # --- Combat ----------------------------------------------------------------
 
+## Every route to hurting a hero, and therefore the single place the impact
+## contract is closed for a hit landing ON one.
+##
+## Five sources reach here — the giant's slam hitbox, his body contact, the
+## shockwave, a thrown rock, and (via `_respawn`) the drop off the deck — and
+## before this pass only the slam froze the frame and only the shockwave drew
+## anything at the point of contact. Putting both here means a source cannot
+## forget: a new hazard that calls `take_hit` is finished the moment it does.
+##
+## The consequence, which is deliberate and is in the report: `Hitbox._deliver()`
+## calls this BEFORE it emits `landed`, and `GameManager.hit_stop` refuses to
+## nest, so the freeze below now pre-empts the ones the boss stream fires from
+## its own `landed` handlers. `HURT_STOP_PER_DAMAGE` is anchored on
+## `Adamastor.SLAM_HIT_STOP` for exactly that reason.
+##
 ## Returns true if the hit landed (false if the player was invulnerable or down).
 func take_hit(amount: int, knockback: Vector3 = Vector3.ZERO) -> bool:
 	if _downed or _invuln > 0.0 or GameManager.state != GameManager.State.PLAYING:
 		return false
 	apply_knockback(knockback)
 	_start_iframes()
+	# 3. the audio transient.
 	AudioManager.play_hurt()
-	# The fifth part of the impact contract is the UI's (GameManager.player_damaged
-	# already carries the hit); this is the deformation and the camera response for
-	# a hit landing on a hero rather than on the giant.
-	_kick_squash(HURT_SQUASH * clampf(float(amount) / 20.0, 0.4, 1.4))
+	# 1. the visual at the point of contact. FLAT, because what was struck is a
+	# hero — whatever hit them throws its own material's chips from its own end of
+	# the blow. Placed on the struck SIDE of the body rather than in the middle of
+	# it, and thrown along the blow, which is the one cue that says who hit whom.
+	var blow := Vector3(knockback.x, 0.0, knockback.z)
+	var into := blow.normalized() if blow.length() > 0.01 else Vector3.UP
+	var bite: float = clampf(float(amount) / HURT_FX_REFERENCE, 0.4, 1.6)
+	ImpactFX.spark(self,
+		global_position - into * HURT_FX_INSET + Vector3.UP * HURT_FX_LIFT,
+		into, ToonFactory.Surface.FLAT, bite)
+	# The deformation, on the same normalisation as the burst so the two agree.
+	_kick_squash(HURT_SQUASH * clampf(float(amount) / HURT_FX_REFERENCE, 0.4, 1.4))
+	# 2. the camera response.
 	GameManager.request_shake(0.12 + 0.010 * float(amount), 0.22)
-	# Damage LAST: this is the call that can knock the hero down or end the run,
-	# and _go_down() has to be the thing that has the final word on the pose.
+	# 4. the hit-stop, proportional to what it cost.
+	GameManager.hit_stop(_hurt_stop_for(amount))
+	# 5. the UI acknowledgement rides `player_damaged`, and damage goes LAST: this
+	# is the call that can knock the hero down or end the run, and _go_down() has
+	# to be the thing that has the final word on the pose.
 	GameManager.damage_player(player_id, amount)
 	return true
 
 
+## Freeze length for `amount` of damage landing on a hero. See
+## HURT_STOP_PER_DAMAGE for where the coefficient comes from.
+func _hurt_stop_for(amount: int) -> float:
+	return clampf(float(amount) * HURT_STOP_PER_DAMAGE, HURT_STOP_MIN, HURT_STOP_MAX)
+
+
+## Push this hero. The horizontal part goes into a reservoir that rides on top of
+## the controlled velocity and decays at `knockback_decay`, so a hit cannot simply
+## be walked off; the vertical part is assigned to `velocity.y` directly, because
+## a pop has to beat gravity on the frame it is applied.
+##
+## **A DOWNED HERO IGNORES THE HORIZONTAL PART OF THIS, BY DESIGN.**
+## `_process_downed` drives `velocity.x/z` to zero every frame, so the reservoir
+## this writes into is scrubbed before it can move the body — see the comment at
+## the drop itself. Any system that needs to move a hero who is down has to do it
+## POSITIONALLY (`global_position += ...`), which is what the boss's push-out
+## already does. This is not a bug to be fixed by removing the scrub: a downed
+## hero skating across the deck under a blast reads as a ragdoll glitch, and the
+## flattened pose is the read the co-op knockdown depends on at 15 m.
 func apply_knockback(impulse: Vector3) -> void:
 	_knockback.x += impulse.x
 	_knockback.z += impulse.z
@@ -606,6 +858,19 @@ func _build_swing_box() -> void:
 
 
 func _on_swing_landed(target: Node3D) -> void:
+	# Leg one, for both heroes and every target, in one line. The jab had camera,
+	# audio, hit-stop and UI and drew NOTHING where it connected, which is the
+	# single most-repeated impact in the game.
+	#
+	# 0.55 of the reach rather than the far face: the volume's far face is where
+	# the swing stops being able to hit, not where a connect usually happens, and
+	# a burst out at 4 m hangs in the air beside the giant instead of on him.
+	# `surface_of` reads the struck node's own declaration, so the same line
+	# throws granite off Adamastor (he is in the "boss" group and is literally a
+	# stone giant) and splinters off a crate (PropBody exports `surface`).
+	ImpactFX.spark(self,
+		global_position + facing_dir * attack_range * 0.55 + Vector3.UP,
+		facing_dir, ImpactFX.surface_of(target), 1.0)
 	if target.is_in_group("boss"):
 		# Adamastor answers every damage event with its own play_boss_hit() (see its
 		# boss_damaged handler), and the shipped boss_hit sample is the same file, so
@@ -753,6 +1018,11 @@ func reset_state() -> void:
 	_stretch = 0.0
 	_stretch_vel = 0.0
 	_tilt = 0.0
+	# Drop the secondary motion too, or the frame after a world rebuild
+	# differences this hero's velocity against wherever they used to be and the
+	# chain arrives bent double.
+	if _lag and is_instance_valid(_lag):
+		_lag.reset()
 	if _swing:
 		_swing.disarm()
 	if _tree:
@@ -893,6 +1163,23 @@ func _kick_squash(amount: float) -> void:
 	_stretch = clampf(_stretch + amount, -SQUASH_LIMIT, SQUASH_LIMIT)
 
 
+## Current deformation of the body, signed: positive is tall and thin, negative
+## short and wide, and it is exactly what `_drive_squash` writes into the model's
+## scale. Public so `_coop_probe` can measure the squash that actually reaches
+## the mesh across a swing rather than the impulse that was asked for — the
+## rubric scores what the frame shows, and the spring between the two has its own
+## opinion.
+func stretch() -> float:
+	return _stretch
+
+
+## This hero's secondary-motion modifier, or null if the model has no skeleton.
+## Public for `_coop_probe`, which asserts that it found its bones, that it stays
+## inside its bound and that it returns to exactly neutral when the hero stops.
+func body_lag() -> BodyLag:
+	return _lag
+
+
 func _drive_squash(delta: float) -> void:
 	if _model_root == null:
 		return
@@ -935,9 +1222,42 @@ func bind_animations(root: Node3D, mapping: Dictionary) -> void:
 			if String(mapping[key]).to_lower() in String(clip).to_lower():
 				_anim_clips[key] = clip
 				break
+	_attach_secondary_motion(root)
 	if not _anim_clips.has("walk") and not _anim_clips.has("idle"):
 		return
 	_build_anim_tree(_synthesize_idle())
+
+
+## Hang a `BodyLag` off the model's skeleton.
+##
+## The rubric's "nothing on a character is perfectly rigid" line, on a rig that
+## has no cape, tail or glove bone to simulate — see `body_lag.gd` for what it
+## does about that and why a `SkeletonModifier3D` is the only place it can live
+## without fighting the AnimationTree built two lines below this.
+##
+## Attached BEFORE the tree, deliberately: `Skeleton3D` runs its modifier stack
+## after whichever mixer wrote the frame, so the order these two are created in
+## does not matter to the result — but a modifier that exists first cannot miss
+## the frame the tree goes live on.
+func _attach_secondary_motion(root: Node3D) -> void:
+	var skel := _find_skeleton(root)
+	if skel == null:
+		return
+	if skel.get_node_or_null("BodyLag") != null:
+		return
+	_lag = BodyLag.new()
+	_lag.name = "BodyLag"
+	skel.add_child(_lag)
+
+
+func _find_skeleton(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node as Skeleton3D
+	for c in node.get_children():
+		var r := _find_skeleton(c)
+		if r:
+			return r
+	return null
 
 
 func _find_anim_player(node: Node) -> AnimationPlayer:

@@ -108,14 +108,34 @@ func _custom_locomotion(delta: float) -> bool:
 	return false
 
 
+## Where the dash connects, measured from Boxy's centre.
+##
+## `DASH_HIT_RANGE` is 5.0 and is a proximity test to the giant's ORIGIN, which
+## is at his feet — it fires while Boxy is still well outside the giant's surface,
+## so a burst at the full 5 m would hang in the air short of him and a burst at
+## Boxy's own position would sit behind his gloves. 1.6 m puts it out in front of
+## the fists at about the depth his own swing volume reaches, and +UP lifts it off
+## the deck to where the two bodies actually meet.
+const DASH_FX_REACH := 1.6
+## Above the jab's 1.0 and above Herosauro's orb at 1.6: this is the biggest
+## single thing either hero does to Adamastor and the burst has to say so.
+const DASH_FX_POWER := 2.0
+
 ## The dash connecting is the pair's biggest single hit, so it carries all five
-## parts of the impact contract: the ghost trail and the giant's own hit reaction
-## are the visual, this is the audio, the hit-stop and the camera, and the UI
-## picks it up from GameManager.boss_damaged.
+## parts of the impact contract: this is the FX at the point of contact, the
+## audio, the hit-stop and the camera, and the UI picks it up from
+## GameManager.boss_damaged. (The ghost trail is the LUNGE, not the connect — it
+## is drawn every 0.06 s along the whole dash whether or not anything is hit, so
+## before this pass the one frame that mattered drew nothing that the frame
+## before it had not already drawn.)
 func _land_dash(boss: Node) -> void:
 	GameManager.damage_boss(DASH_DAMAGE, player_id)
 	if boss.has_method("nudge"):
 		boss.nudge(_dash_dir, 1.2)
+	# `surface_of` resolves granite off the giant — he is in the "boss" group and
+	# he is literally a stone giant — so the gloves throw stone chips.
+	ImpactFX.spark(self, global_position + _dash_dir * DASH_FX_REACH + Vector3.UP,
+		_dash_dir, ImpactFX.surface_of(boss), DASH_FX_POWER)
 	AudioManager.play_super_boxy_hit()
 	GameManager.hit_stop(0.06)
 	GameManager.request_shake(DASH_SHAKE, DASH_SHAKE_TIME)

@@ -74,6 +74,13 @@ func _impact(body: Node3D) -> void:
 		GameManager.hit_stop(0.07)
 	elif body is PropBody:
 		(body as PropBody).apply_hit_impulse(direction * 34.0 + Vector3.UP * 6.0, global_position)
+	# Leg two, on the HIT. Herosauro._perform_ability already punches the camera on
+	# the CAST, which is right for the summon but is not this event - the orb
+	# bursting on the giant fifteen metres away had no camera response at all, so a
+	# 50-damage special landed with less weight in the frame than an 8-damage jab.
+	# Fired for every impact, not just the boss: the orb bursting on a crate or on
+	# the ironwork is still fifty points of energy stopping dead.
+	GameManager.request_shake(0.22, 0.16)
 	_finish()
 
 
@@ -97,41 +104,26 @@ func _apply_visuals() -> void:
 		trail.emitting = true
 
 
-## Brief green particle pop, parented to the spawn root so it survives queue_free.
+## Leg one of the impact contract for the orb: the burst where it stops.
+##
+## This function DREW NOTHING from the day it was written until this pass. It
+## built a `CPUParticles3D`, set eleven emission parameters and a bright green
+## emissive `material_override` — and never set `mesh`. `CPUParticles3D` has no
+## default particle mesh, so it dutifully simulated eighteen invisible particles
+## and freed itself. The material_override is exactly what made it look
+## implemented for this long: every line here read like a working effect.
+##
+## It is now the shared burst every impact in the game draws. `ImpactFX` is one
+## MultiMesh draw call rather than a per-instance particle system, it is seeded
+## off the impact position so two runs of the same fight agree (ARCHITECTURE.md
+## rule 4), and it parents itself into the spawn root the same way this did.
+##
+## FLAT rather than the struck surface: the orb is a summoned spectrum coming
+## apart, not the giant's granite chipping. The giant's own material shows up in
+## the jab's burst, which uses `surface_of`. 1.6 because this is a 50-damage
+## special — well above a jab's 1.0, below Boxy's dash at 2.0.
+##
+## Also covers the orb timing out in mid-air, which is the right read: the
+## spectrum dissipating should be visible, and it was not.
 func _burst() -> void:
-	var burst := CPUParticles3D.new()
-	burst.emitting = true
-	burst.one_shot = true
-	burst.amount = 18
-	burst.lifetime = 0.35
-	burst.explosiveness = 1.0
-	burst.spread = 180.0
-	burst.initial_velocity_min = 4.0
-	burst.initial_velocity_max = 8.0
-	burst.scale_amount_min = 0.3
-	burst.scale_amount_max = 0.6
-	burst.direction = Vector3.UP
-	burst.gravity = Vector3.ZERO
-
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(0.2, 1.0, 0.3, 1.0)
-	mat.emission_enabled = true
-	mat.emission = Color(0.2, 1.0, 0.3)
-	mat.emission_energy_multiplier = 3.0
-	burst.material_override = mat
-
-	var pos := global_position
-	var root := get_tree().get_first_node_in_group("spawn_root")
-	if root == null:
-		root = get_tree().current_scene
-	if root == null:
-		burst.queue_free()
-		return
-	root.add_child(burst)
-	burst.global_position = pos
-
-	# Free the burst node once its particles have finished.
-	var t := burst.get_tree().create_timer(burst.lifetime + 0.2)
-	t.timeout.connect(burst.queue_free)
+	ImpactFX.spark(self, global_position, direction, ToonFactory.Surface.FLAT, 1.6)
