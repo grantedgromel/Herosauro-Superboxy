@@ -68,6 +68,44 @@ jobs:
           godot --headless --export-release "${EXPORT_PRESET}" web/index.html
           test -f web/index.pck && test -f web/index.wasm
 
+      # CACHE-BUST THE BUILD, because a stale one is indistinguishable from a
+      # broken one and the owner spent a session reporting bugs that had already
+      # been fixed. GitHub Pages serves index.pck and index.wasm with ordinary
+      # caching headers; the browser had a stale 18 MB pck and kept playing an
+      # old build while index.html said everything was current. There is no way
+      # to set cache headers on Pages, so the fix is to change the URL.
+      #
+      # Godot's loader derives BOTH payload paths from GODOT_CONFIG.executable
+      # and looks their sizes up in fileSizes by exact filename, so renaming the
+      # pair and rewriting those two fields is the whole job. index.js is left
+      # alone deliberately: it is the loader, it hardcodes no filenames (it reads
+      # them out of GODOT_CONFIG above), so a cached copy loads the fresh build
+      # correctly and there is nothing to bust.
+      #
+      # Verified in a real browser: all three resources return 200, no request
+      # fails, and the engine boots to the title screen off the renamed payload.
+      #
+      # Every deploy is therefore a URL no cache has ever seen. A stale build
+      # stops being possible rather than becoming less likely.
+      - name: Cache-bust the payload
+        working-directory: ${{ env.PROJECT_DIR }}/web
+        run: |
+          set -euo pipefail
+          V="${GITHUB_SHA::12}"
+          mv index.pck  "index.${V}.pck"
+          mv index.wasm "index.${V}.wasm"
+          sed -i \
+            -e "s|\"executable\":\"index\"|\"executable\":\"index.${V}\"|" \
+            -e "s|\"index\.pck\"|\"index.${V}.pck\"|" \
+            -e "s|\"index\.wasm\"|\"index.${V}.wasm\"|" \
+            index.html
+          # Fail loudly rather than deploy a build whose loader points at files
+          # that are no longer there — that would be a black page, not a stale one.
+          grep -q "index.${V}.pck"  index.html
+          grep -q "index.${V}.wasm" index.html
+          test -f "index.${V}.pck" && test -f "index.${V}.wasm"
+          echo "cache-busted to index.${V}.*"
+
       # Publish the build to gh-pages so the live GitHub Pages preview always
       # reflects the latest source. force_orphan keeps gh-pages a single commit
       # so the large wasm/pck don't bloat history. Pushing gh-pages does not
