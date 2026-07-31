@@ -378,6 +378,36 @@ func _check_entry_points() -> void:
 		"play_prop_break dispatches two voices for every surface %s — the fracture "
 			% str(break_voices) + "and the debris, which is what _props_probe counts")
 
+	# The gain and pitch tables must actually REACH the material streams. They are
+	# keyed `prop_hit_wood` and the tables are keyed `prop_hit`, and for a while
+	# that meant all twenty-one played flat, at full level, with no variation —
+	# a defect that is invisible from every angle except this one, because the
+	# entries were there and simply never matched.
+	_am.call("stop_all_sfx")
+	var players: Array = _am.get("_players")
+	var pool: int = players.size()
+	var flat_gain := 0
+	var flat_pitch := 0
+	var seen: Array = []
+	for s in ToonFactory.Surface.size():
+		for i in 3:
+			_am.call("stop_all_sfx")
+			_am.call("_play", _am.call("_surface_key", "prop_hit", s), 0.0, Vector3.INF)
+			var p: AudioStreamPlayer = players[(_cursor() - 1 + pool) % pool]
+			if s == ToonFactory.Surface.WOOD:
+				seen.append("%.1f dB / %.3fx" % [p.volume_db, p.pitch_scale])
+			if is_equal_approx(p.volume_db, 0.0):
+				flat_gain += 1
+			if is_equal_approx(p.pitch_scale, 1.0):
+				flat_pitch += 1
+	print("  -- three wooden hits in a row: ", " | ".join(PackedStringArray(seen)))
+	_ok(flat_gain == 0,
+		"every material stream picks up its role's headroom (%d of %d played at 0 dB)"
+			% [flat_gain, ToonFactory.Surface.size() * 3])
+	_ok(flat_pitch == 0,
+		"...and its role's pitch spread, so two crates in one frame are two crates "
+			+ "(%d of %d played at unity)" % [flat_pitch, ToonFactory.Surface.size() * 3])
+
 	_am.call("stop_all_sfx")
 	await get_tree().process_frame
 
@@ -812,14 +842,17 @@ func _check_pool_under_load() -> void:
 	var key: String = _am.call("_surface_key", "prop_break", ToonFactory.Surface.WOOD)
 	var b := _cursor()
 	var levels: Array = []
+	var shown: Array = []
 	for i in 20:
 		var c := _cursor()
 		_am.call("_play", key, 0.0, Vector3.INF)
 		if _cursor() != c:
-			levels.append((players[(_cursor() - 1 + pool) % pool] as AudioStreamPlayer).volume_db)
+			var db: float = (players[(_cursor() - 1 + pool) % pool] as AudioStreamPlayer).volume_db
+			levels.append(db)
+			shown.append("%.1f" % db)
 	var stack_max: int = int(_am.get("SFX_STACK_MAX"))
 	print("  -- the same fracture asked for 20 times in one frame: %d voices at %s dB"
-		% [_dispatched(b), str(levels)])
+		% [_dispatched(b), " / ".join(PackedStringArray(shown))])
 	_ok(_dispatched(b) == stack_max,
 		"exactly SFX_STACK_MAX (%d) voices were spent; the other %d were refused"
 			% [stack_max, 20 - stack_max])
@@ -829,7 +862,8 @@ func _check_pool_under_load() -> void:
 			descending = false
 	_ok(descending,
 		"...and each one is quieter than the last (%s dB), so three crates sum to "
-			% str(levels) + "about 2.5 dB over one instead of twenty-one")
+			% " / ".join(PackedStringArray(shown))
+			+ "about 2.5 dB over one instead of twenty-one")
 
 	# (d) And the window opens again, or a sustained fight would go quiet.
 	_am.call("set", "_clock", float(_am.get("_clock")) + 1.0)

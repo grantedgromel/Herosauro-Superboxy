@@ -384,29 +384,23 @@ func _fx_seed() -> int:
 # ToonFactory.Surface the fx impact table is keyed on.
 
 ## A blow that the prop survived.
+##
+## This used to route every material to the nearest transient in the shipped
+## library — stone to rock_impact, iron to boss_hit, and everything else to a
+## 90 Hz thud, which is what wood splintering sounded like. AudioManager now
+## synthesises a modal voice per surface off the same ToonFactory.Surface table
+## the FX impact rows are keyed on, so the two agree by construction. Measured
+## ring-down above 250 Hz: iron 0.335 s against wood 0.055, a factor of six.
 func play_surface_hit() -> void:
-	match surface_kind():
-		ToonFactory.Surface.GRANITE, ToonFactory.Surface.COBBLE:
-			# 60 Hz rumble with noise in it — the closest thing to stone on stone.
-			AudioManager.play_rock_impact()
-		ToonFactory.Surface.IRON:
-			AudioManager.play_boss_hit()
-		_:
-			# 90 Hz thud: a dull knock, which is what a full cask sounds like.
-			AudioManager.play_land()
+	AudioManager.play_prop_hit(surface_kind(), global_position)
 
 
-## The prop coming apart. Two layers, because one transient is a hit and a hit is
-## not a destruction: the material's own crack, plus a broadband scatter tail.
+## The prop coming apart. Still two voices, because one transient is a hit and a
+## hit is not a destruction — but both are now synthesised for the material: the
+## fracture, carrying a second detuned ring 18 ms behind it (one object becoming
+## two), and a debris tail of 16-30 front-loaded grains.
 func play_surface_break() -> void:
-	match surface_kind():
-		ToonFactory.Surface.GRANITE, ToonFactory.Surface.COBBLE:
-			AudioManager.play_rock_impact()
-		ToonFactory.Surface.IRON:
-			AudioManager.play_boss_hit()
-		_:
-			AudioManager.play_super_boxy_hit()
-	AudioManager.play_rock_throw()
+	AudioManager.play_prop_break(surface_kind(), global_position)
 
 
 # --- Deck ring ---------------------------------------------------------------

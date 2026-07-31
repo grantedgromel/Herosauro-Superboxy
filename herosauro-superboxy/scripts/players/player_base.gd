@@ -216,11 +216,16 @@ const LAND_FX_RADIUS := 1.2
 ## The worst-rated impact in the game before this pass: it cost twenty health in
 ## complete silence. `_respawn()` is now two beats, and each carries all five.
 
-## The name the `audio` stream is adding for the fall. Called through
-## `has_method` rather than directly: `players` and `audio` are separate streams,
-## and a hero must not fail to come back because a sample has not landed yet.
-## The fallback is the hurt transient, so leg three is covered either way and
-## upgrades to the real sound the moment `AudioManager.play_fall()` exists.
+## The `audio` stream's sound for going over the side — a receding doppler
+## whistle, a 30 ms hole, then the Douro taking it, in one stream because there
+## is no gap to put a second call in: the loss and the return happen inside one
+## call to `_respawn()`.
+##
+## Called through `has_method` rather than directly. It has landed, so this
+## resolves today; the guard stays because `players` and `audio` are separate
+## streams working at the same time, and a hero must never fail to come back
+## because the other stream is mid-edit. The fallback is the hurt transient, so
+## leg three of the contract is covered whatever happens to the sample.
 const FALL_SFX := "play_fall"
 ## Camera punch as the hero goes over, and as they drop back in. The loss is the
 ## bigger of the two on purpose: losing a fifth of your health off the deck
@@ -239,6 +244,21 @@ const RECOVER_FX_POWER := 1.1
 ## The pop out of the recovery. Same idea as `_get_up()`: the body springs onto
 ## the deck rather than materialising at rest scale.
 const RECOVER_SQUASH := -0.30
+
+# --- Knockdown and revive --------------------------------------------------
+## A hero hitting the deck at zero health, and springing back off it, are impacts
+## too — a whole body arriving on the calçada. Both had four legs and drew
+## nothing at the point of contact.
+##
+## The knockdown burst is the bigger of the two: it is a body dropping, where the
+## revive is a body pushing off. Neither carries a hit-stop of its own — the blow
+## that caused the knockdown has already frozen the frame through `take_hit` (or
+## through `_respawn`, if the fall penalty is what emptied the bar), and
+## `GameManager.hit_stop` refuses to nest, so asking again would only be ignored.
+const DOWN_FX_RADIUS := 1.8
+const DOWN_FX_POWER := 1.3
+const UP_FX_RADIUS := 1.4
+const UP_FX_POWER := 0.9
 
 var spawn_position: Vector3 = Vector3.ZERO
 var facing_dir: Vector3 = Vector3(1, 0, 0)
@@ -662,12 +682,8 @@ func _respawn() -> void:
 	GameManager.notify_player_respawned(player_id)
 
 
-## Leg three of the fall.
-##
-## `AudioManager.play_fall()` is the sound the `audio` stream is adding for this
-## moment and this is its call site; until it lands the hurt transient stands in,
-## so the fall is never silent. Duck-typed rather than preloaded, per
-## ARCHITECTURE.md rule 2 — `players` does not get to reach into `audio`'s script.
+## Leg three of the fall. See FALL_SFX for why it is called this way rather than
+## directly, and what stands in if it is ever missing.
 func _play_fall_sfx() -> void:
 	if AudioManager.has_method(FALL_SFX):
 		AudioManager.call(FALL_SFX)
@@ -1134,6 +1150,9 @@ func _go_down() -> void:
 	# legible as "my partner is down" from across the deck, not a subtle slump.
 	_stretch = DOWN_SQUASH
 	_stretch_vel = 0.0
+	# Leg one: the deck taking the weight of a hero who has stopped standing on it.
+	ImpactFX.ground(self, foot_position(), ToonFactory.Surface.COBBLE,
+		DOWN_FX_RADIUS, DOWN_FX_POWER)
 	AudioManager.play_hurt()
 	GameManager.request_shake(0.35, 0.3)
 
@@ -1151,6 +1170,10 @@ func _get_up() -> void:
 	_stretch = DOWN_SQUASH
 	_stretch_vel = 0.0
 	_kick_squash(JUMP_STRETCH * 1.4)
+	# Leg one, on the recovery point rather than where they fell: `_get_up` moves
+	# the body first, exactly as `_respawn` does, so the dust has to follow it.
+	ImpactFX.ground(self, foot_position(), ToonFactory.Surface.COBBLE,
+		UP_FX_RADIUS, UP_FX_POWER)
 	AudioManager.play_land()
 	GameManager.request_shake(0.18, 0.2)
 

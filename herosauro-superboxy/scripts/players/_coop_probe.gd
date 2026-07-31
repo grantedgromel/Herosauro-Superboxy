@@ -1099,16 +1099,42 @@ func _check_knockdown_and_revive() -> void:
 	await _to_menu()
 	await _start(2, 1)
 	await _settle(60)
+	await _send_boss_away()
 
+	# The knockdown is an impact too: a whole body arriving on the calçada. Same
+	# five-leg measurement as the rest, anchored on the soles.
+	var faller: PlayerBase = _hero(1)
+	var down_anchor := func() -> Vector3: return faller.foot_position()
+	_open(down_anchor)
 	GameManager.damage_player(1, GameManager.MAX_PLAYER_HEALTH)
 	await get_tree().physics_frame
+	var down_bursts := _new_bursts
+	var down_miss := _best_miss
+	var down_shakes := _shakes
+	var down_sounds := _sfx_since(_sfx_open)
+	_close()
+	print("\n  -- a hero going down: %d new burst(s) %.2f m from the soles, shake x%d "
+		% [down_bursts, down_miss, down_shakes]
+		+ "peak %.2f, %d sample(s)" % [_shake_peak, down_sounds])
+	_ok(down_bursts > 0 and down_miss <= FX_TOLERANCE,
+		"knockdown: leg 1/5 visual — dust under the body (%.2f m off)" % down_miss)
+	_ok(down_shakes > 0, "knockdown: leg 2/5 camera — %d request(s)" % down_shakes)
+	_ok(down_sounds > 0, "knockdown: leg 3/5 audio — %d sample(s)" % down_sounds)
+
 	_ok(GameManager.state == GameManager.State.PLAYING,
 		"one hero down does NOT end a co-op run (state %d)" % GameManager.state)
 	_ok(_hero(1).is_downed(), "the hero at zero health is downed")
 	_ok(not _hero(2).is_downed(), "the partner is still standing")
 
 	# Ride out the revive timer. 90 Hz ticks, so this is DOWN_TIME plus slack.
+	_open(down_anchor)
 	await _settle(int(PlayerBase.DOWN_TIME * 90.0) + 30)
+	var up_bursts := _new_bursts
+	var up_miss := _closest_new_to(faller.foot_position())
+	_close()
+	_ok(up_bursts > 0 and up_miss <= FX_TOLERANCE,
+		"revive: leg 1/5 visual — dust as they push back off the deck (%.2f m off)"
+			% up_miss)
 	_ok(not _hero(1).is_downed(), "the downed hero is helped back up")
 	_ok(int(GameManager.player_health[1]) > 0,
 		"they come back with health (%d)" % int(GameManager.player_health[1]))

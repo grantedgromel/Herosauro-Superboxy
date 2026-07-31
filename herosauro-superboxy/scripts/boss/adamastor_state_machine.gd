@@ -531,6 +531,13 @@ func _start_roar() -> void:
 
 	_plant_aoe(ROAR_RADIUS, ROAR_WINDUP, BossTelegraph.ROAR_TINT, Vector3.ZERO, &"roar")
 	boss.roar_coil(ROAR_WINDUP)
+	# Fired at the WIND-UP, not at the release: the roar is a 2.45 s stream whose
+	# crest lands at 0.86 s, sized against ROAR_WINDUP's 0.85. Starting it here
+	# means the giant's voice peaks on the frame the coil releases, instead of
+	# beginning there. play_boss_slam() still fires in _do_roar() and the layering
+	# is deliberate — the roar's blast is sub-80 Hz and the slam's energy sits at
+	# 1.2 kHz, so they occupy different bands rather than competing.
+	AudioManager.play_boss_roar()
 
 	_attack_tween = boss.create_tween()
 	_attack_tween.tween_callback(func() -> void: boss.raise_arms(true))

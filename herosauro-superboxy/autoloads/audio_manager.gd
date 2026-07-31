@@ -140,7 +140,27 @@ const SFX_PITCH_VAR := {
 	"boss_slam": 0.04,
 	"fall": 0.05,
 	"splash": 0.07,
+	"prop_hit": 0.10,
+	"prop_break": 0.08,
+	"prop_debris": 0.10,
 }
+
+
+## SFX_GAIN_DB and SFX_PITCH_VAR, looked up with a fallback to the ROLE.
+##
+## The material streams are keyed `role_surface` — `prop_hit_wood`,
+## `prop_debris_granite` — while their headroom and their pitch spread are set
+## per role, because a hit is a hit whatever it is made of. Without this the
+## twenty-one prop keys matched nothing in either table and every one of them
+## played flat, at full gain, with no variation at all: the exact defect the
+## tables exist to prevent, hidden behind entries that looked present.
+static func _row_for(table: Dictionary, key: String, fallback: float) -> float:
+	if table.has(key):
+		return float(table[key])
+	var cut := key.rfind("_")
+	if cut > 0 and table.has(key.substr(0, cut)):
+		return float(table[key.substr(0, cut)])
+	return fallback
 
 ## How long the same logical sound stays "already playing" for stacking purposes.
 ## 45 ms is about three physics ticks at 90 Hz: long enough to catch a frame in
@@ -421,7 +441,7 @@ func _play(key: String, volume_db: float = 0.0, at: Vector3 = Vector3.INF) -> vo
 	_next_player = (idx + 1) % _players.size()
 
 	var pitch: float = float(SFX_PITCH_BASE.get(key, 1.0))
-	var spread: float = float(SFX_PITCH_VAR.get(key, 0.0))
+	var spread: float = _row_for(SFX_PITCH_VAR, key, 0.0)
 	# Level wanders with pitch, and only downwards. Two swings that differ in
 	# pitch but not at all in level still read as a loop, and a symmetric gain
 	# jitter would let a run of hits march up over the mix instead of sitting in
@@ -434,7 +454,7 @@ func _play(key: String, volume_db: float = 0.0, at: Vector3 = Vector3.INF) -> vo
 	p.stream = stream
 	p.pitch_scale = pitch
 	p.volume_db = volume_db + jitter_db \
-		+ float(SFX_GAIN_DB.get(key, 0.0)) \
+		+ _row_for(SFX_GAIN_DB, key, 0.0) \
 		+ float(stack) * SFX_STACK_DB \
 		+ _distance_db(at)
 	p.play()
