@@ -43,12 +43,18 @@ const LINE_TWO := "& SUPER BOXY"
 ## string with spaces: spacing_glyph widens the word gaps in proportion too, so
 ## the strapline stays a strapline instead of collapsing into a caption when the
 ## lockup auto-fits down.
-const STRAPLINE := "LEGENDS OF PORTO"
+const STRAPLINE := "THE GUARDIAN BROTHERS OF PORTO"
 
 # --- Type scale (at design height; main_menu.gd scales these) ----------------
 
-const SIZE_ONE := 92
-const SIZE_TWO := 68
+## Both lines set at the SAME size, deliberately. The lockup used to run
+## HEROSAURO at 92 over & SUPER BOXY at 68, which is a 35% difference — and a
+## title that sets one hero larger than the other is making a claim about the
+## game. This is a two-player co-op game with two equally playable heroes, so
+## the type has to say that. `relayout()` derives a single shared `fit` scalar
+## across every row, so equal sizes here stay equal at every window width.
+const SIZE_ONE := 84
+const SIZE_TWO := 84
 const SIZE_STRAP := 20
 const GAP_LINES := -12.0          # display faces overlap slightly; Bangers has deep bearing
 const GAP_RULE := 22.0
@@ -233,8 +239,25 @@ func relayout(max_width: float, ui_scale: float) -> float:
 	_rule.position = Vector2(0.0, y)
 	_rule.size = Vector2(rule_w, maxf(2.0, RULE_HEIGHT * ui_scale))
 
+	# The strapline gets its own fit, separate from the display lines' shared one.
+	# It is tracked out through spacing_glyph, and get_string_size() measures the
+	# BASE font, so the rendered width is the measured width plus one space of
+	# tracking per glyph gap — a strapline that fits on paper and overruns on
+	# screen is exactly that difference. "THE GUARDIAN BROTHERS OF PORTO" is
+	# nearly twice the length of the sixteen-character line this was designed
+	# around, so the shortfall is real rather than theoretical.
 	var strap_size := maxi(11, roundi(SIZE_STRAP * ui_scale))
-	_strap_font.spacing_glyph = maxi(2, roundi(strap_size * 0.34))
+	var track := maxi(2, roundi(strap_size * 0.34))
+	var strap_w := UIStyle.UI_BOLD.get_string_size(
+			STRAPLINE, HORIZONTAL_ALIGNMENT_LEFT, -1.0, strap_size).x \
+			+ float(track * maxi(0, STRAPLINE.length() - 1))
+	if strap_w > max_width:
+		var strap_fit := max_width / maxf(strap_w, 1.0)
+		strap_size = maxi(9, roundi(strap_size * strap_fit))
+		# Tracking is re-derived from the fitted size rather than scaled
+		# separately, so the letter-spacing stays proportional to the letters.
+		track = maxi(1, roundi(strap_size * 0.34))
+	_strap_font.spacing_glyph = track
 	_strap.add_theme_font_size_override("font_size", strap_size)
 	y += _rule.size.y + GAP_STRAP * ui_scale
 	_strap.position = Vector2(0.0, y)

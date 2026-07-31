@@ -209,7 +209,12 @@ func shatter(push: Vector3 = Vector3.ZERO) -> void:
 	#    three frames at 90 Hz, a granite block five. GameManager.hit_stop
 	#    self-guards against re-entry, so five barrels caught by one slam freeze
 	#    once between them rather than five times.
-	GameManager.hit_stop(0.022 + 0.035 * energy)
+	#
+	#    Gated on PLAYING for the same reason the score is: props are also
+	#    destroyed by the world being torn down and by falling off the bridge
+	#    after the fight, and a results screen that stutters is a bug report.
+	if GameManager.state == GameManager.State.PLAYING:
+		GameManager.hit_stop(0.022 + 0.035 * energy)
 	# 5. UI acknowledgement.
 	_award(break_score)
 

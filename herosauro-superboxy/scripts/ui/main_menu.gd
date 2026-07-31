@@ -16,7 +16,6 @@ extends Control
 ##   HeroStage    Adamastor, Super Boxy, Herosauro, parallaxed against the camera
 ##   TitleLogo    the display lockup
 ##   MenuList     START / DIFFICULTY / CONTROLS / CREDITS / QUIT
-##   Hints        the key legend
 ##   Modal        CONTROLS and CREDITS panels
 ##   Curtain      the fade to black on START and QUIT
 ##
@@ -64,10 +63,14 @@ const LOGO_WIDTH_FRACTION := 0.46
 const COLUMN_WIDTH_MAX := 430.0
 const COLUMN_WIDTH_FRACTION := 0.34
 const LOGO_TO_LIST := 40.0
-const HINTS_BASELINE := 58.0     # up from the bottom edge
-## Air kept under the column, above the hint row. Trimmed when the rows became
-## plates: the column got taller, and the clamp below was pushing it up into the
-## strapline to keep this gap, which is the wrong thing to protect.
+## Air kept under the menu column. Trimmed once when the rows became plates: the
+## column got taller and the clamp below was pushing it up into the strapline to
+## keep this gap, which is the wrong thing to protect.
+##
+## This used to be measured against a W/S/Enter/Esc hint row pinned to the bottom
+## left. That row went when the menu gained a dedicated CONTROLS screen — the same
+## information, stated permanently, in the corner of the game's first impression.
+## The air is worth more than the repetition.
 const LIST_BOTTOM_CLEAR := 74.0
 
 # --- Timing ------------------------------------------------------------------
@@ -88,7 +91,6 @@ var _stage: HeroStageScript
 var _logo: TitleLogoScript
 var _list: MenuListScript
 var _modal: MenuModalScript
-var _hints: Control
 var _veil: ColorRect
 var _curtain: ColorRect
 
@@ -136,14 +138,6 @@ func _build() -> void:
 	_list.difficulty_changed.connect(_on_difficulty_changed)
 	add_child(_list)
 
-	_hints = UIStyle.hint_row([
-		["W", "Up"], ["S", "Down"], ["Enter", "Select"], ["Esc", "Back"],
-	], UIStyle.SPACE_LG)
-	_hints.name = "Hints"
-	(_hints as HBoxContainer).alignment = BoxContainer.ALIGNMENT_BEGIN
-	_hints.modulate.a = 0.0
-	add_child(_hints)
-
 	_modal = MenuModalScript.new()
 	_modal.name = "Modal"
 	_modal.closed.connect(_on_modal_closed)
@@ -182,18 +176,12 @@ func _relayout() -> void:
 	_list.size = Vector2(column_w, 10.0)
 	_list.relayout(ui)
 	var column_h := _list.column_height()
-	# Sits under the lockup, but never so far down that it crowds the hint row.
+	# Sits under the lockup, but never so far down that it runs off the frame.
 	var list_y := minf(_logo.position.y + logo_h + LOGO_TO_LIST * ui,
 			size.y - LIST_BOTTOM_CLEAR * ui - column_h)
 	_list.position = Vector2(margin, maxf(list_y, _logo.position.y + logo_h + 8.0 * ui))
 	_list.size = Vector2(column_w, column_h)
 
-	# Sized to its own content, not to the remaining width: a hint row stretched
-	# across the frame is an invisible box lying over the character art, and the
-	# first thing that goes wrong with one of those is hit-testing.
-	var hint_w := maxf(_hints.get_combined_minimum_size().x, 120.0)
-	_hints.position = Vector2(margin, size.y - HINTS_BASELINE * ui)
-	_hints.size = Vector2(hint_w, 30.0 * ui)
 
 
 # --- Waking and sleeping -----------------------------------------------------
@@ -219,7 +207,6 @@ func _wake() -> void:
 	_leaving = false
 	_veil.color.a = 1.0
 	_curtain.color.a = 0.0
-	_hints.modulate.a = 0.0
 	# The cast and the column sit ABOVE the veil so they can animate in as it
 	# lifts, which means they have to be held back by hand until then.
 	_stage.modulate.a = 0.0
@@ -299,7 +286,6 @@ func _reveal() -> void:
 
 	var tw := create_tween().set_parallel(true)
 	tw.tween_property(_veil, "color:a", 0.0, VEIL_LIFT).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(_hints, "modulate:a", 1.0, 0.5).set_delay(LIST_DELAY + 0.25)
 
 
 # --- Actions -----------------------------------------------------------------
