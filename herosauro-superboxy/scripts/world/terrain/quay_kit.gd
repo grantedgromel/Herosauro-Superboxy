@@ -20,6 +20,7 @@ extends RefCounted
 ## cafes, and it survives any distance the camera can reach.
 
 const MK := preload("res://scripts/world/terrain/masonry_kit.gd")
+const TerrainBatch := preload("res://scripts/world/terrain/terrain_batch.gd")
 
 
 ## A cafe parasol: mast, a shallow square canopy and its valance.
@@ -140,53 +141,145 @@ static func awning(canvas: MeshBaker, iron: MeshBaker, at: Vector3, along: Vecto
 		iron.add_beam(at + half * s, at + half * s + lip, 0.03)
 
 
-## The big iron sign frames that name the Gaia bank.
+## The big sign frames that name the Gaia bank.
 ##
-## Standing lattice frames carrying block letters, which is what the port houses
-## put on their roofs and hillside and what makes that bank instantly Porto from
-## anywhere on the river. Letters come from LandmarksBuilder's 5x7 alphabet, so
-## there is one font in the project and it is geometry rather than a Label3D that
-## would turn to face the camera.
-static func hillside_sign(board: MeshBaker, iron: MeshBaker, face: MeshBaker, at: Vector3,
-		yaw: float, text: String, cell: float) -> void:
+## THE THING THIS REPLACES. Round 2 raised the boards on legs to clear the lodge
+## roofs, which fixed the occlusion and produced something an adversarial critic
+## then found in all three establishing shots and called "the worst-made object
+## in the set": one continuous flat black quad with no thickness and no scaffold,
+## carrying square-edged lettering, clipping the rooftops behind it, and reading
+## "as a debug texture that was never replaced". Every one of those is a fair
+## description of a 20 m x 5 m box 10 cm thick with quads painted on it, seen at
+## ninety metres.
+##
+## WHAT THE REAL THING IS. Sandeman, Calem, Ferreira and Graham's on that bank are
+## freestanding three-dimensional letter frames on rooftop scaffolds: open
+## steelwork you can see through, two lattice planes braced apart in depth, and
+## individual steel letters standing proud of the front plane with daylight
+## between them. So that is what this builds now, and the three things that make
+## it read are, in order:
+##
+##   1. DEPTH. The truss is two braced planes, not one; the letters are extruded
+##      solids, not quads. Under a 34-degree key every upright has a lit side and
+##      a dark side, and each letter casts onto its own backing.
+##   2. OPENNESS. Nothing spans the full width. The only solid surfaces are one
+##      backing plate PER LETTER, so the gaps between glyphs are genuinely
+##      see-through and the object stops being a slab.
+##   3. CONTRAST, LOCALLY. Round 2's note that an open frame at ninety metres
+##      "resolved to a small dark smudge with no letters in it" was correct — pale
+##      lettering needs something dark immediately behind it. A per-letter plate
+##      gives each glyph that ground while leaving most of the frame open, which
+##      a full-width board cannot do.
+##
+## `sill` is the local height of the bottom chord: the caller works out what the
+## sign has to stand clear of and this makes legs that long. Anything shorter than
+## the roofline in front and round 2's occlusion fix is undone.
+static func hillside_sign(batch: TerrainBatch, at: Vector3, yaw: float, text: String,
+		cell: float, sill: float) -> void:
 	var xf := Transform3D(Basis(Vector3.UP, yaw), at)
+	var iron := batch.iron()
+	var board := batch.dark()
+	var face := batch.sign_face()
+
 	var chars := maxi(1, text.length())
 	var text_w := float(chars) * cell * 6.0
-	var hw := text_w * 0.5 + cell * 1.6
-	# SIX CELLS OF LEG, not one, and it is the difference between a sign and a
-	# sign you can read. Measured off 07_ribeira: the glyphs themselves resolve
-	# fine at this size — a 4.3 m cap at 90 m subtends about 28 px and C, O and R
-	# are individually identifiable at 1:1 — but the boards were standing with
-	# their sills less than a metre off the terrace, behind a row of lodges whose
-	# ridges are 6-9 m up, so the roofline ate the bottom two thirds of every
-	# letter and the words truncated to shapes. Raising the sill to cell * 6
-	# (3.7 m at cell 0.62) lifts the whole cap band clear of the ridges in front.
-	# It is also what the real hoardings are: block letters on long lattice legs
-	# standing ABOVE the lodge roofs, which is why they are visible from the
-	# river at all.
-	var sill := cell * 6.0
-	var top := sill + cell * 9.0
-	var legs := maxi(2, int(hw * 2.0 / 4.5))
+	var hw := text_w * 0.5 + cell * 1.1
+	# Seven cells of cap, half a cell of clearance above and below it.
+	var band := cell * 8.0
+	var top := sill + band
+	# Truss depth. Two planes a hand's width apart is a board with extra steps; at
+	# 1.5 m the back plane sits a whole letter-height behind the front one and the
+	# ties between them read AS ties, which is the point of building it at all.
+	var depth := maxf(1.5, cell * 2.4)
+	var bays := maxi(3, int(round(hw * 2.0 / 4.2)))
 
-	for i in range(legs + 1):
-		var px := lerpf(-hw, hw, float(i) / float(legs))
-		iron.add_beam(xf * Vector3(px, 0.0, 0.0), xf * Vector3(px, top, 0.0), 0.14)
-		# Raking back-stay, so the frame stands up rather than being pasted on.
-		iron.add_beam(xf * Vector3(px, top * 0.72, 0.0),
-				xf * Vector3(px, 0.0, -top * 0.5), 0.09)
-	for ty: float in [sill, top]:
-		iron.add_beam(xf * Vector3(-hw, ty, 0.0), xf * Vector3(hw, ty, 0.0), 0.12)
+	for i in range(bays + 1):
+		var px := lerpf(-hw, hw, float(i) / float(bays))
+		# Front plane heavier than the back: the back one carries no letters.
+		iron.add_beam(xf * Vector3(px, 0.0, 0.0), xf * Vector3(px, top, 0.0), 0.15)
+		iron.add_beam(xf * Vector3(px, 0.0, -depth), xf * Vector3(px, top, -depth), 0.11)
+		for ty: float in [sill, top]:
+			iron.add_beam(xf * Vector3(px, ty, 0.0), xf * Vector3(px, ty, -depth), 0.09)
+		# Rakers off the back feet. A frame this tall standing on one plane of legs
+		# is visibly unable to stand up, and the shadow the rakers throw down the
+		# terrace behind is a second reason to have them.
+		iron.add_beam(xf * Vector3(px, sill * 0.85, -depth),
+				xf * Vector3(px, 0.0, -depth - sill * 0.55), 0.09)
+		_sign_foot(batch, xf, px, 0.0)
+		_sign_foot(batch, xf, px, -depth)
 
-	# A solid ground behind the letters, not an open frame.
-	#
-	# The real hoardings are open steelwork with the sky through them, and the
-	# first version of this was too — which at ninety metres, seen against a
-	# terrace of white sheds, resolved to a small dark smudge with no letters in
-	# it at all. Light lettering needs something dark immediately behind it or the
-	# glyphs have nothing to be light AGAINST, and a board is what a painted sign
-	# is anyway once it has been repainted a few times.
-	board.add_box(Vector3(hw * 2.0, top - sill, 0.10),
-			xf * Transform3D(Basis(), Vector3(0.0, (sill + top) * 0.5, -0.05)))
+	# Chords: sill, top, and one at mid-leg so the tower under the letters is a
+	# braced tower rather than a row of sticks.
+	for ty: float in [sill * 0.5, sill, top]:
+		for pz: float in [0.0, -depth]:
+			iron.add_beam(xf * Vector3(-hw, ty, pz), xf * Vector3(hw, ty, pz), 0.11)
 
-	LandmarksBuilder.sign_text(face, xf, text, -text_w * 0.5 + cell * 0.5,
-			sill + cell * 1.0, cell)
+	# Web bracing in both planes, above and below the sill.
+	for i in bays:
+		var x0 := lerpf(-hw, hw, float(i) / float(bays))
+		var x1 := lerpf(-hw, hw, float(i + 1) / float(bays))
+		for pz: float in [0.0, -depth]:
+			iron.add_beam(xf * Vector3(x0, sill, pz), xf * Vector3(x1, top, pz), 0.065)
+			iron.add_beam(xf * Vector3(x1, sill, pz), xf * Vector3(x0, top, pz), 0.065)
+			iron.add_beam(xf * Vector3(x0, 0.0, pz), xf * Vector3(x1, sill * 0.5, pz), 0.06)
+			iron.add_beam(xf * Vector3(x1, sill * 0.5, pz), xf * Vector3(x0, sill, pz), 0.06)
+		# Plan bracing between the planes, alternating bay to bay.
+		var near_z := 0.0 if i % 2 == 0 else -depth
+		var far_z := -depth if i % 2 == 0 else 0.0
+		iron.add_beam(xf * Vector3(x0, top, near_z), xf * Vector3(x1, top, far_z), 0.06)
+
+	# The maintenance catwalk along the bottom chord. Every one of these hoardings
+	# has one, and it is a strong horizontal that a row of uprights needs.
+	iron.add_box(Vector3(hw * 2.0, 0.07, depth * 0.55),
+			xf * Transform3D(Basis(), Vector3(0.0, sill - 0.09, -depth * 0.28)))
+
+	# One backing plate per letter, set back so the letter stands off it. Spaces
+	# and unmapped characters get none, which is what opens the word gaps up.
+	for i in text.length():
+		if not LandmarksBuilder.SIGN_FONT.has(text[i]):
+			continue
+		var cx := -text_w * 0.5 + cell * 6.0 * (float(i) + 0.5) - cell * 0.5
+		board.add_box(Vector3(cell * 5.5, band, 0.09),
+				xf * Transform3D(Basis(), Vector3(cx, sill + band * 0.5, -0.12)))
+
+	# Solid letters, standing off the plates toward the river.
+	LandmarksBuilder.sign_text_solid(face, xf, text, -text_w * 0.5 + cell * 1.0,
+			sill + cell * 0.5, cell, cell * 0.55)
+
+
+## A spread footing under a sign leg.
+##
+## Two jobs, and the second is the one that matters. It is what a hoarding this
+## tall actually stands on — a poured pad, not a post pushed into paving — and it
+## is the geometry that gives the contact a value ramp. See base_collar() for why
+## contact darkening is being solved with geometry in this pass.
+static func _sign_foot(batch: TerrainBatch, xf: Transform3D, px: float, pz: float) -> void:
+	batch.dressed().add_box(Vector3(0.62, 0.34, 0.62),
+			xf * Transform3D(Basis(), Vector3(px, 0.17, pz)))
+	base_collar(batch.dark(), (xf * Vector3(px, 0.0, pz)), 0.46)
+
+
+## The dirt collar every post on a paved street has round its foot.
+##
+## Contact darkening in this scene is not arriving from the renderer. The
+## environment runs SSAO at intensity 1.6 with `ssao_light_affect = 0.15`, so the
+## occlusion term lands almost entirely on ambient — and under a 2.8-energy key in
+## a high-key daylight frame, ambient is a small fraction of what a sunlit paving
+## stone returns. That file belongs to the atmosphere stream and this pass does
+## not touch it.
+##
+## What geometry can do instead is put something at the contact that is genuinely
+## darker: a thin plate of the void material lying on the paving, wider than the
+## post. It is also a real thing — grit, moss and tar collect against a post base
+## and never get swept out — so it is not a cheat, it is the detail that was
+## missing.
+##
+## Deliberately NOT a gradient: there is no vertex-colour path in this pipeline,
+## and a hard-edged plate 40-100 m away is two pixels across and reads as a soft
+## one anyway. `lift` keeps it off the surface underneath; anything under a
+## centimetre z-fights on the web build's 24-bit depth buffer.
+static func base_collar(dark: MeshBaker, at: Vector3, radius: float,
+		lift: float = 0.02) -> void:
+	dark.add_box(Vector3(radius * 2.0, 0.014, radius * 2.0),
+			Transform3D(Basis(), at + Vector3(0.0, lift, 0.0)))
+

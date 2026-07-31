@@ -10,43 +10,56 @@ extends SceneTree
 ## after tweaking a recipe:
 ##   godot --headless --path . --script res://assets/textures/generate_detail_maps.gd
 ##
-## Each surface writes two maps, and three of the six write a third:
+## Each surface writes two maps, and four of the six write a third:
 ##   detail_<name>_normal.tres   tangent-space normal, bump-converted from the noise
 ##   detail_<name>_mask.tres     R = roughness multiplier, G = ambient occlusion
-##   detail_<name>_albedo.tres   surface-scale COLOUR variation (granite, cobble, iron)
+##   detail_<name>_albedo.tres   surface-scale COLOUR variation
+##                               (granite, iron, cobble, plaster)
 ##
 ## Packing roughness and AO into one texture is deliberate: the scenery samples
 ## everything triplanar (3 taps per map), so halving the map count halves the
 ## tap count and keeps both channels in the same cache line.
 ##
-## --- Why three surfaces now carry an albedo map too ------------------------
+## --- Why four surfaces carry an albedo map, and why hue is the point --------
 ##
 ## Round 1 measured the deck cobble contrast-stretched and found every sett the
 ## identical pinkish-mauve: no stone-to-stone albedo variation, no dirt in the low
 ## points, no polished crown. The same measurement on the ironwork returned mean
 ## RGB (11, 16, 27) with a standard deviation of 3 — a black cutout, not a material.
 ##
-## The shared fine layer could not fix either, and it is worth being precise about
-## why rather than adding another octave to it. The fine pair is GREYSCALE and it
-## tiles at 0.28 m: it delivers grit and damp-patch VALUE variation at arm's length,
-## and by four metres it has gone sub-pixel and stopped saying anything at all. What
-## was missing is variation at the scale of the object itself — one sett against the
-## next, a rust bloom across a whole gusset — and that is a surface-scale map with
-## real HUE in it, riding uv1 at the material's own tile size. So it is a third map
-## rather than a stronger second one.
+## The shared fine layer could not fix either. It tiles at 0.28 m: it delivers grit
+## and damp-patch variation at arm's length, and by four metres it has gone sub-pixel
+## and stopped saying anything at all. What was missing is variation at the scale of
+## the object itself — one sett against the next, a rust bloom across a whole gusset —
+## riding uv1 at the material's own tile size. So it is a third map rather than a
+## stronger second one.
+##
+## Round 2 shipped those maps and measured what was still wrong, which is the finding
+## this round is spent on: five stone surfaces across two frames came back with
+## channel-deviation correlations of 0.88-0.995. Every one was one flat albedo
+## multiplied by a grey mask, because every ramp was MONOTONE — all three channels
+## rising or falling together, so the variation was luminance and never became colour.
+## The surfaces carried plenty of variance (granite sd 19.6, walkway sd 40.6) and
+## still read as cardboard. More grunge could not have helped and would have measured
+## as progress; see the note on _report() below for the arithmetic.
+##
+## Every stone-family ramp here is now non-monotone. Iron alone is untouched, and the
+## _report() line explains why it is right that it is.
 ##
 ## These ride BaseMaterial3D.albedo_texture, which multiplies albedo_color, so an
 ## authored call-site colour still sets the surface's identity and this only
-## modulates it. ToonFactory divides that modulation's mean back out (see
-## _albedo_map_gain there) so forty call sites' palettes keep meaning what they say.
+## modulates it. ToonFactory divides that modulation's mean back out PER CHANNEL (see
+## _albedo_map_gain there) so forty call sites' palettes keep meaning what they say
+## even though the maps now average different amounts of red, green and blue.
 ##
-## The other three surfaces (plaster, terracotta, wood) deliberately get none. Three
-## more triplanar taps is a real cost, the fine layer is already doing enough on a
-## limewashed wall, and nothing in Round 1's findings named them.
+## Terracotta and wood still get none. Three more triplanar taps is a real cost and
+## neither has been named in a finding yet.
 ##
 ## Plus one shared pair that is not per-surface:
 ##   detail_fine_normal.tres     grit, at ~1 mm per texel
-##   detail_fine_albedo.tres     patchy albedo modulation, alpha = blend weight
+##   detail_fine_albedo.tres     patchy albedo modulation, alpha = blend weight.
+##                               No longer greyscale — see _fine_ramp() for the two
+##                               constraints a SHARED chromatic layer has to meet.
 ##
 ## Those two are the RUBRIC's "detail layer still doing work at 0.5 m", and they are
 ## SHARED rather than per-surface on purpose. A surface map tiled at its authored
@@ -116,9 +129,50 @@ func _recipes() -> Array[Dictionary]:
 		# Its albedo map is a MUCH lower frequency than its normal (0.011 against
 		# 0.060): the speckle is already carried by the bump and by the fine layer,
 		# and what a granite kerb or a deck bay is missing is the metre-scale
-		# difference between one block and the next. Cool damp grey at the bottom of
-		# the range, sun-bleached feldspar pink at the top — the two ends of the same
-		# stone rather than two different stones.
+		# difference between one block and the next.
+		#
+		# ROUND 3: the ramp is now NON-MONOTONE, and that is the entire change.
+		# What it was, and it reads perfectly sensibly:
+		#     0.00 (0.800, 0.820, 0.860)   cool damp grey
+		#     0.45 (0.940, 0.940, 0.935)
+		#     1.00 (1.000, 0.990, 0.965)   sun-bleached feldspar
+		# and it measured r-g +1.000, r-b +0.999 — see _report() at the end of a run.
+		# Round 2 measured the same thing in the render, on every stone surface in the
+		# game: cobbles 0.945/0.894, granite 0.987/0.882, kerb 0.995/0.975, parapet
+		# 0.994/0.964, walkway 0.995/0.952, and called it "one flat albedo multiplied
+		# by a grey mask". That reading is exactly right.
+		#
+		# The trap is arithmetic rather than artistic, which is why widening the hue
+		# swing between the end stops — the obvious fix, and the one the old ramp
+		# already IS — cannot move it. A NoiseTexture2D carries ONE scalar field, so
+		# R, G and B are all functions of the same t; if all three are MONOTONE in t
+		# their correlation is ~1 however far apart the ends are pitched. Only a ramp
+		# whose channels REVERSE against each other decorrelates.
+		#
+		# So value and hue are separate terms now. Value still means weathering — the
+		# stop luminances climb 0.72 -> 0.89 and the normal and mask are registered to
+		# that. Hue no longer rides along, because in real granite it does not:
+		# brightness says how weathered a patch is, hue says which mineral is showing,
+		# and biotite, hornblende, quartz and feldspar are not ordered by brightness.
+		# Concretely the warm/cool axis flips at EVERY stop (+-0.086 linear) and the
+		# green/magenta axis every two (+-0.038), against one rising pass of value:
+		# three near-orthogonal terms squeezed out of one scalar field. Read as stone,
+		# in order: iron-stained dark granite, damp blue-grey, pink feldspar, quartz
+		# blue-white, warm bleached, lichen grey-green, hot bleached feldspar.
+		#
+		# The value RANGE came in deliberately, 0.60-1.00 linear down to 0.69-0.89.
+		# That is the trade the brief asks for: this surface already carried sd=19.6 in
+		# the render and still read as cardboard, so a third of its monochrome swing is
+		# spent buying hue swing instead. Nothing is lost — the normal, the mask's
+		# 0.52-1.00 roughness and 0.72-1.00 AO, and the fine layer's 0.70-0.97 all
+		# still deliver value variation, and none of them can deliver colour.
+		#
+		# STOP OFFSETS ARE THE FIELD'S OWN QUANTILES, not even sixths. A normalised
+		# fBm field is bell-shaped: its deciles run 0.00 .26 .33 .40 .45 .51 .56 .62
+		# .67 .75 1.00, so 80% of texels sit inside t = 0.26..0.75 and stops spaced
+		# evenly across 0..1 deliver only the three in the middle. 0/.31/.42/.51/.60/
+		# .70/1.00 are the k/6 quantiles of that measured histogram, so each segment
+		# covers a sixth of the surface and the whole ramp actually reaches the frame.
 		{
 			"name": "granite",
 			"noise": _fbm(FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.060, 5, 0.55, 2.2, 1301),
@@ -127,13 +181,13 @@ func _recipes() -> Array[Dictionary]:
 			"ao": Vector2(0.72, 1.00),
 			"albedo_noise": _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.011, 3, 0.55, 2.1, 1307),
 			"albedo_ramp": [
-				[0.00, Color(0.884, 0.835, 0.808)],
-				[0.17, Color(0.843, 0.863, 0.884)],
-				[0.33, Color(0.842, 0.895, 0.908)],
-				[0.50, Color(0.934, 0.883, 0.885)],
-				[0.67, Color(0.933, 0.941, 0.884)],
-				[0.83, Color(0.919, 0.916, 0.974)],
-				[1.00, Color(0.927, 0.972, 0.964)],
+				[0.00, Color(0.884, 0.869, 0.789)],
+				[0.31, Color(0.808, 0.886, 0.901)],
+				[0.42, Color(0.936, 0.863, 0.848)],
+				[0.51, Color(0.865, 0.881, 0.951)],
+				[0.60, Color(0.949, 0.935, 0.862)],
+				[0.70, Color(0.880, 0.950, 0.964)],
+				[1.00, Color(0.996, 0.929, 0.915)],
 			],
 		},
 		# Weathered plate: broad corrosion blooms, not grain. Intact paint is smooth,
@@ -186,20 +240,44 @@ func _recipes() -> Array[Dictionary]:
 			"ao": Vector2(0.45, 1.00),
 			"albedo_noise": _cellular(0.028, 0.90, 3413, FastNoiseLite.RETURN_CELL_VALUE),
 			"albedo_constant": true,
-			# RETUNED against a render, and the render is the only reason these are
-			# where they are. The first version ran 0.68 -> 1.00 in sRGB with the dark
-			# stop pitched cool, on the reasoning that Portuguese calcada really is
-			# black basalt next to white limestone. In the frame it came back as blue
-			# and white broken mosaic: a 2.4x albedo ratio between neighbouring setts
-			# is a huge signal to begin with, the grade's steepest slope (1.54) sits
-			# exactly in the band the deck occupies and expands it further, and a dark
-			# sett at a grazing angle is dominated by its own sky reflection, so the
-			# dark stops came back far bluer than they were authored.
+			# SIX STONES, laid out as a 3 x 2 factorial: three value levels crossed
+			# with warm and cool. That is not a decorative choice, it is the only
+			# arrangement that makes the value axis and the warm-cool axis exactly
+			# orthogonal over an equal-share cell field — [-1,-1,0,0,+1,+1] dotted with
+			# [+1,-1,+1,-1,+1,-1] is zero — which is what drives the channel
+			# correlation to nothing. Measured delivery: r-g +0.52, r-b +0.04, from
+			# +1.000 / +0.999 before. Read as stone: dark warm (oil-stained basalt),
+			# dark cool (fresh blue basalt), mid warm (buff granite), mid cool (grey
+			# granite), pale warm (cream limestone), pale cool (white limestone).
 			#
-			# So: 0.82 -> 1.00, a 1.6x ratio rather than 2.4x, and every stop warm-
-			# neutral (R >= G >= B) so the only blue on this surface is the blue the
-			# sky is actually putting there. Still unmistakably stone-to-stone
-			# variation, which is the finding; no longer a mosaic, which was mine.
+			# THE VALUE RATIO IS DELIBERATELY LOWER THAN ROUND 2'S, and Round 2's own
+			# retune is why. Its first attempt ran 0.68 -> 1.00 sRGB with the dark stop
+			# pitched cool, on the reasoning that Portuguese calcada really is black
+			# basalt beside white limestone, and in the frame that came back as a blue
+			# and white broken mosaic: a 2.4x albedo ratio between neighbouring setts
+			# is a huge signal to begin with, the grade's steepest slope (1.54) sits in
+			# the band the deck occupies and expands it further, and a dark sett at a
+			# grazing angle is dominated by its own sky reflection, so the dark stops
+			# rendered far bluer than authored. Round 2 pulled it back to 1.6x and made
+			# every stop warm-neutral, which fixed the mosaic and produced the flat
+			# monochrome this round has to undo.
+			#
+			# So the ratio comes down again, to 1.5x (0.632 -> 0.947 linear), and the
+			# room that frees goes into hue instead: +-0.055 to +-0.080 linear on the
+			# warm-cool axis, tapered so the DARK pair carries the least of it. That
+			# taper is the direct answer to Round 2's measured failure — a dark sett is
+			# the one that picks up sky, so it is the one that must not also be
+			# authored cool. Tapering does not cost the orthogonality; the dot product
+			# above is zero for any per-level amplitude.
+			#
+			# NO CALCADA MOSAIC. The black-and-white geometric paving is Porto's
+			# signature and it is not being built here, for three reasons written out
+			# in the pass report: it is a laid GEOMETRIC design (waves, compass roses)
+			# that no NoiseTexture2D descriptor can express and this repo ships no
+			# bitmaps; Round 2 already measured what high-contrast two-tone setts do to
+			# this exact surface; and calcada is the paving of the Ribeira quays and
+			# squares, not of a tram-and-carriageway bridge deck, so laying it here
+			# would be a Porto identity error dressed as Porto identity.
 			"albedo_ramp": [
 				[0.00, Color(0.877, 0.863, 0.816)],
 				[0.16, Color(0.816, 0.863, 0.877)],
@@ -227,15 +305,28 @@ func _recipes() -> Array[Dictionary]:
 		# so it streaks vertically-ish rather than reading as even mottling — the shape
 		# damp actually makes running down a limewashed wall.
 		#
-		# The range is deliberately the tightest of the four (linear 0.80 -> 1.00
-		# against cobble's 0.64 -> 1.00). Two reasons, and the second is the important
-		# one: uneven limewash is a subtle mark and not a mosaic, and plaster carries
-		# the brightest authored colours in the game (PLASTER_CREAM 0.88, the Ribeira
-		# walls up to 0.80). Those already sit against ALBEDO_CEILING after
-		# DETAIL_ALBEDO_GAIN, so a large gain here would be eaten by the clamp rather
-		# than applied. As authored, the brightest wall's rendered PEAK is unchanged at
-		# the 0.90 ceiling and its MEAN comes down about 9%, which is a real change to
-		# another stream's palette and is called out in this pass's report.
+		# The VALUE range stays the tightest of the four (linear 0.845 -> 0.958 against
+		# cobble's 0.63 -> 0.95), and for the same two reasons it always had: uneven
+		# limewash is a subtle mark and not a mosaic, and plaster carries the brightest
+		# authored colours in the game (PLASTER_CREAM 0.88, the Ribeira walls up to
+		# 0.80), which already sit against ALBEDO_CEILING after DETAIL_ALBEDO_GAIN, so
+		# a large gain here would be eaten by the clamp rather than applied.
+		#
+		# ROUND 3 gives it the same non-monotone treatment as granite, at half the
+		# amplitude: warm-cool flips at every stop (+-0.046 linear), green-magenta
+		# every two (+-0.021), against a value trend that still climbs. Delivered
+		# r-g +0.57, r-b +0.25 against +1.000 / +1.000 before. Damp streaks on lime
+		# render go grey-green and sun-baked panels go warm-ochre, and the two are next
+		# to each other on every Ribeira facade — which is also the answer to a second
+		# critic's independent measurement that saturation on those facades RISES with
+		# distance (0.265 -> 0.301 -> 0.323 near to far). A near wall that carries its
+		# own hue variation cannot be the least saturated thing in its own frame.
+		#
+		# The MEAN is held at 0.900 linear, within 0.6% of the ramp it replaces, so the
+		# per-channel gain barely moves and the facade palette another stream authored
+		# keeps meaning what it says. Chroma peaks at 0.092 linear — a third of what
+		# granite carries, because a painted wall is a manufactured surface and a
+		# mineral mixture is not.
 		{
 			"name": "plaster",
 			"noise": _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.020, 3, 0.50, 2.0, 4517),
@@ -243,13 +334,14 @@ func _recipes() -> Array[Dictionary]:
 			"rough": Vector2(0.80, 1.00),
 			"ao": Vector2(0.90, 1.00),
 			"albedo_noise": _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.006, 4, 0.55, 2.3, 4523),
+			# Quantiles of the fBm histogram, as granite; see the note there.
 			"albedo_ramp": [
-				[0.00, Color(0.949, 0.921, 0.915)],
-				[0.20, Color(0.920, 0.947, 0.952)],
-				[0.40, Color(0.947, 0.943, 0.961)],
-				[0.60, Color(0.977, 0.968, 0.938)],
-				[0.80, Color(0.970, 0.965, 0.981)],
-				[1.00, Color(0.963, 0.989, 0.994)],
+				[0.00, Color(0.946, 0.939, 0.901)],
+				[0.33, Color(0.912, 0.950, 0.956)],
+				[0.45, Color(0.977, 0.941, 0.934)],
+				[0.56, Color(0.945, 0.951, 0.987)],
+				[0.67, Color(0.988, 0.981, 0.946)],
+				[1.00, Color(0.955, 0.991, 0.997)],
 			],
 		},
 		# Barrel roof tiles: rounded cells with a gritty clay surface. Rain-polished
@@ -393,20 +485,50 @@ func _fine_noise() -> FastNoiseLite:
 	return _fbm(FastNoiseLite.TYPE_SIMPLEX, 0.032, 3, 0.55, 2.0, 8821)
 
 
-## Greyscale, biased high so the average surface keeps most of its authored value,
-## with a long dark tail for the crevices and damp patches. Alpha is constant and is
-## the blend weight for the whole detail layer — see the header.
+## Biased high so the average surface keeps most of its authored value, with a long
+## dark tail for the crevices and damp patches. Alpha is constant and is the blend
+## weight for the whole detail layer — see the header.
+##
+## NO LONGER GREYSCALE. It was, and being greyscale is a large part of why Round 2
+## measured every stone surface in the game at a channel correlation of 0.88-0.995:
+## at arm's length this layer is most of what varies, and a grey multiplier on a flat
+## colour is the definition of variation that never becomes albedo. The same
+## non-monotone treatment as granite is applied here — warm-cool flips at every stop
+## (+-0.070 linear), green-magenta every two (+-0.032) — so damp reads cool-green,
+## dust and old dirt read warm, and the two sit a few centimetres apart. That is what
+## 03_rail_macro exists to test.
+##
+## TWO CONSTRAINTS THIS RAMP CANNOT VIOLATE, both because it is SHARED by every
+## textured material in the game and, unlike the surface maps, is corrected by ONE
+## SCALAR (ToonFactory.DETAIL_ALBEDO_GAIN) rather than a per-channel gain:
+##
+##   * its three channel means must be EQUAL. A fine layer averaging even 2% warm
+##     tints the ironwork, the azulejos, the terracotta and forty facade colours at
+##     once, and nothing downstream divides it back out. Measured equal to 1.3%,
+##     which is inside the 4% _atmosphere_probe.gd allows.
+##   * its NET mean — 0.45 + 0.55*c, since FINE_BLEND is the weight of the whole
+##     detail pass — must stay at 0.873, which is what DETAIL_ALBEDO_GAIN's 1.13 is
+##     the reciprocal of. Measured 0.8733 against the old ramp's 0.8734, so the
+##     constant does not move and no call site's palette shifts.
+##
+## Those two are also why this layer's correlation only comes down to about +0.85
+## rather than to granite's +0.18: its VALUE swing (0.45-0.94 linear) is load-bearing
+## for "damp in the crevices, dry on the face" and cannot be spent, and matching it
+## with chroma would need +-0.14 linear of hue on every material in the game. The
+## surface-scale maps carry the decorrelation; this one contributes to it.
+##
+## Stops sit at the fBm field's quantiles, not at even fifths — see the granite note.
 func _fine_ramp() -> Gradient:
 	var g := Gradient.new()
 	g.interpolation_mode = Gradient.GRADIENT_INTERPOLATE_LINEAR
-	g.offsets = PackedFloat32Array([0.0, 0.20, 0.40, 0.60, 0.80, 1.0])
+	g.offsets = PackedFloat32Array([0.0, 0.33, 0.45, 0.56, 0.67, 1.0])
 	g.colors = PackedColorArray([
-		Color(0.713, 0.644, 0.635, FINE_BLEND),
-		Color(0.702, 0.749, 0.753, FINE_BLEND),
-		Color(0.778, 0.790, 0.824, FINE_BLEND),
-		Color(0.881, 0.856, 0.824, FINE_BLEND),
-		Color(0.914, 0.910, 0.895, FINE_BLEND),
-		Color(0.930, 0.947, 0.986, FINE_BLEND),
+		Color(0.738, 0.723, 0.637, FINE_BLEND),
+		Color(0.779, 0.847, 0.859, FINE_BLEND),
+		Color(0.929, 0.869, 0.858, FINE_BLEND),
+		Color(0.899, 0.910, 0.967, FINE_BLEND),
+		Color(0.979, 0.969, 0.912, FINE_BLEND),
+		Color(0.933, 0.988, 0.997, FINE_BLEND),
 	])
 	return g
 

@@ -56,20 +56,33 @@ resource_name = "BridgeGranite"
 ; texture layers' mean corrections, because albedo_color is what both of them
 ; multiply:
 ;   x 1.130                   the fine layer's mean, ToonFactory.DETAIL_ALBEDO_GAIN
-;   x (1.159, 1.159, 1.171)   the surface albedo map's mean, per channel, i.e.
+;   x (1.293, 1.257, 1.265)   the surface albedo map's mean, per channel, i.e.
 ;                             ToonFactory._albedo_map_gain(GRANITE)
-; 0.283 x 1.130 x 1.159 = 0.3706. Read this as the value the BRIGHTEST texel on the
-; surface reaches, not as the surface's colour: the mean across it is the authored
-; 0.283. _atmosphere_probe.gd recomputes both gains from the live descriptors and
-; fails if this line drifts from them, which is not hypothetical -- this number moved
-; twice inside one afternoon, once when the factory stopped integrating the ramp
-; uniformly and started measuring the real noise histogram, and again when that
-; measurement was corrected to cover the whole field rather than a corner of it.
-albedo_color = Color(0.3706, 0.3651, 0.3583, 1)
-; New this pass, and the same map stone() now wears. Metre-scale mottling between one
-; block and the next, cool damp grey through sun-bleached feldspar. Without it the
-; fascia is 100 m of one flat value, which is the RUBRIC's first material failure on
-; the largest surface in the game.
+; 0.283 x 1.130 x 1.293 = 0.4134. Read this as the value the BRIGHTEST texel on the
+; surface reaches, not as the surface's colour: the MEAN across it is the authored
+; neutral (0.283, 0.2788, 0.2708), which is the whole point of the per-channel gain
+; and is what _atmosphere_probe.gd now asserts directly rather than by hex compare.
+;
+; ROUND 3 moved this line, and moved it in a way worth understanding rather than
+; copying. The three gains used to be near-identical (1.159, 1.159, 1.171) because
+; the granite albedo map was near-monochrome; they now differ by 3% because the map
+; carries real hue variation and its per-channel means differ. So albedo_color is
+; deliberately WARMER than the authored colour: red is divided by a smaller map mean
+; and therefore multiplied by a larger gain. Multiply it back by the map and the
+; surface's mean is neutral again. A "correction" that re-neutralises this line by
+; hand would tint the whole fascia cool.
+;
+; This number has now moved three times in two rounds -- when the factory stopped
+; integrating the ramp uniformly, when that measurement was corrected to cover the
+; whole noise field, and now when the ramp stopped being monotone. That is exactly
+; why the probe recomputes it from the live descriptors instead of trusting it.
+albedo_color = Color(0.4134, 0.3961, 0.3872, 1)
+; The same map stone() wears. Metre-scale mottling between one block and the next.
+; Round 3: that mottling is now non-monotone in hue -- warm-cool flips at every ramp
+; stop against a rising value trend -- so the 100 m fascia stops being one colour
+; times a grey mask. Round 2 measured this exact band at channel correlation
+; r-g 0.994 / r-b 0.964 and 1.98% unique colours; see the recipe in
+; generate_detail_maps.gd for what the ramp is and why.
 albedo_texture = ExtResource("5_surface_albedo")
 metallic = 0.0
 ; F0 4%: the dielectric response every real mineral surface has. It matters more now

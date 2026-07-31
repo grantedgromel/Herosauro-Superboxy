@@ -23,6 +23,11 @@ extends Node
 ##     for shard; two differently-seeded ones do not; and a shard's state at a
 ##     given AGE is the same answer whenever it is asked, which is the wall-clock
 ##     rule (ARCHITECTURE.md rule 5) made measurable.
+##   * WHERE THE DEBRIS ACTUALLY GOES. How high a fan climbs, how wide it opens
+##     and where it is by the end of its life. This is the check that catches the
+##     two ways a closed-form debris solve goes wrong without ever erroring: a
+##     bounce that reflects the whole path (chips climb away for ever) and a speed
+##     ramp that shares momentum by mass (chips leave the arena).
 ##   * THE SHOCKWAVE'S HONESTY. That the radius you can see and the radius that
 ##     can hit you never disagree by more than a few centimetres across a whole
 ##     sweep, and that its knockback points AWAY from the blast.
@@ -126,6 +131,7 @@ func _run() -> void:
 	await _check_burst_budget()
 	await _check_lifetimes_and_leaks()
 	await _check_determinism()
+	await _check_shards_settle()
 	await _check_shockwave()
 	await _check_rock_arc()
 	_drop_root()
@@ -427,6 +433,59 @@ func _check_determinism() -> void:
 	print("  -- the same shard at the same age, 25 frames later: %.6f m of drift" % drift)
 	_ok(drift < 1.0e-5,
 		"shard state is a pure function of age, not of the clock (%.6f m)" % drift)
+	await _drain()
+
+
+# --- Shards go up, and then they come down ------------------------------------
+
+## Two bugs this catches, both of which were live in this file's first draft and
+## neither of which is visible without a GPU:
+##
+##   * THE BOUNCE. Reflecting the whole ballistic path about the floor plane —
+##     two multiplies, correct for about a tenth of a second — makes the mirrored
+##     path keep accelerating upward, so every chip in the game climbs away off
+##     the deck for ever. The fix solves the first floor crossing and integrates a
+##     second arc from it. Measured here as a ceiling on the fan and a floor on
+##     where it ends up.
+##   * THE SPEED RAMP. Sharing the blow's MOMENTUM out by piece mass is the
+##     physically tempting thing to write and gives v proportional to 1/mass,
+##     which over this size ramp is a 3.6x multiplier: cobble at a slam's power
+##     came out at 39 m/s and left the arena on a 29 m arc.
+##
+## Both show up as the same number, so both are measured as one: how high the fan
+## goes, and where it is by the end.
+func _check_shards_settle() -> void:
+	# A slam's worth of power on the deck: the heaviest ground impact the game
+	# makes, and therefore the fastest chips in it.
+	var fx := ImpactFX.ground(self, Vector3(0.0, 2.0, 0.0), ToonFactory.Surface.COBBLE, 5.2, 1.6)
+	_ok(fx != null, "a slam-strength ground burst for the settling check")
+	if fx == null:
+		return
+
+	# The burst simulates in its own local space with the contact plane at zero,
+	# so these are heights above the deck.
+	var apex := -INF
+	var apex_reach := 0.0
+	var resting := -INF
+	var below := 0.0
+	for i in fx.shard_count():
+		for step in 40:
+			var t: float = ImpactFX.GROUND_LIFE * float(step) / 39.0
+			var p: Vector3 = fx.sample_shard(i, t).origin
+			apex = maxf(apex, p.y)
+			apex_reach = maxf(apex_reach, Vector2(p.x, p.z).length())
+			below = minf(below, p.y)
+		resting = maxf(resting, fx.sample_shard(i, ImpactFX.GROUND_LIFE).origin.y)
+
+	print("  -- a slam's chips: highest %.2f m, furthest %.2f m out, deepest %.3f m below the deck, highest at end of life %.2f m"
+		% [apex, apex_reach, below, resting])
+	# Head height on the giant is nine metres; chips off the deck must stay well
+	# inside the fight, not leave the frame.
+	_ok(apex < 6.0, "the fan stays inside the fight (%.2f m at its highest)" % apex)
+	_ok(apex_reach < 9.0, "...and inside its own bounding box (%.2f m at its widest)" % apex_reach)
+	_ok(below > -0.05, "no chip sinks through the deck it landed on (%.3f m)" % below)
+	_ok(resting < 0.75,
+		"every chip is back on the deck by the end of its life (%.2f m)" % resting)
 	await _drain()
 
 

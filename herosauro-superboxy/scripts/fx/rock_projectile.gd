@@ -67,6 +67,12 @@ const LAND_POWER := 1.5
 const LAND_RADIUS := 1.8
 
 var _settling: bool = false
+## The rock's own masonry is thrown exactly once. `_settling` cannot stand in for
+## this: a rock that lands on a hero throws its rubble immediately and is freed in
+## the same call, and `_physics_process` can still run once more on a node queued
+## for deletion — which without this flag would put a second burst on the deck out
+## of a rock that is not there any more.
+var _crumbled: bool = false
 var _settle_left: float = 0.0
 var _life: float = 0.0
 var _mesh: MeshInstance3D = null
@@ -188,6 +194,7 @@ func _on_body_entered(body: Node) -> void:
 				travel = dir
 			ImpactFX.spark(self, contact, travel, ToonFactory.Surface.FLAT, 1.4)
 			# ...and the rock itself comes apart on him.
+			_crumbled = true
 			ImpactFX.smash(self, global_position, fx_surface, _radius * 0.8, travel)
 		queue_free()
 	elif body is PropBody:
@@ -238,7 +245,8 @@ func _crumble(delta: float) -> void:
 	# it does not deflate evenly from the moment it touches down.
 	var shrink: float = clampf((k - 0.34) / 0.66, 0.0, 1.0)
 	_mesh.scale = _mesh_scale * (1.0 - shrink * shrink)
-	if _settle_left <= 0.0 and _mesh.scale.length_squared() > 0.0:
+	if _settle_left <= 0.0 and not _crumbled:
+		_crumbled = true
 		_mesh.scale = Vector3.ZERO
 		# The rock's last act: its own material, its own size, no push, so the
 		# pieces simply drop where the boulder was.

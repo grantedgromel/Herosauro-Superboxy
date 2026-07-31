@@ -419,27 +419,62 @@ func _check_materials() -> void:
 	# measures it off a 96-square rasterisation of the noise field; this recomputes it
 	# at 160, so a mismatch means either the factory's sample resolution has stopped
 	# converging or the descriptors on disk have been regenerated into something it is
-	# no longer reasoning about. Both have already happened once each this round --
-	# see the note above _albedo_map_gain in toon_factory.gd.
-	for entry in [[ToonFactory.Surface.GRANITE, "granite"],
-			[ToonFactory.Surface.COBBLE, "cobble"], [ToonFactory.Surface.IRON, "iron"],
-			[ToonFactory.Surface.PLASTER, "plaster"]]:
+	# no longer reasoning about. Both have already happened once each -- see the note
+	# above _albedo_map_gain in toon_factory.gd.
+	#
+	# Round 3 added the second half of this table: the CHANNEL CORRELATION each map
+	# delivers. That is the property the round was spent buying, and without a gate on
+	# it the next edit that quietly re-flattens a ramp passes silently -- which is
+	# precisely how the game arrived at five stone surfaces measuring 0.88-0.995 in a
+	# render with nothing in the tree saying anything was wrong.
+	#
+	# WHY THE THRESHOLDS ARE LOOSE. These are regression gates, not pins. A monotone
+	# ramp -- every channel rising or falling together, which is what all five maps
+	# were -- lands at +0.99 or above however wide its hue swing is, because R, G and
+	# B are then all monotone functions of one scalar field. Anything under about 0.8
+	# has real reversals in it. So the gate sits where the two populations separate,
+	# and leaves a retune free to move inside it.
+	for entry in [[ToonFactory.Surface.GRANITE, "granite", 0.80, 0.50],
+			[ToonFactory.Surface.COBBLE, "cobble", 0.80, 0.50],
+			[ToonFactory.Surface.IRON, "iron", 1.01, 1.01],
+			[ToonFactory.Surface.PLASTER, "plaster", 0.85, 0.55]]:
 		var surface: int = entry[0]
 		var label: String = entry[1]
+		var max_rg: float = entry[2]
+		var max_rb: float = entry[3]
 		var gain := ToonFactory._albedo_map_gain(surface)
-		var measured: Variant = _map_mean(ToonFactory._ALBEDO_MAPS[surface])
+		var measured: Variant = _map_stats(ToonFactory._ALBEDO_MAPS[surface])
 		if measured == null:
 			print("  %-10s gain %s   (texture not rasterised; mean unchecked)"
 					% [label, gain.to_html(false)])
 			continue
-		var mean: Color = measured
+		var st: Dictionary = measured
+		var mean: Color = st["mean"]
 		var net := Color(gain.r * mean.r, gain.g * mean.g, gain.b * mean.b)
-		print("  %-10s gain (%.3f %.3f %.3f) x measured mean (%.3f %.3f %.3f) = (%.3f %.3f %.3f)"
-				% [label, gain.r, gain.g, gain.b, mean.r, mean.g, mean.b, net.r, net.g, net.b])
+		print("  %-10s gain (%.3f %.3f %.3f) x mean (%.3f %.3f %.3f) = (%.3f %.3f %.3f)   corr r-g %+.3f r-b %+.3f   chroma %.3f"
+				% [label, gain.r, gain.g, gain.b, mean.r, mean.g, mean.b, net.r, net.g,
+					net.b, st["rg"], st["rb"], st["chroma"]])
 		for ch in [net.r, net.g, net.b]:
 			if absf(ch - 1.0) > 0.04:
 				_fail("%s albedo map's gain leaves a net %.3f; it tints every %s surface in the game"
 						% [label, ch, label])
+		if absf(st["rg"]) > max_rg or absf(st["rb"]) > max_rb:
+			_fail("%s albedo map is monochrome: channel correlation r-g %+.3f r-b %+.3f (limits %.2f / %.2f). Its variation multiplies all three channels together, so it is a grey mask and never becomes colour."
+					% [label, st["rg"], st["rb"], max_rg, max_rb])
+
+	# IRON IS DELIBERATELY EXEMPT from the correlation gate above (limits 1.01), and
+	# it is the one map that should be. Its ramp runs intact paint -> chalked edge ->
+	# oxide bloom, all three channels falling together, so it measures r-g +0.995 --
+	# and it is also the only surface in either Round 2 frame the critic named as
+	# behaving like real matter. The reason is amplitude, not correlation: rust is a
+	# 0.41-linear chroma event between one end of the ramp and the other, three times
+	# any stone's, so the hue difference is enormous even though the channels are
+	# ordered. That is what a real oxide does and it is what gets asserted here
+	# instead. Nothing about this pass touched the iron maps.
+	var iron_st: Variant = _map_stats(ToonFactory._ALBEDO_MAPS[ToonFactory.Surface.IRON])
+	if iron_st != null and (iron_st as Dictionary)["chroma"] < 0.25:
+		_fail("the iron albedo map's chroma range is %.3f; rust has stopped being a colour event"
+				% (iron_st as Dictionary)["chroma"])
 
 	# (e) THE DECK MATERIAL. It is hand-written rather than built by the factory, and
 	# Round 1 found out what that costs: detail_blend_mode was 2, the comment beside it
@@ -459,16 +494,86 @@ func _check_materials() -> void:
 		_fail("the deck material lost its close-range detail layer")
 	if deck.albedo_texture == null:
 		_fail("the deck material has no surface-scale albedo map; the fascia is one flat value")
-	# Its albedo_color is hand-carried and has to match what the factory would compute.
-	var deck_gain := ToonFactory._albedo_map_gain(ToonFactory.Surface.GRANITE)
+
+	# WHAT THIS ASSERTION IS FOR, restated in Round 3 because the old form stopped
+	# being the honest test.
+	#
+	# It used to compare albedo_color against authored x DETAIL_ALBEDO_GAIN x
+	# _albedo_map_gain, on the red channel only. That checked that the hand-written
+	# .tres agreed with the factory's arithmetic -- but the factory's arithmetic was
+	# also the thing under test, so the two could drift together and still pass, and
+	# a single-channel compare could not see a map that had gone chromatic. It also
+	# failed the moment the albedo maps stopped being monochrome, which is the change
+	# this round exists to make: the three gains now differ by 3%, so albedo_color is
+	# deliberately warmer than the colour it stands for and no hex constant means
+	# anything on its own.
+	#
+	# The property that actually matters is end-to-end and survives hue-varying
+	# albedo: THE MEAN ALBEDO THE SURFACE PRESENTS EQUALS THE COLOUR THAT WAS
+	# AUTHORED, per channel. albedo_color is multiplied by two texture layers before
+	# it reaches the frame, so
+	#
+	#     albedo_color[c] x surface_map_mean[c] x fine_net_mean  ==  authored[c]
+	#
+	# is the invariant, and it is measured from the live descriptors on both sides
+	# rather than recomputed from the same constants the material was built with.
+	# That is strictly stronger: it fails if the .tres drifts, if a ramp is
+	# regenerated darker or lighter, if the per-channel gain stops being per-channel,
+	# or if DETAIL_ALBEDO_GAIN stops being the reciprocal of what the fine layer
+	# actually does -- none of which the old form could see.
+	#
+	# 3% tolerance: the two means are Monte-Carlo'd off 160-square and 128-square
+	# rasterisations of different noise fields, and the factory's own gain is measured
+	# at 96, so a couple of percent is sampling noise rather than drift. A real
+	# mistake here is 10% or more -- every one this file has caught was.
 	var authored := Color(0.283, 0.2788, 0.2708)
-	var expect := Color(
-		authored.r * ToonFactory.DETAIL_ALBEDO_GAIN * deck_gain.r,
-		authored.g * ToonFactory.DETAIL_ALBEDO_GAIN * deck_gain.g,
-		authored.b * ToonFactory.DETAIL_ALBEDO_GAIN * deck_gain.b)
-	if absf(deck.albedo_color.r - expect.r) > 0.01:
-		_fail("deck albedo %s does not carry both texture gains; expected %s"
-				% [deck.albedo_color.to_html(false), expect.to_html(false)])
+	var deck_map: Variant = _map_stats(ToonFactory._ALBEDO_MAPS[ToonFactory.Surface.GRANITE])
+	var fine_net: Variant = _fine_net_mean()
+	if deck_map == null or fine_net == null:
+		_fail("the deck material's texture means could not be measured; the check would pass vacuously")
+	else:
+		var map_mean: Color = (deck_map as Dictionary)["mean"]
+		var fnet: Color = fine_net
+		var presented := Color(
+			deck.albedo_color.r * map_mean.r * fnet.r,
+			deck.albedo_color.g * map_mean.g * fnet.g,
+			deck.albedo_color.b * map_mean.b * fnet.b)
+		print("  deck mean    albedo_color x surface map x fine layer = (%.4f %.4f %.4f)  vs authored (%.4f %.4f %.4f)"
+				% [presented.r, presented.g, presented.b, authored.r, authored.g, authored.b])
+		for pair in [["R", presented.r, authored.r], ["G", presented.g, authored.g],
+				["B", presented.b, authored.b]]:
+			var got: float = pair[1]
+			var want: float = pair[2]
+			if absf(got - want) > want * 0.03:
+				_fail("the deck fascia presents %s = %.4f where %.4f was authored (%.1f%% off). albedo_color %s no longer carries both texture layers' means."
+						% [pair[0], got, want, 100.0 * (got / want - 1.0),
+							deck.albedo_color.to_html(false)])
+
+	# THE FINE LAYER'S THREE CHANNEL MEANS MUST BE EQUAL, and this is new because the
+	# layer is new: Round 3 made it chromatic, and it is SHARED by every textured
+	# material in the game while being corrected by ONE SCALAR
+	# (ToonFactory.DETAIL_ALBEDO_GAIN) rather than by a per-channel gain. So a fine
+	# ramp that averages 2% warm tints the ironwork, the azulejos, the terracotta and
+	# forty facade colours at once, and nothing downstream divides it back out. The
+	# surface maps are free to average any colour they like; this one is not.
+	if fine_net != null:
+		var fnet2: Color = fine_net
+		var lo: float = minf(fnet2.r, minf(fnet2.g, fnet2.b))
+		var hi: float = maxf(fnet2.r, maxf(fnet2.g, fnet2.b))
+		print("  fine mean    net multiplier (%.4f %.4f %.4f)   spread %.2f%%   1/mean %.4f vs DETAIL_ALBEDO_GAIN %.4f"
+				% [fnet2.r, fnet2.g, fnet2.b, 100.0 * (hi / lo - 1.0),
+					3.0 / (fnet2.r + fnet2.g + fnet2.b), ToonFactory.DETAIL_ALBEDO_GAIN])
+		if hi / lo - 1.0 > 0.02:
+			_fail("the shared fine layer averages %.2f%% off neutral; it tints every textured material in the game and one scalar gain cannot undo it"
+					% (100.0 * (hi / lo - 1.0)))
+		# ...and DETAIL_ALBEDO_GAIN must be its reciprocal, which nothing asserted
+		# before. If it is not, every authored colour in the game is off by the
+		# difference -- silently, because the error is a uniform scale.
+		var ideal: float = 3.0 / (fnet2.r + fnet2.g + fnet2.b)
+		if absf(ToonFactory.DETAIL_ALBEDO_GAIN / ideal - 1.0) > 0.03:
+			_fail("DETAIL_ALBEDO_GAIN is %.4f but the fine layer's measured mean wants %.4f; every authored colour is scaled %.1f%% wrong"
+					% [ToonFactory.DETAIL_ALBEDO_GAIN, ideal,
+						100.0 * (ToonFactory.DETAIL_ALBEDO_GAIN / ideal - 1.0)])
 
 	# The cache is what collapses two hundred facades onto a handful of materials.
 	# Snapping metallic before the key is built is supposed to make it collapse
@@ -497,7 +602,14 @@ func _check_materials() -> void:
 ##
 ## Returns null only if the descriptor is missing a piece, in which case the caller
 ## says so rather than passing vacuously.
-func _map_mean(tex: NoiseTexture2D) -> Variant:
+## Returns { mean: Color, rg: float, rb: float, chroma: float } or null.
+##
+## `rg` / `rb` are the per-channel correlations of the linear colour the map
+## delivers over its own noise histogram — the Round 3 metric. They are computed
+## here rather than read from generate_detail_maps.gd's own report for the same
+## reason the mean is: that script is an authoring tool that is not run in CI, and
+## a gate that trusts the tool it is gating is not a gate.
+func _map_stats(tex: NoiseTexture2D) -> Variant:
 	if tex == null or tex.color_ramp == null:
 		return null
 	var size := 160
@@ -505,7 +617,11 @@ func _map_mean(tex: NoiseTexture2D) -> Variant:
 	if img == null:
 		return null
 	var ramp: Gradient = tex.color_ramp
-	var sum := Color(0.0, 0.0, 0.0)
+	var s := [0.0, 0.0, 0.0]
+	var ss := [0.0, 0.0, 0.0]
+	var s_rg := 0.0
+	var s_rb := 0.0
+	var chroma := 0.0
 	for y in size:
 		for x in size:
 			# The noise image is greyscale, so its red channel IS the field value, and
@@ -513,7 +629,53 @@ func _map_mean(tex: NoiseTexture2D) -> Variant:
 			# carries a source_color hint, so what multiplies ALBEDO is the LINEAR
 			# value of an sRGB-authored stop.
 			var c := ramp.sample(img.get_pixel(x, y).r).srgb_to_linear()
-			sum += Color(c.r, c.g, c.b)
+			s[0] += c.r
+			s[1] += c.g
+			s[2] += c.b
+			ss[0] += c.r * c.r
+			ss[1] += c.g * c.g
+			ss[2] += c.b * c.b
+			s_rg += c.r * c.g
+			s_rb += c.r * c.b
+			chroma = maxf(chroma, maxf(c.r, maxf(c.g, c.b)) - minf(c.r, minf(c.g, c.b)))
+	var n := float(size * size)
+	var m := [s[0] / n, s[1] / n, s[2] / n]
+	var sd: Array[float] = []
+	for ch in 3:
+		sd.append(sqrt(maxf(ss[ch] / n - m[ch] * m[ch], 0.0)))
+	return {
+		"mean": Color(m[0], m[1], m[2]),
+		"rg": (s_rg / n - m[0] * m[1]) / maxf(sd[0] * sd[1], 1e-9),
+		"rb": (s_rb / n - m[0] * m[2]) / maxf(sd[0] * sd[2], 1e-9),
+		"chroma": chroma,
+	}
+
+
+## The per-channel mean of what the shared fine layer actually multiplies ALBEDO by.
+##
+## Not the ramp's mean: Godot's detail pass is
+##     detail = mix(ALBEDO, ALBEDO * detail_tex.rgb, detail_tex.a)
+## so the NET multiplier is (1 - a) + a * c, with `a` the map's own alpha. That is
+## the quantity DETAIL_ALBEDO_GAIN is the reciprocal of, and measuring the ramp
+## without the blend would be 45% wrong.
+##
+## 128-square rather than 160: this field is a 3-octave simplex at 0.032, an order of
+## magnitude smoother than the cellular maps, and it converges long before there.
+func _fine_net_mean() -> Variant:
+	var tex: NoiseTexture2D = ToonFactory._FINE_ALBEDO
+	if tex == null or tex.color_ramp == null:
+		return null
+	var size := 128
+	var img := ToonFactory.sample_noise(tex, size)
+	if img == null:
+		return null
+	var ramp: Gradient = tex.color_ramp
+	var a: float = ramp.colors[0].a
+	var sum := Color(0.0, 0.0, 0.0)
+	for y in size:
+		for x in size:
+			var c := ramp.sample(img.get_pixel(x, y).r).srgb_to_linear()
+			sum += Color(1.0 - a + a * c.r, 1.0 - a + a * c.g, 1.0 - a + a * c.b)
 	var n := float(size * size)
 	return Color(sum.r / n, sum.g / n, sum.b / n)
 

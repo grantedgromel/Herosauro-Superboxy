@@ -189,10 +189,14 @@ static func front_x(side: float, level: int, z: float) -> float:
 
 
 ## A level's platform height at `z`, at its front edge and before camber.
+##
+## No longer faded toward the water downstream of BANK_Z_NEAR. That fade used to
+## live here and in _upland_y(), and it applied to the WHOLE WIDTH of the bank at
+## once — see _headland_y() for what that produced and what replaced it.
 static func terrace_top(side: float, level: int, z: float) -> float:
 	var levels := _levels(side)
 	var row: Dictionary = levels[clampi(level, 0, levels.size() - 1)]
-	return lerpf(WATER_Y, float(row["top"]) + _drift(side, level, z), _end_fade(z))
+	return float(row["top"]) + _drift(side, level, z)
 
 
 ## Height of the ground at (x, z) — the query placement code should use, and the
@@ -214,16 +218,21 @@ static func ground_height(x: float, z: float) -> float:
 		return WATER_Y
 	if side > 0.0 and ax >= BLUFF_TOE_X and _bluff_window(z) > 0.02:
 		return _bluff_y(ax, z)
+	var land := WATER_Y
 	if ax >= absf(front_x(side, levels.size(), z)):
-		return _upland_y(side, ax, z)
-
-	for l in range(levels.size() - 1, -1, -1):
-		var f := absf(front_x(side, l, z))
-		if ax >= f:
+		land = _upland_y(side, ax, z)
+	else:
+		for l in range(levels.size() - 1, -1, -1):
+			var f := absf(front_x(side, l, z))
+			if ax < f:
+				continue
 			var top := terrace_top(side, l, z)
-			return MK.surface_y(f, absf(front_x(side, l + 1, z)), top, top + _back_fall(l),
+			land = MK.surface_y(f, absf(front_x(side, l + 1, z)), top, top + _back_fall(l),
 					_crown(l), 0.16, _land_key(side) + l, ax, z)
-	return WATER_Y
+			break
+	if z > BANK_Z_NEAR:
+		return _headland_y(side, ax, z, land)
+	return land
 
 
 ## Where buildings go on one bank: one plot per house, alleys already subtracted,
@@ -662,55 +671,82 @@ static func _build_lodge_yard(near: TerrainBatch, seed: int) -> void:
 					2 + int(MK.hash01(seed + 83, i) * 3.0), seed + i * 29)
 
 
-## The port houses' names on the Gaia hillside.
+# --- Gaia hoardings ----------------------------------------------------------
+
+## World Y the lettering band starts at, i.e. the sign's bottom chord.
 ##
-## Arguably the single most recognisable Porto identity cue there is: from
-## anywhere on the river the far bank is a row of white sheds under three-metre
-## letters. The lodges themselves are placed by the placement stream, so these
-## frames stand on the terrain that holds them up — on the first terrace behind
-## the cais, where the real hillside boards are, angled to face the bridge.
+## Not a leg length: the legs are however long it takes to reach this from the
+## terrace under them. Round 2 set the sill as a multiple of the cell, which
+## meant the clearance moved whenever the type size did, and the boards ended up
+## cutting through the lodge roofs in front of them.
 ##
-## Invented names only, matching the ones LandmarksBuilder puts on the lodge
-## roofs — the real houses are trademarks and this is not the place to borrow one.
+## 1.8 is measured against the three shot vantages. The Gaia waterfront lodges
+## sit on a platform at y = -9.6 and reach a ridge at about y = +1.0. Sighting
+## from 02_deck_eye — the lowest camera of the three, at y = 3.6 — over a ridge at
+## x = 65 to a sign at x = 74 puts the grazing line at y = 0.74, so anything from
+## about 0.8 up is clear of the roofline in every shot. 1.8 keeps a metre of
+## daylight under the letters, which is what makes them read as standing ABOVE the
+## roofs rather than resting on them.
+const SIGN_BAND_Y := 1.8
+
+## Where the hoardings stand, in |x| off the first terrace's front edge.
+##
+## The terrace is 4.6 m of street between the parapet and the building line, and
+## the truss needs about 3.6 m of that: half a metre of sign each side of the leg
+## line (it runs nearly along the bank, so its width barely spends any x), plus
+## 2.4 m of depth and rakers behind. 1.5 centres that in the street with a
+## half-metre of clearance at both ends.
+const SIGN_SETBACK := 1.5
+
+## Yaw of the hoardings. -1.5 rad is 86 degrees: near enough square to the bank
+## that a 19 m frame spends only +-0.7 m of the terrace's x, which is the only
+## reason it fits at all. Round 2 used -0.70, which turned the frame 40 degrees
+## into the channel and swept ELEVEN metres of x — a terrace 4.6 m wide cannot
+## hold that, which is how the boards came to intersect the buildings behind them
+## and to overhang the retaining wall in front.
+##
+## It is also the better read. At -1.5 the sign is seen at 38-42 degrees off its
+## own normal from every shot vantage, so it sits in perspective like a building
+## instead of presenting flat to the lens like a billboard.
+const SIGN_YAW := -1.5
+
+
+## The port houses' names on the Gaia bank.
+##
+## From anywhere on the river the far bank is a row of white sheds under big
+## letters, and that is one of the strongest Porto identity cues available. What
+## makes or breaks it is the number of them and the space between them: round 2
+## put three boards at z = -52, -74 and -96, each up to 24 m wide and turned 40
+## degrees toward the camera, and from all three shot vantages they OVERLAPPED —
+## the near board's panel ate the far board's last letters. That is where the
+## critic's "QUIN ... CORV, truncated mid-word at both panel edges" came from. The
+## glyphs were never clipped; the boards were in front of each other.
+##
+## Two boards now, 24 m apart in Z and each about 19 m wide, which measures out at
+## 10-40 px of clear gap between them from every vantage and a complete word in
+## each. Every letter of every name fits: a short invented name at a legible cap
+## beats a long one cut in half.
 static func _build_gaia_signage(near: TerrainBatch, seed: int) -> void:
-	var iron := near.iron()
-	var face := near.sign_face()
-	# z, name, cell size. The cell sets the cap height: seven cells, so 0.34 gives
-	# 2.4 m of letter, which is about 25 px at these distances — readable, and
-	# about what the real hoardings subtend from the deck.
+	# z, name, cell size. The cell is the letter's stroke unit and the cap is seven
+	# of them, so 0.58 gives a 4.1 m letter — about 26 px of cap height from
+	# 07_ribeira at 116 m, which round 2 measured as roughly the least that
+	# resolves as a WORD rather than as texture.
 	#
-	# All well upstream. The boards stand on the second Gaia terrace at |x| ~ 78,
-	# and the frame only opens far enough sideways to include that once it is 85 m
-	# or so deep: closer in, a sign there is outside 07_ribeira's 55-degree
-	# horizontal cone entirely, which is what the first placement did.
-	# One word each, and short ones. The frame is sized to the string — six cells
-	# per character — so "CAVES DO CORVO" at cell 0.34 comes out THIRTY METRES
-	# wide, which is a motorway gantry rather than a lodge hoarding. The real
-	# boards on that bank are 15-25 m and carry the house name only.
-	#
-	# The cell is the letter's stroke unit and the cap height is seven of them, so
-	# 0.62 is a 4.3 m letter. That is deliberately large: these stand 90-115 m from
-	# the deck, where 4.3 m is about 30 px of cap height — roughly a headline on a
-	# page held at arm's length, which is the least that resolves as a WORD rather
-	# than as texture.
+	# Both z values are chosen to clear the terrace-edge cypresses, which stand at
+	# |x| 73.8-75.4 on this same street at z = -108, -84, -61, -37, -13 and +10.
+	# A 19 m frame centred on -72 or -96 keeps 2 m of daylight off the nearest.
 	var boards := [
-		{"z": -74.0, "text": "CORVO", "cell": 0.62},
-		{"z": -96.0, "text": "QUINTA", "cell": 0.58},
-		{"z": -52.0, "text": "DOURO", "cell": 0.52},
+		{"z": -72.0, "text": "CORVO", "cell": 0.58},
+		{"z": -96.0, "text": "DOURO", "cell": 0.58},
 	]
 	for i in boards.size():
 		var b: Dictionary = boards[i]
 		var z := float(b["z"])
-		var x := absf(front_x(GAIA, 1, z)) + 3.0 + MK.hash01(seed + 91, i) * 2.5
-		# Turned to face the bridge, not square to the bank: a hoarding meant to be
-		# read from the water is angled at the water. Basis(UP, yaw) sends the
-		# lettering's own +Z to (sin yaw, 0, cos yaw), and the deck sits at -x and
-		# +z from these boards, so the yaw is negative and shallow. Square to the
-		# bank (+PI/2) would point the letters straight into the hillside behind.
-		var yaw := -0.70 + MK.hash_sym(seed + 93, i) * 0.20
-		QK.hillside_sign(near.dark(), iron, face,
-				Vector3(x, ground_height(x, z) - 0.1, z), yaw,
-				String(b["text"]), float(b["cell"]))
+		var x := absf(front_x(GAIA, 1, z)) + SIGN_SETBACK
+		var base := ground_height(x, z)
+		QK.hillside_sign(near, Vector3(x, base, z),
+				SIGN_YAW + MK.hash_sym(seed + 93, i) * 0.08,
+				String(b["text"]), float(b["cell"]), SIGN_BAND_Y - base)
 
 
 # --- Hillside behind the top terrace -----------------------------------------
@@ -860,41 +896,133 @@ static func _build_bluff(near: TerrainBatch, far: TerrainBatch, seed: int) -> vo
 
 # --- Headland ----------------------------------------------------------------
 
-## Downstream of BANK_Z_NEAR the terraces sink into the water. Bare rock with a
-## rubble toe: this is the last thing before open river, and a manicured quay
-## ending in mid-air is worse than a natural one.
+## How steeply the point's rock rises inland off its own waterline. 0.55 is about
+## 29 degrees: steep enough that only the first couple of metres are within a
+## metre of the surface, which is what stops the shore reading as a beach.
+const HEADLAND_SLOPE := 0.55
+
+## How far past the top terrace the shoreline has swept by the tip of the point.
+## Anything less and the last row of land is still standing when the modelled
+## reach runs out, which is a cliff in mid-river.
+const HEADLAND_OVERRUN := 8.0
+
+
+## Signed world x of the WATERLINE at `z` — the line where the bank goes under.
+##
+## Upstream of BANK_Z_NEAR that is simply the quay face. Downstream it sweeps
+## inland, so the bank narrows to a point instead of ending at a straight cut
+## across the river.
+##
+## This exists because the old model faded the bank's HEIGHT to the water over the
+## last sixteen metres while leaving its PLAN alone, and a critic scored the result
+## in 06_river_wide as "a pale tan low-poly terrain sheet with hard visible
+## triangle facets, punching through the granite quay wall and lying flat across
+## the river surface, with a hard cut edge and no shoreline". That is exactly what
+## the arithmetic produced: forty-eight metres of bank, full width, sinking
+## uniformly until the whole sheet was within half a metre of the water plane and
+## then stopping dead at z = HEADLAND_Z. It was procedural, not scan geometry —
+## a raycast probe put every triangle of it in TerrainNear's rock surface, not in
+## the photogrammetry backdrop.
+##
+## A real point loses PLAN, not height: the water eats in from the side, the rock
+## stays above the surface until it does not exist any more, and where the two
+## meet there is a rock face with rubble at its foot. That is what this returns
+## and what _build_headlands() now builds to.
+static func headland_shore_x(side: float, z: float) -> float:
+	var front := absf(front_x(side, 0, z))
+	if z <= BANK_Z_NEAR:
+		return side * front
+	var back := (PORTO_BACK_X if side < 0.0 else GAIA_BACK_X) + _taper(z)
+	var t := clampf((z - BANK_Z_NEAR) / (HEADLAND_Z - BANK_Z_NEAR), 0.0, 1.0)
+	# Smoothstep, so the point holds most of its width for the first third and
+	# then goes quickly — a headland is blunt at the root and sharp at the tip.
+	var ease := t * t * (3.0 - 2.0 * t)
+	# The shoreline wanders like the retaining walls do, in the same 6 m segments
+	# with a smooth join, or the point comes out as a ruled wedge.
+	var key := _land_key(side) + 47
+	var i := int(floor(z / 6.0))
+	var f := z / 6.0 - float(i)
+	var wander := lerpf(MK.hash_sym(key, i), MK.hash_sym(key, i + 1),
+			smoothstep(0.0, 1.0, f)) * 2.6 * sin(t * PI)
+	return side * (lerpf(front, back + HEADLAND_OVERRUN, ease) + wander)
+
+
+## Ground on the point, downstream of BANK_Z_NEAR. `land` is what the terraces
+## and the upland would have given here.
+##
+## Below the waterline this deliberately keeps going DOWN rather than clamping to
+## WATER_Y: the submerged toe is what makes the shoreline an intersection with the
+## river plane instead of a cut edge coincident with it, and a coincident edge over
+## a 900 m plane is the z-fighting hairline that reads as "a hard cut".
+static func _headland_y(side: float, ax: float, z: float, land: float) -> float:
+	var shore := absf(headland_shore_x(side, z))
+	var rock := maxf(WATER_Y + (ax - shore) * HEADLAND_SLOPE, WALL_FOOT_Y + 0.3)
+	var t := clampf((z - BANK_Z_NEAR) / (HEADLAND_Z - BANK_Z_NEAR), 0.0, 1.0)
+	# Blend in over the first thirty per cent so the quay's last coping does not
+	# step. Past that the point is entirely its own shape.
+	return lerpf(land, minf(land, rock), smoothstep(0.0, 0.30, t))
+
+
+## Downstream of BANK_Z_NEAR the terraces run out into a rock point. Bare rock
+## with a rubble toe: this is the last thing before open river, and a manicured
+## quay ending in mid-air is worse than a natural one.
+##
+## The sheet is emitted between the WATERLINE and the back of the bank, one row
+## of columns per z step, so its river-side edge follows the point instead of
+## running straight down the old quay line. Twice the subdivision of the old grid
+## in both directions: the facets were 8 m by 3.2 m at 110 m, which is where the
+## "hard visible triangle facets" came from.
 static func _build_headlands(near: TerrainBatch, seed: int) -> void:
 	for side_i in 2:
 		var side := PORTO if side_i == 0 else GAIA
-		var front := absf(front_x(side, 0, BANK_Z_NEAR))
-		var back := absf(front_x(side, _levels(side).size(), BANK_Z_NEAR))
 		var b: MeshBaker = near.rock()
-		_ground_grid(b, side, front, back, BANK_Z_NEAR, HEADLAND_Z, 6, 3.5)
+		var rows := 12
+		var cols := 10
+		for j in rows:
+			var za := lerpf(BANK_Z_NEAR, HEADLAND_Z, float(j) / float(rows))
+			var zb := lerpf(BANK_Z_NEAR, HEADLAND_Z, float(j + 1) / float(rows))
+			# One metre seaward of the waterline, so the sheet passes UNDER the
+			# river plane and the shore is an intersection rather than a seam.
+			var sa := absf(headland_shore_x(side, za)) - 1.0
+			var sb := absf(headland_shore_x(side, zb)) - 1.0
+			var back_a := absf(front_x(side, _levels(side).size(), za)) + HEADLAND_OVERRUN
+			var back_b := absf(front_x(side, _levels(side).size(), zb)) + HEADLAND_OVERRUN
+			if back_a - sa < 0.5 and back_b - sb < 0.5:
+				continue
+			for i in cols:
+				var u0 := float(i) / float(cols)
+				var u1 := float(i + 1) / float(cols)
+				var xa0 := side * lerpf(sa, maxf(back_a, sa), u0)
+				var xa1 := side * lerpf(sa, maxf(back_a, sa), u1)
+				var xb0 := side * lerpf(sb, maxf(back_b, sb), u0)
+				var xb1 := side * lerpf(sb, maxf(back_b, sb), u1)
+				var p00 := Vector3(xa0, ground_height(xa0, za), za)
+				var p10 := Vector3(xa1, ground_height(xa1, za), za)
+				var p11 := Vector3(xb1, ground_height(xb1, zb), zb)
+				var p01 := Vector3(xb0, ground_height(xb0, zb), zb)
+				# Wound so the right-hand normal comes out +Y on either bank: the
+				# columns run outward in |x| and the rows run downstream, and the
+				# two banks mirror in x, so one of the two orders is upside down.
+				if side < 0.0:
+					b.add_quad(p00, p10, p11, p01, Vector2(6.0, 4.0))
+				else:
+					b.add_quad(p00, p01, p11, p10, Vector2(4.0, 6.0))
 
-		# Close the river-facing edge, or the sheet is a flap seen edge-on from
-		# anywhere downstream.
-		var steps := 5
-		for j in steps:
-			var za := lerpf(BANK_Z_NEAR, HEADLAND_Z, float(j) / float(steps))
-			var zb := lerpf(BANK_Z_NEAR, HEADLAND_Z, float(j + 1) / float(steps))
-			var xa := side * front
-			var top_a := Vector3(xa, ground_height(xa, za), za)
-			var top_b := Vector3(xa, ground_height(xa, zb), zb)
-			var foot_a := Vector3(xa, WALL_FOOT_Y, za)
-			var foot_b := Vector3(xa, WALL_FOOT_Y, zb)
-			# Porto's river face looks +X, Gaia's looks -X.
-			if side < 0.0:
-				b.add_quad(foot_b, foot_a, top_a, top_b, Vector2(zb - za, 6.0))
-			else:
-				b.add_quad(foot_a, foot_b, top_b, top_a, Vector2(zb - za, 6.0))
-
-		RK.scree(near, BANK_Z_NEAR + 1.0, HEADLAND_Z - 2.0, side * (front + 1.0),
-				-side, WATER_Y + 0.4, 5.0, seed + side_i * 91, 0.75)
+		# Rubble along the waterline, following the point in rather than sitting on
+		# the old straight quay line.
+		var pieces := 9
+		for k in pieces:
+			var z := lerpf(BANK_Z_NEAR + 1.0, HEADLAND_Z - 3.0,
+					(float(k) + 0.5) / float(pieces))
+			var sx := headland_shore_x(side, z)
+			RK.scree(near, z - 1.6, z + 1.6, sx, -side, WATER_Y + 0.25, 3.2,
+					seed + side_i * 91 + k * 13, 0.8)
 		# Stacks standing off the point, IN the water — the reason a headland is a
 		# headland is the rock the river has not managed to take yet.
 		for k in 3:
-			RK.boulder(b, Vector3(side * (front - 3.0 - float(k) * 2.6),
-					WATER_Y + 0.4, BANK_Z_NEAR + 5.0 + float(k) * 7.0),
+			var z := BANK_Z_NEAR + 5.0 + float(k) * 7.0
+			RK.boulder(b, Vector3(headland_shore_x(side, z) - side * (2.4 + float(k) * 2.2),
+					WATER_Y + 0.35, z),
 					1.5 + MK.hash01(seed, k) * 1.3, seed + k * 5)
 
 

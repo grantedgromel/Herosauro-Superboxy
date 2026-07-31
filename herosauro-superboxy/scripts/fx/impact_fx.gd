@@ -689,9 +689,17 @@ func _build_shards(row: Dictionary, surface: int, aim: Vector3, spread: float,
 		# very thin, and they keep the curve's proportion rather than the body's.
 		var shape: Vector3 = proportions if not is_trim else Vector3(2.4, 0.12, 0.34)
 		_sh_pos[i] = dir * base * _rng.randf_range(0.4, 1.6)
-		# Slower for the bigger pieces: one blow's momentum is shared out by mass,
-		# so the chips carrying least go furthest. That is what a break looks like.
-		var v: float = _rng.randf_range(speed.x, speed.y) * power / grade
+		# Faster for the smaller pieces: one blow's energy is shared out by mass, so
+		# the chips carrying least go furthest, and that spread is most of what a
+		# break looks like.
+		#
+		# A LERP rather than the physically-tempting 1/mass. Sharing momentum
+		# exactly gives v proportional to 1/grade, which over this size ramp is a
+		# 3.6x multiplier: cobble at a slam's power came out at 39 m/s and the chips
+		# left the arena on a 29 m arc. Real debris partitions energy, not momentum,
+		# and the honest visual range is much narrower than either — the biggest
+		# piece a little slower than nominal, the smallest a third faster.
+		var v: float = _rng.randf_range(speed.x, speed.y) * force * lerpf(1.35, 0.8, grade)
 		_sh_vel[i] = dir * v
 		_sh_size[i] = Vector3(shape.x * edge, shape.y * edge, shape.z * edge)
 		_sh_axis[i] = _unit()

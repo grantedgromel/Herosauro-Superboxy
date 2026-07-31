@@ -130,7 +130,13 @@ const SERRA_CLOISTER_X := 16.5              ## cloister centre, offset from the 
 # --- Lodges ------------------------------------------------------------------
 
 ## Invented names. Deliberately not the real houses on that bank.
-const LODGE_NAMES := ["CAVES DO CORVO", "QUINTA VELHA", "ADEGA DOURO", "VINHO DO PORTO"]
+##
+## ONE WORD EACH, and short ones, because the roof frame is sized to the string:
+## six cells per character across a 15 m shed gives "CAVES DO CORVO" a cell of
+## 0.15 m, i.e. a one-metre capital seen from ninety metres. That is not lettering,
+## it is a grey smear with the cost of lettering. The same five sheds carrying
+## "CORVO" get a cell of 0.38 and a 2.7 m capital off exactly the same frame.
+const LODGE_NAMES := ["CORVO", "QUINTA", "DOURO", "VELHA"]
 
 ## A 5x7 cell alphabet for the rooftop signs. Building the letters as geometry
 ## rather than hanging a Label3D on the roof costs no extra draw call, needs no
@@ -1039,8 +1045,14 @@ static func _lodge_sign(batch: Batch, at: Transform3D, spec: LodgeSpec, ridge_y:
 	if detail == Detail.LOW or text.is_empty():
 		return
 	# Centre the seven-cell cap height between the frame's two rails.
+	#
+	# SOLID letters, standing a third of a cell off the frame. Flat lettering on an
+	# open frame has one value at every sun angle, so it reads as a stencil rather
+	# than as a row of steel characters — the exact fault an adversarial critic
+	# scored on the hillside hoardings, and this is the same font on the same bank.
 	var y0 := ridge_y + 0.2 + (spec.sign_height - 0.2 - cell * 7.0) * 0.5
-	sign_text(batch.baker(Batch.sign_face()), at, text, -text_w * 0.5 + cell * 0.5, y0, cell)
+	sign_text_solid(batch.baker(Batch.sign_face()), at, text,
+			-text_w * 0.5 + cell * 0.5, y0, cell, cell * 0.5)
 
 
 ## Lay out a string in 5x7 cells as quads, merging each row's runs so a letter
