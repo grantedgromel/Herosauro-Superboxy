@@ -40,29 +40,58 @@ the tier the owner is complaining about.
 Shadow submission is measured at the `01_deck_mid` camera; the other vantages are
 within 1%.
 
-**Per-frame counters at that same camera**, which is what `tools/profile.gd`'s
-BUDGET gate is written against:
+## Per-frame counters, every vantage, both tiers
 
-| | Forward+ | GL Compatibility |
-|---|---|---|
-| objects in frame | not measurable here — see below | 245 |
-| draw calls in frame | " | 245 |
-| primitives in frame | " | 524,577 |
+This is what `tools/profile.gd`'s budget gate is written against, and until
+`4b20430` none of it existed: `tools/budget.gd` printed objects, draw calls and
+primitives as **0** on every run it had ever done, because `budget.tscn`
+contained no `Camera3D` and nothing rendered 3D. It now stands a camera at every
+`world` vantage in `tools/shots.json` — the same manifest the review gate
+renders — and sweeps them.
 
-Two things to know about those rows.
+Static arena, no heroes, no giant, no FX. 1280×720, llvmpipe.
 
-`tools/budget.gd` prints all three as **0**, always, and has since it was written:
-`tools/budget.tscn` contains no `Camera3D`, so nothing renders 3D and the counters
-are honestly zero. Standing a camera at a shot vantage is the whole fix and it is
-proposed to the lead.
+| shot | Forward+ objects | Forward+ prims | Compat objects | Compat prims |
+|---|---|---|---|---|
+| `01_deck_mid` | 575 | 3,261,457 | 245 | 524,577 |
+| `02_deck_eye` | 447 | 3,251,645 | 226 | **574,730** |
+| `03_rail_macro` | 393 | 3,200,929 | 176 | 555,740 |
+| `04_cobble_macro` | 500 | 3,253,111 | 242 | 568,102 |
+| `05_arch_under` | 570 | 3,215,849 | 267 | 538,669 |
+| `06_river_wide` | 482 | 3,160,731 | 266 | 523,811 |
+| `07_ribeira` | 477 | 3,223,291 | 206 | 524,549 |
+| `08_gaia_end` | 380 | 3,232,715 | 182 | 570,988 |
+| `09_water_close` | 527 | 3,194,551 | 220 | 491,409 |
+| `10_skyline_high` | 508 | 3,131,571 | 297 | 522,678 |
+| **worst** | 575 | **3,261,457** | 297 | **574,730** |
 
-And the Forward+ column is blank because it could not be obtained. Twelve frames
-of the full Forward+ pipeline on this container's software rasteriser — SDFGI
-cascade bake, SSR, SSIL, volumetric fog — did not complete inside fifty minutes.
-`tools/profile.tscn` is in the same position: 70 frames of a live fight timed out
-at forty minutes on Forward+ and 180 frames timed out on Compatibility. Both are
-usable on real hardware and neither is usable here, which is worth knowing before
-anyone waits on one.
+Draw calls equal objects in every row on both tiers.
+
+**The web tier costs 17.6% of the desktop tier's worst-case primitives and 39%
+of its draw calls.** That is the geometry tier, measured end to end rather than
+inferred from the levers.
+
+### The finding: primitives barely respond to the camera
+
+On Forward+, objects range 380–575 across the ten vantages — a 51% spread — and
+primitives range 3,131,571–3,261,457, a spread of **4.1%**. `03_rail_macro` is a
+camera half a metre from a railing at 45° FOV and it still submits 3.2M
+primitives, **2.9× the world's entire triangle count**.
+
+The cascades are anchored to the camera's frustum slices, not to what the camera
+is looking at, and the bridge is inside all four of them from every vantage in
+the arena. Four cascades plus the colour pass is five potential submissions per
+caster, and `directional_shadow_blend_splits = true` adds a sixth for anything
+near a split boundary.
+
+This is the same root cause as the web-tier finding below — bakes whose AABBs
+are too large to cull — on the tier that fix did not touch. On Compatibility the
+spread is 17%, four times better, which is the chunking letting culling bite.
+
+**Not acted on.** Every lever (fewer cascades, `blend_splits` off, `cast_shadow`
+off on far bakes, visibility ranges) trades a measurable win for a visual cost
+that has to be scored, not assumed, and three rounds of lighting work sit on the
+desktop image. It is recorded so the next round starts from a number.
 
 ## How the web tier got there
 
@@ -161,23 +190,40 @@ which would change the desktop city and cost a full re-review. Not worth it.
 
 ## Memory
 
-52.3 MiB on the web tier for the world is a non-issue. **The UI art is not**, and
-it is the largest single VRAM item in the build:
+52.3 MiB on the web tier for the world is a non-issue. The UI art was a real
+one, and the first pass over it got the size wrong twice over. Measured from
+each file's IHDR, with `mipmaps/generate` checked rather than assumed:
 
-| file | size | in VRAM |
-|---|---|---|
-| `assets/ui/key_art.png` | 1672×941 | 7.98 MiB |
-| `assets/ui/art/banner_adamastor.png` | 1672×941 | 7.98 MiB |
-| `assets/ui/art/banner_superboxy.png` | 1672×941 | 7.98 MiB |
-| `assets/ui/art/figure_adamastor.png` | 1024×1536 | 7.98 MiB |
-| `assets/ui/art/figure_superboxy.png` | 1024×1536 | 7.98 MiB |
-| three portraits | | 5.12 MiB |
+| file | size | RGBA8 | loaded by |
+|---|---|---|---|
+| `assets/ui/key_art.png` | 1672×941 | 6.00 MiB | `menu_backdrop.gd` |
+| `assets/ui/portraits/adamastor.png` | 631×900 | 2.17 MiB | `ui_style.gd` |
+| `assets/ui/portraits/herosauro.png` | 282×900 | 0.97 MiB | `ui_style.gd` |
+| `assets/ui/portraits/superboxy.png` | 209×900 | 0.72 MiB | `ui_style.gd` |
+| `assets/ui/art/banner_adamastor.png` | 1672×941 | 6.00 MiB | **nothing** |
+| `assets/ui/art/banner_superboxy.png` | 1672×941 | 6.00 MiB | **nothing** |
+| `assets/ui/art/figure_adamastor.png` | 1024×1536 | 6.00 MiB | **nothing** |
+| `assets/ui/art/figure_superboxy.png` | 1024×1536 | 6.00 MiB | **nothing** |
 
-All eight import at `compress/mode=0` (Lossless), so they arrive in VRAM as
-uncompressed RGBA8 with mipmaps: **~45 MiB, against 52 MiB for the entire
-world**, plus ~13.5 MiB of PNG in the pck. That is the `ui` stream's to decide,
-and the decision is a real one — VRAM Compressed would quarter it and would show
-banding on flat gradient art.
+The earlier figure of "~45 MiB, against 52 MiB for the entire world" was wrong
+in two independent ways, and both inflated it:
+
+* **Mipmaps were assumed, not checked.** All eight import with
+  `mipmaps/generate=false`, which is Godot's default for 2D textures. The base
+  level is the whole cost, so a 1672×941 plate is 6.00 MiB and not 7.98.
+* **Four of the eight are referenced by nothing** — no `.gd`, no `.tscn`, no
+  `.tres`. They never load, so they were never in VRAM. They were pck weight,
+  which is a different problem needing a different fix.
+
+The honest totals: **33.9 MiB** if everything were resident, **9.9 MiB**
+actually resident. Both are worth fixing and both now are. All eight moved to
+`compress/mode=2` in `19b521d` (these are painterly plates viewed at or near
+native size — the block artifacts have nothing crisp to chew on), and the four
+unreferenced ones are excluded from the web pck in `4b20430`.
+
+Nothing about the conclusion changes; the size of it does. Quoting a number
+four times too big to justify a change that was right anyway is how a rubric
+ends up being optimised instead of a game.
 
 ## Texture compression and the export preset
 
@@ -231,22 +277,65 @@ Geometry is no longer the top of this list. In order:
 
 ## The budget gate
 
-`tools/profile.gd`'s `BUDGET` dictionary is stale in one entry and cannot be right
-in that entry for both tiers at once:
+`tools/profile.gd`'s `BUDGET` was a single `primitives_p99: 1_600_000` serving
+both tiers, which cannot be right for either: the static desktop arena measures
+3,261,457 primitives at its worst vantage before a hero, a giant or a particle
+is drawn, and the same scene measures 574,730 on the web tier. A ceiling loose
+enough for desktop is six times the web tier's entire frame.
 
+It is now `BUDGETS`, keyed on `RenderingServer.get_current_rendering_method()`,
+with an unknown renderer falling back to the *strict* tier — a gate that does
+not recognise where it is running should not be the loose one.
+
+### It had never run
+
+The stale ceiling was not why the gate kept passing. **The gate had never
+executed.** `tools/profile.gd` did not parse:
+
+```gdscript
+var p50 := proc["p50"]      # Parse Error: cannot infer the type of "p50"
 ```
-"primitives_p99": 1_600_000
-```
 
-The desktop world alone submits ~1.1M in the opaque pass, ~1.1M again in the
-Forward+ depth prepass and 2,196,722 to the shadow cascades — roughly 4.4M before
-a hero, a giant or a particle is drawn. The gate has been passing only because
-nobody has run it since the density work landed.
+`:=` off a Dictionary subscript is a hard parse error in GDScript — the value is
+a Variant with no set type — and the line had been there since the file was
+written. So the profiler that owns the frame-cost distribution, the hitch
+attribution and the budget enforcement was dead code, and its silence was
+indistinguishable from a clean run.
 
-One number cannot serve both tiers: the same scene measures 524,577 primitives on
-the web tier. The gate wants to be keyed on
-`RenderingServer.get_current_rendering_method()`, with the web ceiling being the
-one that matters, since the web tier is the one with no headroom.
+Two things nothing caught, both now closed:
+
+* **`--import` cannot see it.** Godot compiles the scripts reachable from the
+  resources it imports; a script referenced only by a `.tscn` that no import
+  step loads is never compiled, so CI's "Import must be error-free" was grepping
+  a log that could not contain the error. `tools/parsecheck.tscn` now loads and
+  `reload()`s every `.gd` in the project in one process — three seconds for 94
+  scripts — and CI runs it before the probes.
+* **The gate could not fail.** `_report()` printed `BUDGET EXCEEDED` and then
+  `_process` called `get_tree().quit(0)` unconditionally. Whatever launched it
+  saw success. It now exits 1.
+
+The parse check needed the same treatment applied to itself. Its first version
+tested `ResourceLoader.load(...) == null`, and with the real bug reintroduced on
+purpose it reported PASS — Godot hands back a `Script` object for a file that
+did not compile. `reload()` returns `43` (`ERR_PARSE_ERROR`) and is the check
+that discriminates. **A gate has to be shown failing on the fault it was written
+for**, or it is decoration; this one was run in all three states (clean → PASS,
+bug → FAIL exit 1, restored → PASS).
+
+That is now four instances of the same failure shape in this project: the
+`_menu_probe` that measured a scene it had failed to add to the tree,
+`tools/budget.gd`'s zeros, the profiler that never parsed, and the parse check
+that passed its own motivating bug. **A tool that does not run looks exactly
+like a tool that runs and finds nothing wrong.**
+
+### The ceilings are a ratchet
+
+They are set just above what the build measures today, so a regression trips
+them. They are not a statement that this is what a frame should cost — the
+desktop tier submits 2.9× the world's whole triangle count every frame and that
+is an open problem, recorded above. Loosening one to make a run pass turns the
+ratchet into a rubber stamp; a change that needs more headroom needs a
+measurement and a line in the round doc saying what it bought.
 
 ## Rules this budget is kept under
 

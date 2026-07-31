@@ -27,14 +27,51 @@ extends Node
 
 const MainScene: PackedScene = preload("res://scenes/main.tscn")
 
-## Budget ceilings. Exceeding one is a failure, not a warning — the point of a
-## budget is that it is enforced before the frame is lost, not after.
-const BUDGET := {
-	"draw_calls_p99": 1400,
-	"primitives_p99": 1_600_000,
-	"nodes_max": 6000,
-	"static_memory_mib": 900.0,
+## Budget ceilings, keyed on the rendering method, because one number cannot
+## serve both tiers. `scripts/world/world_tier.gd` builds a genuinely different
+## world on GL Compatibility — 406,179 triangles against 1,106,039, two shadow
+## cascades against four — and the same static arena measures 3,261,457
+## primitives a frame on Forward+ and 574,730 on Compatibility. A ceiling loose
+## enough for desktop is six times the web tier's entire frame.
+##
+## READ THESE AS A RATCHET, NOT AS A TARGET. They are set just above what the
+## build measures today, so that a regression trips them; they are NOT a
+## statement that this is what the frame should cost. It should cost less. The
+## desktop tier in particular submits about 2.9x the world's whole triangle
+## count every frame and is documented in docs/PERFORMANCE_BUDGET.md as an open
+## problem. Loosening one of these to make a run pass is how the ratchet turns
+## into a rubber stamp — if a change needs more, it needs a measurement and a
+## line in the round doc saying what was bought.
+##
+## Measured with tools/budget.tscn (static arena) and this file (live fight) on
+## llvmpipe. Every counter here is hardware-independent, so the numbers hold on
+## a real card even though the frame times would not.
+const BUDGETS := {
+	"forward_plus": {
+		"draw_calls_p99": 1400,
+		"primitives_p99": 5_000_000,
+		"nodes_max": 6000,
+		"static_memory_mib": 900.0,
+	},
+	"gl_compatibility": {
+		"draw_calls_p99": 700,
+		"primitives_p99": 900_000,
+		"nodes_max": 6000,
+		"static_memory_mib": 500.0,
+	},
 }
+
+
+## The tier whose budget applies. Unknown renderers fall back to the strict one:
+## a gate that does not recognise where it is running should not be the loose
+## gate.
+func _tier() -> String:
+	var method := RenderingServer.get_current_rendering_method()
+	return method if BUDGETS.has(method) else "gl_compatibility"
+
+
+func _budget() -> Dictionary:
+	return BUDGETS[_tier()]
 
 ## Beats driven while profiling, chosen to cover the expensive moments rather
 ## than a quiet stroll: closing on the giant, swinging, taking the slam.
@@ -97,8 +134,11 @@ func _process(_delta: float) -> void:
 	_n += 1
 	if _n >= _frames:
 		set_process(false)
-		_report()
-		get_tree().quit(0)
+		# EXIT CODE, not just stdout. This used to quit(0) unconditionally, so a
+		# run that printed "BUDGET EXCEEDED" three times still reported success
+		# to whatever launched it. A gate that cannot fail is not a gate; it is
+		# a log line. Same class of defect as tools/budget.gd's zeros.
+		get_tree().quit(0 if _report() else 1)
 
 
 func _sample() -> void:
@@ -163,7 +203,8 @@ func _dist(label: String, values: Array[float]) -> Dictionary:
 	return d
 
 
-func _report() -> void:
+## Returns true if every budget held.
+func _report() -> bool:
 	print("=== PROFILE (%d frames, %s) ===" % [_n, RenderingServer.get_current_rendering_method()])
 	print("  --- CPU cost per frame, milliseconds ---")
 	var proc := _dist("script process", _process_ms)
@@ -177,7 +218,12 @@ func _report() -> void:
 	# Hitch attribution. A frame far above p50 is the one worth chasing, and
 	# saying WHICH frame and what was running lets someone reproduce it.
 	var spikes: Array = []
-	var p50 := proc["p50"]
+	# Explicitly typed, not inferred. `:=` off a Dictionary subscript is a hard
+	# parse error in GDScript — the value is a Variant and has no set type — and
+	# this line is why tools/profile.gd has never once run. The profiler that
+	# owns the frame-cost distribution and the budget gate has been dead code
+	# since it was written, which is the real reason the budget "kept passing".
+	var p50: float = proc["p50"]
 	for i in _process_ms.size():
 		if _process_ms[i] > maxf(p50 * 4.0, p50 + 4.0):
 			spikes.append({"frame": i, "process_ms": snappedf(_process_ms[i], 0.01)})
@@ -185,15 +231,17 @@ func _report() -> void:
 	for s in spikes.slice(0, 8):
 		print("     frame %5d  %.2f ms" % [s["frame"], s["process_ms"]])
 
+	var budget := _budget()
+	print("  budget applied      : %s" % _tier())
 	var failures: Array[String] = []
-	if draws["p99"] > BUDGET["draw_calls_p99"]:
-		failures.append("draw calls p99 %d > %d" % [draws["p99"], BUDGET["draw_calls_p99"]])
-	if prims["p99"] > BUDGET["primitives_p99"]:
-		failures.append("primitives p99 %d > %d" % [prims["p99"], BUDGET["primitives_p99"]])
-	if nodes["max"] > BUDGET["nodes_max"]:
-		failures.append("nodes max %d > %d" % [nodes["max"], BUDGET["nodes_max"]])
-	if _peak_static_mib > BUDGET["static_memory_mib"]:
-		failures.append("static memory %.1f MiB > %.1f" % [_peak_static_mib, BUDGET["static_memory_mib"]])
+	if draws["p99"] > budget["draw_calls_p99"]:
+		failures.append("draw calls p99 %d > %d" % [draws["p99"], budget["draw_calls_p99"]])
+	if prims["p99"] > budget["primitives_p99"]:
+		failures.append("primitives p99 %d > %d" % [prims["p99"], budget["primitives_p99"]])
+	if nodes["max"] > budget["nodes_max"]:
+		failures.append("nodes max %d > %d" % [nodes["max"], budget["nodes_max"]])
+	if _peak_static_mib > budget["static_memory_mib"]:
+		failures.append("static memory %.1f MiB > %.1f" % [_peak_static_mib, budget["static_memory_mib"]])
 
 	for f in failures:
 		print("  BUDGET EXCEEDED: " + f)
@@ -211,7 +259,8 @@ func _report() -> void:
 			"nodes": nodes,
 			"peak_static_mib": snappedf(_peak_static_mib, 0.1),
 			"spikes": spikes,
-			"budget": BUDGET,
+			"tier": _tier(),
+			"budget": budget,
 			"failures": failures,
 			"pass": failures.is_empty(),
 		}
@@ -220,3 +269,5 @@ func _report() -> void:
 			fh.store_string(JSON.stringify(payload, "  "))
 			fh.close()
 			print("profile: wrote " + _out)
+
+	return failures.is_empty()
