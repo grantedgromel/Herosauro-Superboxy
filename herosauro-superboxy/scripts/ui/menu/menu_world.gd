@@ -84,7 +84,7 @@ func _ready() -> void:
 
 ## Give this copy of the arena its own Environment.
 ##
-## `porto_golden_hour.tres` is referenced by path from sky_background.tscn, so
+## The environment resource is referenced by path from sky_background.tscn, so
 ## every instance of the arena shares one cached Environment object — and
 ## LightingRig's renderer tiering does not just read it, it multiplies into it:
 ##
@@ -176,7 +176,7 @@ func _apply_depth_of_field() -> void:
 	var attrs := CameraAttributesPractical.new()
 	# Left at the neutral defaults on purpose: this resource exists to carry DOF,
 	# and an exposure multiplier or an auto-exposure curve here would silently
-	# re-grade a scene whose look is authored in porto_golden_hour.tres.
+	# re-grade a scene whose look is authored in the environment resource.
 	attrs.exposure_multiplier = 1.0
 	attrs.auto_exposure_enabled = false
 	attrs.dof_blur_far_enabled = true

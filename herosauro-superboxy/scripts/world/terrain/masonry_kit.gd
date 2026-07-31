@@ -411,6 +411,12 @@ static func bollard(batch: TerrainBatch, pos: Vector3, outward: float, seed: int
 	# Mushroom head — the shape is what stops a hawser riding off the top.
 	g.add_cylinder(0.31, 0.16, Transform3D(Basis.IDENTITY, pos + Vector3(0, h + 0.05, 0)), 8)
 	mooring_ring(batch.iron(), pos + Vector3(outward * 0.24, h * 0.55, 0.0), 0.17, seed)
+	# The grime ring at the foot. Bollards on a working quay are never clean where
+	# they meet the setts, and it is the contact darkening the renderer is not
+	# supplying — see the note on BridgeDeckKit.contact_patch() for why this is
+	# geometry in this pass and not an environment setting.
+	batch.dark().add_box(Vector3(0.62, 0.014, 0.62),
+			Transform3D(Basis.IDENTITY, pos + Vector3(0.0, 0.014, 0.0)))
 
 
 ## A ring approximated by a closed loop of beams, standing in the YZ plane so it

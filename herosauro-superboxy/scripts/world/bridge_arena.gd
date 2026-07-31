@@ -28,6 +28,8 @@ extends Node3D
 ##   cannot walk through the gaps of is what a railing is anyway.
 
 const IronworkScript := preload("res://scripts/world/bridge_ironwork.gd")
+const DeckKit := preload("res://scripts/world/bridge/deck_kit.gd")
+const WireSwayScript := preload("res://scripts/world/bridge/wire_sway.gd")
 
 # --- Deck cross-section ------------------------------------------------------
 # Every Z is a half-width from the bridge centreline, every Y is absolute.
@@ -65,9 +67,103 @@ const MIDRAIL_Y := 2.98
 ## is nothing to catch on, and the bed is sunk 2 cm so the rails read as rails.
 const TRAM_HALF := 1.75
 const TRAM_TOP := DECK_TOP - 0.02
-const RAIL_GAUGE_HALF := 0.72     # 1.44 m gauge
-const RAIL_HEAD := 0.08
+const RAIL_GAUGE_HALF := 0.72     # 1.44 m gauge, taken to the gauge faces
 const SLEEPER_PITCH := 1.0
+## The rail CROWN, 4 mm proud of the carriageway. Real grooved rail stands a few
+## millimetres out of the paving it is bedded in; the deck collider is the flat
+## box in the .tscn, so nothing here is a step anything can trip on.
+const RAIL_CROWN_Y := DECK_TOP + 0.004
+
+# --- Catenary ----------------------------------------------------------------
+## Gantry stations. Interleaved with LAMP_XS (-30/-10/10/30) on purpose: masts and
+## lamp posts at the same X would stack two verticals in one place and leave 20 m
+## of nothing between them, which is the opposite of the rhythm this is for.
+##
+## NOTHING AT x = 0, and that is the whole reason this ladder is offset by 12
+## rather than centred. Shot 07_ribeira looks straight down the deck's centreline
+## at the arch, which round 1 named as the identity anchor that must not be
+## occluded; a mast on the centreline projects to the exact middle of that frame
+## and stands up through the arch's span. At +-12 and +-36 the four masts land at
+## screen x = 34, 323, 957 and 1246 against an arch spanning 420 to 880, so all
+## four are clear of it and the crown is untouched. Move these and re-check that.
+const CATENARY_XS := [-36.0, -12.0, 12.0, 36.0]
+## Masts stand on the footway, hard against the parapet, so a mast never lands in
+## the fighting corridor and never fouls the kerb the hero steps up.
+const MAST_Z := WALKWAY_OUTER - 0.30
+const MAST_BASE_Y := WALKWAY_TOP
+
+# --- The wrecked span --------------------------------------------------------
+## THE CATENARY OVER THE FIGHTING SPAN IS BUILT ALREADY DOWN, and that is a fix,
+## not a flourish. Adamastor's model stands 8.6 m out of a deck at 2.0, so the top
+## of him is at 10.6; the contact wire hangs at 7.0, its messenger at 7.72 and the
+## gantry cross-spans at 7.84. All three pass straight through his chest and neck
+## for the whole fight.
+##
+## The two obvious fixes are both wrong. Lowering an overhead line to clear a
+## nine-metre giant puts it at head height on a tram deck and looks wrong from
+## every angle; deleting the catenary costs the corridor the converging verticals
+## that are the one thing round 1's critics said it lacked. The third option costs
+## nothing and pays: he has been rampaging on this bridge — that is the premise of
+## the game — so over the span he fights in, the line is already torn out. A
+## snapped wire has no span left for him to walk through, the run keeps its true
+## height everywhere it is actually visible, and the eye reads the intact run
+## first, then the break, and knows what happened here without a word of dialogue.
+##
+## MIRRORED, NOT IMPORTED. Reaching into another stream's script is banned
+## (ARCHITECTURE.md rule 2), so these repeat adamastor.gd the way ROADWAY_HALF
+## above already repeats its ARENA_Z. If the giant's arena moves, move these.
+const BOSS_ARENA_X := Vector2(-14.0, 24.0)     # adamastor.gd ARENA_X_MIN / ARENA_X_MAX
+## adamastor.gd's CORPSE_SIZE, which that file's own header calls "closer to what
+## the model actually occupies" than the generous 5 x 9 x 4 gameplay box: 2.8 m
+## across and 8.6 m tall. Half of 2.8 either side of the position clamp is how far
+## the giant's shoulders really reach along the deck.
+const GIANT_HALF_WIDTH := 1.4
+const GIANT_TOP := DECK_TOP + 8.6
+## What has to be clear of overhead line. A stomp or a kick throws an arm well
+## past the torso, so the giant's own footprint is not enough on its own; 3 m of
+## slack at each end covers the animation overhang. Comes out at -18.4 .. 28.4.
+const WRECK_REACH := Vector2(
+		BOSS_ARENA_X.x - GIANT_HALF_WIDTH - 3.0,
+		BOSS_ARENA_X.y + GIANT_HALF_WIDTH + 3.0)
+# WHERE THE LINE PARTS, AND WHY IT IS A GANTRY RATHER THAN MID-SPAN.
+#
+# Everything a hero can stand on tops out at |z| = 6.55, and a hero jumping off
+# the raised footway reaches 6.95 with the crown of his capsule — five
+# centimetres under the contact wire. So over this deck there is no room BENEATH
+# an overhead line to hang anything in at all: the only place a loose end can
+# droop is outboard of the parapet, and the only place the run gets out there on
+# its own is a mast bracket. CATENARY_XS[0] and [3] are the first brackets
+# outside WRECK_REACH, so the line is made off there and everything between them
+# has come down. _line_is_up() and _gantry_is_wrecked() are the two tests that
+# follow from that, and _wreck_probe.gd is what checks it stayed true.
+
+## 20 cm outboard of the deck's own face, which clears the parapet (7.0) and the
+## fascia girder behind it (6.85 centreline). Nothing on this bridge reaches it.
+const WRECK_HANG_Z := DECK_HALF_WIDTH + 0.20
+## Which parapet it went over. ONE side, not both: a cable dragged sideways ends
+## up on one side of what dragged it, and a matched pair either side would read as
+## decoration rather than as damage. +Z is the side the signature view down the
+## deck (02_deck_eye) puts on the right of frame, so it is the side that is
+## actually seen; 07_ribeira sits ten metres above the deck and its near parapet
+## falls below the bottom of that frame entirely.
+const WRECK_HANG_SIDE := 1.0
+## Where a torn gantry's hanging span-wire catches the dead run as it passes.
+const WRECK_CATCH_Y := 4.90
+## How far the dead run sags between the things it is caught on: least at the two
+## brackets it is still made off at, most in the middle, where the slack of
+## seventy metres of cable ends up.
+##
+## The deep one is 2.10 and the number is measured rather than judged. The parapet
+## coping's outer top is at 2.42, and from an eye at 3.6 m on the deck the
+## sightline that grazes it crosses this cable's plane at y = 2.34 — so anything
+## hanging below about 2.4 out here is behind the railing from every position a
+## player ever stands in, and only the river shots ever see it. 4.90 - 2.10 puts
+## the bottom of the swag at 2.80, clear of that line and still well under the
+## handrail at 3.33.
+const WRECK_SAG := Vector2(1.55, 2.10)
+## Sag of an intact gantry's span wire, and therefore how far its midpoint hangs
+## below the mast brackets. Named because _gantry_is_wrecked() has to know it.
+const CROSS_SPAN_SAG := 0.34
 
 # --- Course pitches ----------------------------------------------------------
 const BAY_PITCH := 2.5            # deck plates along the carriageway
@@ -132,8 +228,16 @@ const FLAG_COLOR := Color(0.545, 0.525, 0.485)
 const PLINTH_COLOR := Color(0.500, 0.480, 0.440)
 const ABUTMENT_COLOR := Color(0.470, 0.450, 0.410)
 const IRONWORK_COLOR := Color(0.210, 0.230, 0.260)
-const RAILHEAD_COLOR := Color(0.520, 0.500, 0.460)
+## Bare rolled steel, wheel-burnished. Metallic 1 and near-mirror: the crown is
+## the only true bare-metal surface anywhere in the playable corridor.
+const RAILHEAD_COLOR := Color(0.560, 0.545, 0.520)
+## The flangeway, the check rail and the clips — everything a wheel never touches
+## and rust therefore owns.
+const RAIL_RUST_COLOR := Color(0.235, 0.150, 0.105)
 const SLEEPER_COLOR := Color(0.190, 0.160, 0.130)
+const LITTER_COLOR := Color(0.640, 0.575, 0.440)
+const GULL_COLOR := Color(0.930, 0.925, 0.900)
+const GULL_MARK_COLOR := Color(0.150, 0.155, 0.170)
 const JOINT_COLOR := Color(0.340, 0.330, 0.310)
 const STEEL_COLOR := Color(0.400, 0.430, 0.470)
 const DARK_STEEL_COLOR := Color(0.280, 0.300, 0.340)
@@ -149,6 +253,7 @@ func _ready() -> void:
 	_build_arch_foundations()
 	IronworkScript.attach(self)
 	_build_lamps()
+	_build_deck_dressing()
 
 
 # --- Roadway -----------------------------------------------------------------
@@ -185,9 +290,17 @@ func _build_roadway() -> void:
 # --- Tramway -----------------------------------------------------------------
 
 ## The metro track the real upper deck carries: a sunken sett bed, sleepers just
-## breaking its surface, and two rails whose heads are exactly flush with the
-## paving. Two bright parallel lines down a hundred metres of dark granite are
-## the strongest perspective cue on the whole bridge.
+## breaking its surface, and two lengths of real GROOVED rail whose crowns sit
+## level with the paving. Two bright parallel lines down a hundred metres of dark
+## granite are the strongest perspective cue on the whole bridge — but only if
+## they are rails.
+##
+## What was here was a 100 x 0.10 x 0.08 box per side: a painted stripe, measuring
+## a flat navy (21, 32, 56) with a maximum of 102, and named independently by both
+## round-1 critics as the single detail that gave the frame away against N. Sane
+## Trilogy. BridgeDeckKit builds the section instead — running head, gauge face,
+## flangeway, check rail and clips, in two materials. See its header for why the
+## crown is ground to a far tighter radius than a real one.
 func _build_tramway() -> void:
 	var tram := Node3D.new()
 	tram.name = "Tramway"
@@ -209,12 +322,39 @@ func _build_tramway() -> void:
 		ties.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		ties.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
 
-	# Polished heads: low roughness, high metallic, so the low sun runs a hot
-	# specular line down each rail instead of leaving them flat grey.
-	var steel := ToonFactory.iron(RAILHEAD_COLOR, 1.0, 0.85, 0.26)
-	for side in [-1.0, 1.0]:
-		SceneryKit.box(tram, "Rail", Vector3(DECK_LENGTH, 0.10, RAIL_HEAD),
-				Vector3(0.0, DECK_TOP - 0.05, side * RAIL_GAUGE_HALF), steel)
+	# Two bakes, two draw calls — exactly what the pair of boxes cost before.
+	var steel := MeshBaker.new()
+	var rust := MeshBaker.new()
+	var half := DECK_LENGTH * 0.5
+	for i in 2:
+		var side := -1.0 if i == 0 else 1.0
+		DeckKit.grooved_rail(steel, rust, -half, half, side * RAIL_GAUGE_HALF,
+				RAIL_CROWN_Y, TRAM_TOP, 4801 + i * 137)
+	# metallic 1.0, not the 0.85 that was here. ToonFactory snaps at 0.6 so both
+	# land on bare metal either way, and stating it stops the next reader assuming
+	# there is a half-painted rail somewhere in the cache. Everything a wheel never
+	# touches is dielectric rust at 0.88 in the second bake.
+	#
+	# Roughness 0.30, not the 0.15 a mirror-polished crown would take. Measured, on
+	# a render: at 0.15 the head comes back near-black. A metal has no diffuse term
+	# at all, so every photon it returns is a reflection, and at a grazing view down
+	# the deck the only thing in the reflection is either the sun's own lobe — which
+	# a horizontal surface under a 51-degree key cannot see — or the environment.
+	# Widening the lobe is the one lever this file has over that. It is also honest:
+	# a rail head is ground and then wheel-burnished, which is satin, not chrome.
+	#
+	# It is a partial fix and the rest is not geometry. See the report: metals in
+	# this scene are returning almost nothing at grazing angles, which points at the
+	# environment's screen-space reflections marching along the deck and finding the
+	# deck. A ReflectionProbe over the corridor would settle it.
+	#
+	# LODs off, as on the arch and the lampposts: a 56 mm rail head is exactly the
+	# kind of thin disjoint ribbon mesh decimation deletes first, and the crown
+	# facets are the whole point of it.
+	tram.add_child(steel.commit(ToonFactory.iron(RAILHEAD_COLOR, 0.6, 1.0, 0.30),
+			"RailHeads", false))
+	tram.add_child(rust.commit(ToonFactory.iron(RAIL_RUST_COLOR, 0.34, 0.0, 0.88),
+			"RailFurniture", false))
 
 
 # --- Kerbs and walkways ------------------------------------------------------
@@ -380,13 +520,20 @@ func _build_lamps() -> void:
 	# glowing globes stay separate, because they are separate materials and
 	# because lighting_rig.gd has to be able to find them (see _lamp below).
 	var castings := MeshBaker.new()
+	# The contact ring under each foot. Its own material, because void black is
+	# not iron — but the same parameter set ToonFactory already caches for the
+	# deck's gully voids, so it is one extra draw call for all eight lamps and
+	# nothing new in the material table.
+	var collars := MeshBaker.new()
 	for x in LAMP_XS:
 		for side in [-1.0, 1.0]:
-			_lamp(lamps, castings, x, side * PARAPET_MID)
+			_lamp(lamps, castings, collars, x, side * PARAPET_MID)
 	# LODs off for the same reason as the arch: eight disjoint 13 cm poles are
 	# exactly what mesh decimation deletes first.
 	lamps.add_child(castings.commit(
 			ToonFactory.iron(LAMP_IRON_COLOR, 0.8, 0.2, 0.45), "LampCastings", false))
+	lamps.add_child(collars.commit(
+			ToonFactory.solid(Color(0.055, 0.05, 0.055), 0.0, 1.0), "LampCollars", false))
 
 	# Capsules, and all eight on one body: a swept-sphere SpringArm glides around
 	# a capsule where it snags on the corners of a box, and one body means one
@@ -417,9 +564,26 @@ func _build_lamps() -> void:
 ## children for a SphereMesh, so nesting the parts would leave the bridge unlit —
 ## and any second sphere here (a finial, a lantern shell) would burn one of the
 ## eight OmniLight3D slots on itself.
-func _lamp(parent: Node3D, castings: MeshBaker, x: float, z: float) -> void:
+func _lamp(parent: Node3D, castings: MeshBaker, collars: MeshBaker,
+		x: float, z: float) -> void:
+	# A moulded foot, not a pole ending at a plane. A critic measured the two
+	# posts in 02_deck_eye as meeting the paving "on a hard line with no falloff",
+	# and half of that is the geometry: a 34 cm box on a flat coping presents one
+	# horizontal edge and nothing under it. Three courses stepping outward give
+	# the base a face that turns away from a 34-degree key and an overhang that
+	# shades the course below, which is the value ramp the eye is looking for.
+	# The other half is a contact ring — see BridgeDeckKit.contact_patch().
+	DeckKit.contact_patch(collars, Vector3(x, LAMP_BASE_Y, z), 0.30)
+	castings.add_box(Vector3(0.50, 0.05, 0.50),
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.025, z)))
+	castings.add_box(Vector3(0.42, 0.07, 0.42),
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.085, z)))
 	castings.add_box(Vector3(0.34, 0.22, 0.34),
-			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.11, z)))
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.23, z)))
+	# The shaft's own swell where it leaves the base, which is what a cast-iron
+	# standard actually has and what stops the joint reading as a butt.
+	castings.add_cylinder(0.115, 0.30,
+			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 0.47, z)), 8)
 	castings.add_cylinder(0.065, 2.60,
 			Transform3D(Basis.IDENTITY, Vector3(x, LAMP_BASE_Y + 1.52, z)))
 	castings.add_cylinder(0.11, 0.10,
@@ -440,6 +604,291 @@ func _lamp(parent: Node3D, castings: MeshBaker, x: float, z: float) -> void:
 	# blooms rather than clipping to a flat white blob.
 	globe.material_override = ToonFactory.glow(Color(1.0, 0.85, 0.55), 2.2)
 	parent.add_child(globe)
+
+
+# --- Deck dressing -----------------------------------------------------------
+
+## Everything the corridor was missing. Round 1's finding was blunt and correct:
+## across four wide shots there was not one crate, bollard, bench, sign, drain,
+## catenary pole, landed gull or piece of litter on this deck, and the RUBRIC
+## counts empty flat ground anywhere the camera can see as a defect.
+##
+## WHERE IT ALL GOES. props/prop_spawner.gd documents its own lane — barrels hug
+## the rails at |z| ~ 4.2 and keep the middle six metres clear — so nothing static
+## here occupies |z| in [3.4, 4.9] unless it is flush with the paving. Everything
+## with height stands on the footway or against the parapet, outside ARENA_Z.
+##
+## FIVE MATERIALS, FIVE DRAW CALLS, one bake each. Every piece below is a handful
+## of boxes and would have been a MeshInstance3D apiece under the old scheme; at
+## roughly a hundred pieces that is a hundred draw calls, which is the whole
+## reason MeshBaker exists. The only exceptions are the two parted wire ends,
+## which move and therefore cannot be welded into a static surface — see
+## _build_fallen_line. Two draw calls, and they are the whole cost of the wreck.
+func _build_deck_dressing() -> void:
+	var dressing := Node3D.new()
+	dressing.name = "DeckDressing"
+	add_child(dressing)
+
+	var iron := MeshBaker.new()      # catenary, gratings, bollards
+	var stone := MeshBaker.new()     # benches
+	var dark := MeshBaker.new()      # grating voids, gull markings
+	var feather := MeshBaker.new()   # gull bodies
+	var scrap := MeshBaker.new()     # litter
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 18_86    # the year the bridge opened; seeded, see ARCHITECTURE.md
+
+	_build_catenary(iron, dark)
+	_build_fallen_line(iron, dressing)
+	_build_furniture(iron, stone, dark, rng)
+	_build_gratings(iron, dark)
+	_build_perched_gulls(feather, dark, rng)
+	_build_litter(scrap, rng)
+
+	# Same cast iron as the lampposts, so the two share a cached material even
+	# though they are separate bakes.
+	dressing.add_child(iron.commit(ToonFactory.iron(LAMP_IRON_COLOR, 0.8, 0.0, 0.5),
+			"DeckIron", false))
+	dressing.add_child(stone.commit(SceneryKit.world_mapped(
+			ToonFactory.stone(KERB_COLOR, 1.5)), "DeckStone"))
+	dressing.add_child(dark.commit(ToonFactory.solid(Color(0.055, 0.05, 0.055), 0.0, 1.0),
+			"DeckVoids", false))
+	dressing.add_child(feather.commit(ToonFactory.solid(GULL_COLOR, 0.0, 0.82),
+			"PerchedGulls", false))
+	# Paper, leaves and torn ticket stock. Cloth at a tight tile is the closest
+	# thing in the factory to a scrap of something on stone.
+	dressing.add_child(scrap.commit(ToonFactory.cloth(LITTER_COLOR, 0.22), "DeckLitter", false))
+
+
+## Masts, span wires, messenger and contact wire, station by station — and, over
+## the fighting span, the same assembly built already torn out. See WRECK_REACH.
+##
+## The contact wire staggers either side of the centreline between stations, which
+## is both what a real one does — so a pantograph carbon wears evenly instead of
+## grooving in one place — and what stops a 100 m wire being a dead straight line
+## down the middle of the frame.
+func _build_catenary(iron: MeshBaker, dark: MeshBaker) -> void:
+	var span_y := MAST_BASE_Y + DeckKit.MAST_HEIGHT - DeckKit.SPAN_DROP
+	for x: float in CATENARY_XS:
+		# Every mast, its cap and its bracket lug stand on all four stations, torn
+		# gantry or not. They are the converging verticals the corridor is for, and
+		# at |z| = 6.25 against a giant who reaches 5.75 they are already clear.
+		for side in [-1.0, 1.0]:
+			DeckKit.catenary_mast(iron, x, side * MAST_Z, MAST_BASE_Y, dark)
+		if _gantry_is_wrecked(x, span_y):
+			DeckKit.torn_cross_span(iron, x, MAST_Z, span_y, WRECK_HANG_Z,
+					WRECK_CATCH_Y - 0.35)
+		else:
+			DeckKit.cross_span(iron, x, MAST_Z, span_y, CROSS_SPAN_SAG,
+					DECK_TOP + DeckKit.WIRE_HEIGHT + DeckKit.MESSENGER_RISE)
+
+	# The through-line, support to support. The ladder carries the two abutment
+	# anchors as well as the four masts, because a wire that stops dead over the
+	# last mast is the sort of thing that survives three review rounds because
+	# nobody looks up. Only the bays outside the break are still strung.
+	var brk := _break_brackets()
+	var ladder: Array[float] = [-ABUTMENT_INNER]
+	ladder.append_array(CATENARY_XS)
+	ladder.append(ABUTMENT_INNER)
+	for i in range(1, ladder.size()):
+		var x0: float = ladder[i - 1]
+		var x1: float = ladder[i]
+		if x1 > brk.x and x0 < brk.y:
+			continue     # inside the break: this bay is on the floor of the Douro
+		# The end bays are anchored, not registered, so they carry less sag than a
+		# mast-to-mast span. Same two numbers this had before the break existed.
+		var sag := 0.05 if (i == 1 or i == ladder.size() - 1) else 0.09
+		DeckKit.catenary_run(iron, x0, x1, DECK_TOP,
+				_wire_stagger(i - 1, ladder.size()), _wire_stagger(i, ladder.size()), sag)
+
+
+## The two brackets the line is still made off at: the innermost mast on each side
+## that stands clear of WRECK_REACH. DERIVED, not written down — move the giant's
+## arena or the gantry ladder and the break moves with it instead of quietly
+## leaving three metres of live wire inside his shoulders. Falls back to the
+## abutment anchors if no mast qualifies, which takes the whole line down rather
+## than leaving one up in the wrong place.
+func _break_brackets() -> Vector2:
+	var out := Vector2(-ABUTMENT_INNER, ABUTMENT_INNER)
+	for x: float in CATENARY_XS:
+		if x <= WRECK_REACH.x:
+			out.x = maxf(out.x, x)
+		elif x >= WRECK_REACH.y:
+			out.y = minf(out.y, x)
+	return out
+
+
+## Has this gantry lost its span wire? Only the ones the giant can reach, and only
+## while their cross-span hangs below the top of him — raise the masts past 10.6
+## and this correctly stops claiming damage that no longer needs doing.
+func _gantry_is_wrecked(x: float, span_y: float) -> bool:
+	return x > WRECK_REACH.x and x < WRECK_REACH.y \
+			and span_y - CROSS_SPAN_SAG < GIANT_TOP
+
+
+## Contact-wire stagger at support `i` of the ladder: it zig-zags mast to mast and
+## comes back to the centreline where it is anchored at the abutments.
+func _wire_stagger(i: int, count: int) -> float:
+	if i == 0 or i == count - 1:
+		return 0.0
+	return DeckKit.WIRE_STAGGER * (1.0 if i % 2 == 1 else -1.0)
+
+
+## What came down. The messenger is still made off at both outer brackets, so the
+## dead run hangs in swags along the OUTSIDE of the parapet, caught over the two
+## torn gantries on its way; the contact wire it used to carry has parted near
+## each end, and those two free tails are the only moving thing on this deck.
+##
+## Nothing here is inboard of WRECK_HANG_Z except the two short jogs from the
+## brackets, which are still 7.9 m up where they cross the footway edge. The
+## clearance argument is in the WRECK_REACH block and it is checked for real by
+## scripts/world/bridge/_wreck_probe.gd.
+func _build_fallen_line(iron: MeshBaker, dressing: Node3D) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2_002    # the year the Metro reached the upper deck; seeded, see ARCHITECTURE.md
+	var span_y := MAST_BASE_Y + DeckKit.MAST_HEIGHT - DeckKit.SPAN_DROP
+	var sz := WRECK_HANG_SIDE
+	var brk := _break_brackets()
+	var catch_z := sz * WRECK_HANG_Z
+
+	# Bracket, a jog out over the rail, every torn gantry it is snagged on along
+	# the way, jog, bracket. The jog is the piece that gets the run from the mast
+	# bracket to outboard of the parapet WITHOUT dropping on the way — see the
+	# WRECK_REACH block for why that ordering is not negotiable.
+	var path: Array[Vector3] = [
+		Vector3(brk.x, span_y, sz * (MAST_Z - 0.10)),
+		Vector3(brk.x + 1.2, span_y - 0.73, catch_z),
+	]
+	for x: float in CATENARY_XS:
+		if _gantry_is_wrecked(x, span_y):
+			path.append(Vector3(x, WRECK_CATCH_Y, catch_z))
+	path.append(Vector3(brk.y - 1.2, span_y - 0.73, catch_z))
+	path.append(Vector3(brk.y, span_y, sz * (MAST_Z - 0.10)))
+
+	# Sag per swag: none across the two jogs, then WRECK_SAG.x at the ends easing
+	# to WRECK_SAG.y in the middle.
+	var sags: Array[float] = [0.0]
+	var inner := path.size() - 3      # swags between the two jogs' far ends
+	var mid := float(inner - 1) * 0.5
+	for i in inner:
+		sags.append(lerpf(WRECK_SAG.x, WRECK_SAG.y,
+				1.0 - absf(float(i) - mid) / maxf(mid, 1.0)))
+	sags.append(0.0)
+	for i in range(1, path.size()):
+		DeckKit.fallen_line(iron, path[i - 1], path[i], sags[i - 1], rng)
+
+	# The two parted ends of the contact wire, hung off the outermost swags where
+	# the messenger still holds them. Separate nodes because they move: one draw
+	# call each, and the only two in this whole rebuild.
+	var last := path.size() - 1
+	for i in 2:
+		var a := 1 if i == 0 else last - 2
+		var at := DeckKit.swag_point(path[a], path[a + 1], sags[a],
+				0.21 if i == 0 else 0.79)
+		var tail := WireSwayScript.new() as MeshInstance3D
+		tail.name = "TornContactWire%d" % (i + 1)
+		tail.mesh = DeckKit.torn_tail(2.9 - float(i) * 0.5, 0.32, 7 + i * 5)
+		tail.position = at
+		# The cached DeckIron material, so a parted end is visibly the same cable
+		# as the run it fell off.
+		tail.material_override = ToonFactory.iron(LAMP_IRON_COLOR, 0.8, 0.0, 0.5)
+		# A 40 mm cable hanging over the river casts onto water fifteen metres
+		# below and onto nothing else, and a moving shadow caster is the one kind
+		# the shadow atlas cannot cache.
+		tail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		tail.set("phase", 0.9 + float(i) * 2.4)
+		dressing.add_child(tail)
+
+
+## Bollards guarding the footway ends, and a granite bench under every other
+## catenary station. The bench is the only piece of dressing tall enough to stand
+## in the player's way, so it is the only one with a collider.
+func _build_furniture(iron: MeshBaker, stone: MeshBaker, dark: MeshBaker,
+		rng: RandomNumberGenerator) -> void:
+	var bodies := StaticBody3D.new()
+	bodies.name = "DeckFurnitureBodies"
+	bodies.collision_layer = PhysicsLayers.WORLD
+	bodies.collision_mask = 0
+	add_child(bodies)
+
+	var bench_z := WALKWAY_OUTER - 0.32
+	for sx: float in [-1.0, 1.0]:
+		for sz: float in [-1.0, 1.0]:
+			for k in 2:
+				# Two bollards per corner, each with its own lean: a matched pair
+				# of perfectly plumb posts is the repetition the RUBRIC bans.
+				var x := sx * (ABUTMENT_INNER - 0.9 - float(k) * 1.35)
+				DeckKit.bollard(iron, Vector3(x, WALKWAY_TOP, sz * (WALKWAY_OUTER - 0.42)),
+						0.78 + rng.randf_range(-0.05, 0.05), rng.randi(), dark)
+		for bx: float in [-30.0, 10.0]:
+			var z := sx * bench_z
+			DeckKit.bench(stone, Vector3(bx, WALKWAY_TOP, z), 1.9, rng.randf_range(-0.03, 0.03))
+			# The grime line under a bench end, which is the same contact problem
+			# a lamp post has and the same fix. See DeckKit.contact_patch().
+			for ex: float in [-0.68, 0.68]:
+				DeckKit.contact_patch(dark, Vector3(bx + ex, WALKWAY_TOP, z), 0.20)
+			# The box reaches back into the parapet body, so there is no
+			# hero-width slot between a bench and the railing behind it.
+			SceneryKit.solid_shape(bodies, Vector3(2.0, 0.55, 0.86),
+					Vector3(bx, WALKWAY_TOP + 0.275, sx * (WALKWAY_OUTER - 0.05)))
+
+
+## Gully gratings in the kerb line, where the carriageway drains. Flush with the
+## paving — 8 mm of bar over a recessed frame — so they are a pattern in the deck
+## and never something to trip on.
+func _build_gratings(iron: MeshBaker, dark: MeshBaker) -> void:
+	var z := ROADWAY_HALF - 0.24
+	var x := -DECK_LENGTH * 0.5 + 6.0
+	while x < DECK_LENGTH * 0.5 - 5.0:
+		for sz in [-1.0, 1.0]:
+			DeckKit.drain(iron, dark, Vector3(x, DECK_TOP, sz * z), 0.52, 0.30)
+		x += 12.5
+
+
+## Gulls standing on the handrail. Five, on both parapets, never at a matching X
+## and never at a repeated yaw — the frame should not show two birds in the same
+## pose at the same station.
+func _build_perched_gulls(feather: MeshBaker, dark: MeshBaker,
+		rng: RandomNumberGenerator) -> void:
+	# BridgeIronwork.RAIL_TOP. Mirrored rather than imported: that script has no
+	# class_name either, and it already mirrors this file's cross-section back.
+	const HANDRAIL_Y := 3.33
+	for spot: Vector3 in [
+		Vector3(-17.5, 1.0, 0.0), Vector3(6.0, 1.0, 0.0), Vector3(27.0, -1.0, 0.0),
+		Vector3(-34.0, -1.0, 0.0), Vector3(15.5, -1.0, 0.0),
+	]:
+		DeckKit.perched_gull(feather, dark,
+				Vector3(spot.x, HANDRAIL_Y, spot.y * PARAPET_MID),
+				rng.randf_range(-PI, PI))
+
+
+## Scraps blown into the angles the wind cannot reach: the kerb line, the back of
+## the footway and the outer edge of the tram bed. Two triangles each, and they
+## are what stops a hundred metres of swept granite reading as swept granite.
+func _build_litter(scrap: MeshBaker, rng: RandomNumberGenerator) -> void:
+	# Lanes, as (z, how far the scatter spreads either side). Nothing lands inside
+	# prop_spawner.gd's barrel lane at |z| ~ 4.2 with any height, but these are
+	# 2 mm quads and a barrel settling on one is not a collision anyone can see.
+	var lanes: Array[Vector2] = [
+		Vector2(ROADWAY_HALF - 0.15, 0.13),        # against the kerb face
+		Vector2(WALKWAY_OUTER - 0.16, 0.12),       # against the parapet plinth
+		Vector2(TRAM_HALF - 0.18, 0.14),           # the tram bed's outer gutter
+	]
+	for lane in lanes:
+		var count := int(DECK_LENGTH / 5.5)
+		for i in count:
+			if rng.randf() < 0.35:
+				continue
+			for sz: float in [-1.0, 1.0]:
+				var x := lerpf(-DECK_LENGTH * 0.5 + 2.0, DECK_LENGTH * 0.5 - 2.0,
+						(float(i) + rng.randf()) / float(count))
+				var z := sz * (lane.x + rng.randf_range(-lane.y, lane.y))
+				var y := TRAM_TOP if absf(z) < TRAM_HALF else DECK_TOP
+				if absf(z) > ROADWAY_HALF:
+					y = WALKWAY_TOP
+				DeckKit.litter(scrap, Vector3(x, y, z),
+						Vector2(rng.randf_range(0.07, 0.19), rng.randf_range(0.05, 0.15)),
+						rng.randf_range(-PI, PI))
 
 
 # --- Layout helpers ----------------------------------------------------------

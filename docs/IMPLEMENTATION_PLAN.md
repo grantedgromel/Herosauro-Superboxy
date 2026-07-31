@@ -1,6 +1,6 @@
 # Implementation Plan — Refining Level 1 to a High-Quality Indie Standard
 
-_Project: **Herosauro & Super Boxy: Legends of Porto** (Godot 4.3, GDScript)_
+_Project: **Herosauro & Super Boxy: The Guardian Brothers of Porto** (Godot 4.3, GDScript)_
 _Scope of this plan: take the **existing first level** (the Dom Luís Bridge fight vs. Adamastor)
 from a working MVP to a level that reads as a polished indie game. Additional levels are
 explicitly **out of scope for now** — but where a decision affects future levels, it is noted._

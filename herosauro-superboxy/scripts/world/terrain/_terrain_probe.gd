@@ -5,6 +5,7 @@ extends SceneTree
 ##   godot --headless --path . --script scripts/world/terrain/_terrain_probe.gd
 
 const TB := preload("res://scripts/world/terrain_builder.gd")
+const TerrainBatch := preload("res://scripts/world/terrain/terrain_batch.gd")
 
 ## Anything above this inside the bridge landing is standing in the arch.
 const WATER_LINE := -14.9
@@ -109,28 +110,56 @@ func _check_corridor(root: Node) -> void:
 		_fail("terrain reaches |x| = %.2f, well inside the arch springing" % min_ax)
 
 
-## Every triangle of the cobbled platforms must face up. It is the cheapest test
-## for the grid winding, which flips with the sign of the bank.
+## Every triangle of the cobbled platforms must face up, and must be seen from
+## above. It is the cheapest test for the grid winding, which flips with the sign
+## of the bank.
+##
+## Two things this used to get wrong, and both were invisible because the check
+## silently matched nothing and passed on an empty set:
+##
+##   * it selected the paving by comparing `albedo_color` to the batch's raw
+##    `COBBLE` constant, but ToonFactory remaps every colour through
+##    `_physical_albedo` on the way into the material, so the comparison stopped
+##     matching the moment that landed. It now asks TerrainBatch for the material
+##     it actually uses and compares identity — the factory caches by parameter
+##     set, so the paving surfaces share one instance — and fails outright if it
+##     finds no paving at all.
+##   * it tested the right-hand normal of the emitted vertex order, which is the
+##     CULLING direction, not the shading one, and asserted it points up. Godot's
+##     front face is the clockwise one, so an up-facing surface's emitted
+##     right-hand normal points DOWN; asserting otherwise is asserting that the
+##     paving is invisible from above, which for a long time it was. Both are
+##     checked now, in the directions MeshBaker's contract gives them.
 func _check_winding(root: Node) -> void:
+	var paving := TerrainBatch.cobble_mat()
+	var surfaces := 0
 	for mi in _all(root):
-		var mat := mi.material_override as StandardMaterial3D
-		if mat == null or mat.albedo_color.to_html(false) != Color(0.58, 0.56, 0.51).to_html(false):
+		if mi.material_override != paving:
 			continue
+		surfaces += 1
 		var arrays := (mi.mesh as ArrayMesh).surface_get_arrays(0)
 		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var norms: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
 		var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
-		var down := 0
+		var shaded_down := 0
+		var back_facing := 0
 		var n := idx.size() / 3
 		for t in n:
 			var a := verts[idx[t * 3]]
 			var b := verts[idx[t * 3 + 1]]
 			var c := verts[idx[t * 3 + 2]]
-			if (b - a).cross(c - a).normalized().y < 0.3:
-				down += 1
-		if down > 0:
-			_fail("%s: %d/%d paving triangles not facing up" % [mi.name, down, n])
+			if norms[idx[t * 3]].y < 0.3:
+				shaded_down += 1
+			if (b - a).cross(c - a).normalized().y > -0.3:
+				back_facing += 1
+		if shaded_down > 0:
+			_fail("%s: %d/%d paving triangles shaded from below" % [mi.name, shaded_down, n])
+		elif back_facing > 0:
+			_fail("%s: %d/%d paving triangles culled from above" % [mi.name, back_facing, n])
 		else:
-			print("  %s: all %d paving triangles face up" % [mi.name, n])
+			print("  %s: all %d paving triangles face up and render" % [mi.name, n])
+	if surfaces == 0:
+		_fail("no paving surfaces found — the check matched nothing and proved nothing")
 
 
 ## ground_height() has to be sane before anything can be placed with it: finite,
@@ -143,7 +172,12 @@ func _check_heights() -> void:
 		var x := -190.0
 		while x <= 190.0:
 			var y := TB.ground_height(x, z)
-			if is_nan(y) or is_inf(y) or y < TB.WATER_Y - 0.01 or y > 26.0:
+			# The headland's toe deliberately continues BELOW the water plane, so
+			# the shoreline is an intersection with the river rather than an edge
+			# coincident with it. Its floor is the same WALL_FOOT_Y everything else
+			# on the bank foots at.
+			var floor_y := TB.WALL_FOOT_Y if z > TB.BANK_Z_NEAR else TB.WATER_Y
+			if is_nan(y) or is_inf(y) or y < floor_y - 0.01 or y > 26.0:
 				bad += 1
 			x += 2.0
 		z += 3.0
@@ -268,5 +302,11 @@ func _check_bounds(root: Node) -> void:
 	print("  x %.1f..%.1f   y %.1f..%.1f   z %.1f..%.1f" % [
 		total.position.x, total.end.x, total.position.y, total.end.y,
 		total.position.z, total.end.z])
-	if total.end.y > 26.0:
-		_fail("terrain reaches y = %.1f, above the intended skyline" % total.end.y)
+	# What this is really protecting is the LANDMARKS' skyline: the Sé's towers top
+	# out at 41.2 and Clérigos at 53, and if the ground or its planting climbs into
+	# that band the one thing that makes the far bank Porto stops being the tallest
+	# thing on it. 26 was the right number while the upland was bare ground; the
+	# crest now carries cypresses, which is what a Douro ridge line actually is, and
+	# they reach 29. 33 keeps eight metres of clear sky under the Sé.
+	if total.end.y > 33.0:
+		_fail("terrain reaches y = %.1f, into the landmarks' skyline" % total.end.y)

@@ -32,6 +32,9 @@ extends Node3D
 #                     wide, running along Z for the model's whole 90-unit depth.
 #   capture skirt     the curtain of stretched triangles hanging off every capture
 #                     boundary, down to y = -10.889. Pure garbage; must be drowned.
+#   sky islands       the same garbage at the TOP of the capture volume: detached
+#                     chunks of hillside floating clear of everything under them.
+#                     Nothing drowns these, so they are clipped — see sky_ceiling.
 #
 # Two independent checks put one scan unit at 5.0 real metres: the arch spans 33.7
 # units against the real 172 m, and deck-to-water is 12.6 units against the real
@@ -86,6 +89,26 @@ const SCAN_SIZE_TOLERANCE := 0.02
 ## anywhere in the tree, but the numbers only mean anything against the arena's
 ## origin — a parent that translates the whole arena would need these moved with it.
 @export var scan_origin: Vector3 = Vector3(-63.467, -11.8, -150.0)
+
+## World Y above which this scan carries nothing real. Triangles lying entirely
+## above it are dropped at load. 0 disables the clip.
+##
+## Measured off the mesh under the placement above, by triangle-centroid height:
+## the scan's own skyline — the Gaia clifftop, x 115..154, z -235..-288 — tops out
+## at y = 38.0, and above that sit 1,213 triangles (0.28% of the mesh) in two tight
+## clusters near (130, 46, -245) and (151, 42, -244), with a clear two-metre gap of
+## empty air underneath both.
+##
+## They are capture-boundary islands — the identical garbage to the skirt hanging
+## off the bottom of the capture volume, which the placement above already drowns
+## under the river. Nothing drowns the ones in the air, so a 3.5 m lump of hillside
+## hung in clear sky 250 m out, and both round-1 critics found it independently in
+## two different shots. It is a bug, so it is fixed where it comes from rather than
+## hidden behind something.
+##
+## 39.0 leaves a metre of headroom over the real skyline. Re-measure it if the scan
+## is ever re-exported; the warning below fires if the number stops making sense.
+@export var sky_ceiling: float = 39.0
 
 # --- Light reconciliation ----------------------------------------------------
 #
@@ -154,7 +177,8 @@ func _ready() -> void:
 	var mat := _build_backdrop_material()
 	var native := AABB()
 	var seen := false
-	for entry in _geometry(_scan, Transform3D.IDENTITY):
+	var geometry := _geometry(_scan, Transform3D.IDENTITY)
+	for entry in geometry:
 		var geo: GeometryInstance3D = entry[0]
 		_configure(geo, mat)
 		var mesh_instance := geo as MeshInstance3D
@@ -162,8 +186,14 @@ func _ready() -> void:
 			var local: AABB = (entry[1] as Transform3D) * mesh_instance.mesh.get_aabb()
 			native = local if not seen else native.merge(local)
 			seen = true
+	# After the size check, which is authored against the mesh as imported.
 	if seen:
 		_check_native_size(native.size)
+	if sky_ceiling != 0.0:
+		for entry in geometry:
+			var mesh_instance := entry[0] as MeshInstance3D
+			if mesh_instance != null and mesh_instance.mesh is ArrayMesh:
+				_clip_sky_islands(mesh_instance)
 
 
 # --- Gating ------------------------------------------------------------------
@@ -265,6 +295,101 @@ func _find_albedo() -> Texture2D:
 			return source.albedo_texture
 	push_warning("CityBackdrop: no albedo texture on the scan; it will render flat.")
 	return null
+
+
+# --- Sky-island clip ---------------------------------------------------------
+
+## Drop every triangle lying entirely above `sky_ceiling` in world space.
+##
+## Only the index buffer is rewritten. Positions, normals and UVs are handed
+## straight back, so nothing is re-welded and the atlas mapping cannot drift; the
+## orphaned vertices are left in the buffer because chasing them would cost a
+## remap of a million indices to save a megabyte on an asset that is desktop-only.
+##
+## LODs have to be regenerated, because ArrayMesh can be given LOD index arrays
+## but cannot be asked for them back. That is the expensive half, so it is skipped
+## outright when nothing sits above the ceiling — a clean scan pays two cheap
+## passes and keeps its imported mesh untouched.
+##
+## The height test is a single dot product per vertex: the scan hangs under a yaw
+## and a uniform scale, and the mesh under a fixed axis-convention rotation of its
+## own, so world Y is an affine function of the local position and the row of the
+## composed basis is all of it that matters. Nothing here assumes which local axis
+## the glTF calls up.
+func _clip_sky_islands(mi: MeshInstance3D) -> void:
+	var source: ArrayMesh = mi.mesh
+	var g := mi.global_transform
+	var up_row := Vector3(g.basis.x.y, g.basis.y.y, g.basis.z.y)
+
+	var out := ArrayMesh.new()
+	out.resource_name = "%s_clipped" % source.resource_name
+	var dropped := 0
+	var total := 0
+
+	for s in source.get_surface_count():
+		var arr := source.surface_get_arrays(s)
+		var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+		var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+		if verts.is_empty() or idx.is_empty():
+			continue
+		var heights := PackedFloat32Array()
+		heights.resize(verts.size())
+		for i in verts.size():
+			heights[i] = up_row.dot(verts[i]) + g.origin.y
+
+		var kept := PackedInt32Array()
+		kept.resize(idx.size())
+		var n := 0
+		for t in range(0, idx.size(), 3):
+			var a := idx[t]
+			var b := idx[t + 1]
+			var c := idx[t + 2]
+			# Entirely above, so a triangle straddling the ceiling survives whole
+			# and the clip can never cut a hole in the real skyline.
+			if heights[a] > sky_ceiling and heights[b] > sky_ceiling \
+					and heights[c] > sky_ceiling:
+				continue
+			kept[n] = a
+			kept[n + 1] = b
+			kept[n + 2] = c
+			n += 3
+		kept.resize(n)
+		total += idx.size() / 3
+		dropped += (idx.size() - n) / 3
+		arr[Mesh.ARRAY_INDEX] = kept
+		# Keep whatever vertex compression the importer chose; decompressing a
+		# million vertices here would double this asset's buffer memory.
+		var flags := source.surface_get_format(s) & Mesh.ARRAY_FLAG_COMPRESS_ATTRIBUTES
+		var im := ImporterMesh.new()
+		im.add_surface(Mesh.PRIMITIVE_TRIANGLES, arr, [], {}, null, "", flags)
+		im.generate_lods(25.0, 60.0, [])
+		var lodded: ArrayMesh = im.get_mesh()
+		if lodded == null or lodded.get_surface_count() == 0:
+			push_warning("CityBackdrop: sky clip produced an empty surface; keeping the original.")
+			return
+		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES,
+				lodded.surface_get_arrays(0), [], _surface_lods(im, 0), flags)
+
+	if dropped == 0:
+		return
+	if float(dropped) > float(total) * 0.05:
+		push_warning(
+			"CityBackdrop: sky_ceiling = %.1f drops %d of %d triangles (%.1f%%). "
+			% [sky_ceiling, dropped, total, 100.0 * float(dropped) / float(maxi(total, 1))]
+			+ "That is far more than capture debris — re-measure it against the scan."
+		)
+	mi.mesh = out
+	print_verbose("CityBackdrop: clipped %d sky-island triangles above y = %.1f."
+			% [dropped, sky_ceiling])
+
+
+## ImporterMesh's LOD index arrays, in the {screen_ratio: PackedInt32Array} shape
+## ArrayMesh.add_surface_from_arrays wants.
+func _surface_lods(im: ImporterMesh, surface: int) -> Dictionary:
+	var lods: Dictionary = {}
+	for l in im.get_surface_lod_count(surface):
+		lods[im.get_surface_lod_size(surface, l)] = im.get_surface_lod_indices(surface, l)
+	return lods
 
 
 # --- Guarantees --------------------------------------------------------------

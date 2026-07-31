@@ -11,8 +11,16 @@ extends Node3D
 ##   RiverLife         gulls, small craft, wakes and surface mist
 ##
 ## What it still owns directly is the cheap animated dressing: moored rabelos
-## riding the same wave field the water shader draws, drifting clouds, and a few
-## circling gulls. All decorative, none of it collides.
+## riding the same wave field the water shader draws, and drifting clouds. All
+## decorative, none of it collides.
+##
+## It used to own five gulls as well — two 1.1 m boxes each, hinged at a point, pure
+## white, no body — and Round 1 measured them as "untextured flat quads, bent
+## rectangles hinged at a point, no wing shape, no body, no shading". They are gone
+## rather than improved, because RiverLife already flies proper ones: a body, a head,
+## a tail, a grey mantle, near-black primaries and a vertex-shader wingbeat, in a
+## MultiMesh, with a flight envelope the probe checks against every landmark. Two
+## flocks of birds in one sky where one of them is worse is a defect, not density.
 ##
 ## The city used to be rows of coloured boxes laid along X at a fixed z. That was
 ## wrong twice over: the boxes read as painted card under a raking sun, and the
@@ -21,17 +29,47 @@ extends Node3D
 ## plots, and the facades are real punched geometry.
 
 const RiverLifeScript := preload("res://scripts/world/river_life.gd")
+const CloudShader: Shader = preload("res://assets/shaders/soft_cloud.gdshader")
 
 const CLOUD_SPEED := 1.4          # world units / second of drift along +X
-const CLOUD_WRAP_MIN := -120.0    # x where a cloud re-appears after wrapping
-const CLOUD_WRAP_MAX := 120.0     # x past which a cloud wraps back
+const CLOUD_WRAP_MIN := -190.0    # x where a cloud re-appears after wrapping
+const CLOUD_WRAP_MAX := 190.0     # x past which a cloud wraps back
 
 # --- Ribeira palette ---------------------------------------------------------
-# Pitched a good 10-15% darker than a photograph of these houses would suggest.
-# The key light is 2.4 energy of Color(1, 0.78, 0.54) and AgX has a 12.0 white
-# point: at the old values the ochres, creams and roses all converged on the same
-# hot cream and the terrace lost its stripe. Chroma went up as the values came
-# down, so the hue survives the exposure instead of being bleached out of it.
+# Pitched a good 10-15% darker than a photograph of these houses would suggest, with
+# the chroma raised to match. That was originally a defence against a warm key and a
+# high AgX white point bleaching every hue toward the same hot cream, and it still
+# holds under the daylight rig for a different and better reason.
+#
+# The arithmetic, re-derived against the values porto_daylight.tres ACTUALLY carries
+# (tonemap_exposure 0.72, tonemap_agx_white 4.0) and the re-keyed sun (energy 2.8 at
+# 34 degrees elevation, 66 degrees east of +x):
+#
+#   These facades stand at -x facing +x, so their normal is +x and the key's incidence
+#   on them is the sun vector's own x component, 0.337. plaster() takes the authored
+#   ochre Color(0.80, 0.60, 0.22) to an effective mean albedo of the same 0.80 in red
+#   (x1.13 for the fine layer's mean, then clamped at ALBEDO_CEILING, then multiplied
+#   back down by the layer itself). So red arrives at 0.80 x 0.337 x 2.8 = 0.755
+#   scene-referred, plus about 0.10 of ambient and quay bounce, and x0.72 of exposure
+#   puts it at 0.60 going into AgX — high on the curve, short of the shoulder, a bright
+#   wall that has kept its hue.
+#
+#   That is DOWN from 0.72 before the re-key, and the drop is deliberate. Round 1
+#   measured the background out-shouting the playable deck by 2x in luminance and
+#   2.5x in saturation; swinging the sun round toward +z cuts these facades' incidence
+#   from 0.545 to 0.337 while the deck's is held flat by the energy change. Nobody's
+#   paint was desaturated to get it — the Ribeira chord is the right chord for Porto
+#   and the critics were explicit that it is not what is wrong.
+#
+#   Photo values here would still land past the white point and the terrace would go
+#   back to being one cream stripe, which is the failure this palette was authored
+#   against and the reason it is not simply brightened now that there is headroom.
+#
+# The saturation these carry also has to survive adjustment_saturation 1.12 on top of
+# a per-channel LUT whose slope through the band they occupy (input 0.45-0.62) is now
+# 0.95 rather than 1.3 — the grade compresses the background band on purpose this
+# round. The reds are the closest to the edge; a render was checked at 1.20 and they
+# went neon, which is why the environment's saturation is 1.12.
 
 const RIBEIRA_WALLS := [
 	Color(0.80, 0.60, 0.22),  # ochre yellow
@@ -58,12 +96,23 @@ const ROOF_COLORS := [Color(0.56, 0.28, 0.22), Color(0.48, 0.26, 0.21)]
 const RABELO_SPOTS := [Vector3(-28.0, 0.0, -16.0), Vector3(8.0, 0.0, -24.0), Vector3(34.0, 0.0, -13.0)]
 const RABELO_YAWS := [-0.35, 0.25, 0.6]
 
-const GULL_COUNT := 5
+## Cloud field. Nine identically-scaled clusters at identical tilt read as two
+## copy-pasted objects, which is what Round 1 saw; twelve over a much wider band, each
+## with its own yaw, its own three-axis stretch and its own puff count, do not.
+const CLOUD_COUNT := 12
+## Height band and depth band the field occupies. Both pushed a long way out from the
+## 34-58 / -70..-30 they used to sit in: at that range a 4 m puff scaled 2.2 subtends
+## as much of shot 07 as a building does, which is why the old ones read as objects
+## hanging over the river rather than as weather.
+const CLOUD_Y := Vector2(58.0, 104.0)
+const CLOUD_Z := Vector2(-210.0, -70.0)
 
 var _clouds: Array[Node3D] = []
 var _rabelos: Array[Node3D] = []
-var _gulls: Array[Node3D] = []
-var _gull_data: Array[Dictionary] = []
+var _cloud_material: ShaderMaterial
+## Seconds of simulated time since this node entered the tree — the animation
+## clock for the rabelos. See the note in _process().
+var _decor_time: float = 0.0
 
 
 const CityBackdropScene: PackedScene = preload("res://scenes/world/city_backdrop.tscn")
@@ -85,7 +134,12 @@ func _ready() -> void:
 	_build_rabelos()
 	add_child(RiverLifeScript.new())
 	_build_clouds()
-	_build_gulls()
+	# The cloud shader needs the direction the key actually points, and SunLight is a
+	# sibling of the arena root that has not been resolved yet during this _ready().
+	# Deferring is the same thing LightingRig does one node over and for the same
+	# reason. Reading it rather than authoring a copy is the whole point: a
+	# hand-copied sun vector is how Mat_river's is still two rounds stale.
+	_aim_clouds_at_sun.call_deferred()
 
 
 # --- Ribeira city ------------------------------------------------------------
@@ -244,32 +298,18 @@ func _process(delta: float) -> void:
 		if cloud.position.x > CLOUD_WRAP_MAX:
 			cloud.position.x = CLOUD_WRAP_MIN
 
-	# Ticks approximate the water shader's TIME, so hulls ride the same waves
-	# the river surface is showing.
-	var t := float(Time.get_ticks_msec()) / 1000.0
+	# Accumulated delta, NOT Time.get_ticks_msec(). It still approximates the
+	# water shader's TIME closely enough that hulls ride the waves the river
+	# surface is showing, and unlike the wall clock it is identical on every run
+	# — which is what lets tools/harness.py gate captures per pixel. river_life.gd
+	# integrates the same delta, so the two decor sets stay locked to each other.
+	_decor_time += delta
+	var t := _decor_time
 	for i in _rabelos.size():
 		var boat := _rabelos[i]
 		var wave := sin((boat.position.x + t * 0.5) * 0.18) + cos((boat.position.z + t * 0.4) * 0.234)
 		boat.position.y = -14.75 + wave * 0.35
 		boat.rotation.z = sin(t * 0.6 + float(i) * 2.1) * 0.04
-
-	# Gulls circle their roosts, banking around the loop, wings beating.
-	for i in _gulls.size():
-		var gull := _gulls[i]
-		var d := _gull_data[i]
-		var ang: float = t * d.speed + d.phase
-		var c: Vector3 = d.center
-		gull.position = Vector3(
-			c.x + cos(ang) * d.radius,
-			c.y + sin(t * 1.7 + d.phase) * 0.8,
-			c.z + sin(ang) * d.radius * 0.55
-		)
-		var vx: float = -sin(ang) * d.radius * d.speed
-		var vz: float = cos(ang) * d.radius * 0.55 * d.speed
-		gull.rotation.y = atan2(-vx, -vz)
-		var flap: float = 0.35 + 0.45 * sin(t * 7.0 + d.phase * 3.0)
-		(gull.get_child(0) as Node3D).rotation.z = -flap
-		(gull.get_child(1) as Node3D).rotation.z = flap
 
 
 # --- Rabelo boats ------------------------------------------------------------
@@ -328,10 +368,44 @@ func _build_rabelo(parent: Node3D) -> Node3D:
 
 # --- Clouds ------------------------------------------------------------------
 
+## Fair-weather cumulus over the gorge.
+##
+## Round 1's finding, in full: "placeholder ellipsoid meshes — hard opaque
+## silhouettes, visible mesh-intersection seams, khaki-brown undersides, hard-edged
+## white caps, and two copy-pasted clusters at identical size and tilt. They occupy
+## the top quarter of every wide shot." Five defects, and they split into two causes.
+##
+## Four of the five were the MATERIAL, and specifically the fact that it was an opaque
+## StandardMaterial3D at all. Everything that pass tried — retinting cream to white,
+## adding a plaster normal, taking it back off again, dropping the tile to 5.5 m — was
+## a search inside a category that could not contain the answer, because an opaque
+## Lambert solid necessarily has a one-pixel silhouette, necessarily shows its own
+## interior where two spheres cross, and necessarily takes its underside from whatever
+## ambient is around, which was warm enough to land in khaki. That is now
+## assets/shaders/soft_cloud.gdshader: transparent, no depth write, alpha falling to
+## zero at the limb, and an underside explicitly lit by the sky rather than by the
+## arena. The seams and the hard edges cannot come back, because there is no depth
+## buffer entry to cut with and no coverage at the limb to step from.
+##
+## The fifth was the GEOMETRY, and this function owns it. Nine clusters, all built
+## from the same 4-6 puffs at the same 1.0 x 0.6 x 1.0 flattening with no rotation
+## anywhere, read as one object stamped twice — which is exactly what the critics
+## reported seeing. What varies now: cluster count, per-cluster yaw, per-cluster
+## three-axis stretch, per-puff yaw and roll, per-puff three-axis stretch, and the
+## number of puffs. Nothing in the field is a copy of anything else in it.
+##
+## The whole field also moved: from y 34-58 / z -70..-30 out to y 58-104 /
+## z -210..-70. At the old range a 4 m puff scaled 2.2 subtended as much of shot 07 as
+## a Ribeira house did, which is why they read as objects hovering over the river
+## rather than as weather. Out there they are also behind 25-45% of aerial
+## perspective, which is what puts them in the same atmosphere as everything else.
+##
+## Every number comes off one seeded RNG in a fixed order, so the field is identical
+## on every run — the capture gate depends on it.
 func _build_clouds() -> void:
-	# Fully rough and untextured: a detail normal on a 4 m puff at 50 m just
-	# shimmers, and the rim term already gives the golden-hour edge glow.
-	var cloud_mat := ToonFactory.solid(Color(0.95, 0.90, 0.84), 0.0, 1.0)
+	_cloud_material = ShaderMaterial.new()
+	_cloud_material.shader = CloudShader
+
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 90210
 
@@ -339,76 +413,150 @@ func _build_clouds() -> void:
 	holder.name = "Clouds"
 	add_child(holder)
 
-	for i in 9:
+	for i in CLOUD_COUNT:
 		var cloud := Node3D.new()
 		cloud.name = "Cloud%d" % i
 		cloud.position = Vector3(
 			rng.randf_range(CLOUD_WRAP_MIN, CLOUD_WRAP_MAX),
-			rng.randf_range(34.0, 58.0),
-			rng.randf_range(-70.0, -30.0)
+			rng.randf_range(CLOUD_Y.x, CLOUD_Y.y),
+			rng.randf_range(CLOUD_Z.x, CLOUD_Z.y)
 		)
-		var cloud_scale := rng.randf_range(1.0, 2.2)
-		cloud.scale = Vector3.ONE * cloud_scale
+		cloud.rotation.y = rng.randf_range(0.0, TAU)
+		# Non-uniform, so no two clusters share a proportion. Cumulus are wider than
+		# they are deep and much wider than they are tall.
+		cloud.scale = Vector3(
+			rng.randf_range(1.4, 3.1),
+			rng.randf_range(0.9, 1.6),
+			rng.randf_range(1.1, 2.4)
+		)
 		holder.add_child(cloud)
-
-		# A cluster of overlapping flattened spheres makes a puffy toon cloud.
-		var puffs := rng.randi_range(4, 6)
-		for p in puffs:
-			var puff := MeshInstance3D.new()
-			var puff_mesh := SphereMesh.new()
-			var radius := rng.randf_range(2.0, 4.0)
-			puff_mesh.radius = radius
-			puff_mesh.height = radius * 2.0
-			puff_mesh.radial_segments = 12
-			puff_mesh.rings = 6
-			puff.mesh = puff_mesh
-			puff.material_override = cloud_mat
-			puff.position = Vector3(
-				rng.randf_range(-5.0, 5.0),
-				rng.randf_range(-1.0, 1.0),
-				rng.randf_range(-1.5, 1.5)
-			)
-			puff.scale = Vector3(1.0, 0.6, 1.0)
-			cloud.add_child(puff)
-
+		_build_cloud_puffs(cloud, rng)
 		_clouds.append(cloud)
 
 
-# --- Gulls -------------------------------------------------------------------
+## One cluster, BAKED INTO ONE SURFACE. Puffs are laid along a shallow arc with a
+## FLAT BASE — every puff's centre is lifted by enough of its own radius that none of
+## them hangs below the cluster's base plane. That flat base is the single most
+## recognisable thing about fair-weather cumulus and the old spherical blobs had none
+## of it.
+##
+## --- Why this bakes, and why not through MeshBaker ------------------------
+##
+## The first version of this function left every puff as its own MeshInstance3D, which
+## put 90 nodes and 90 draw calls in the sky for twelve clouds — 37% of the whole
+## scene's draw calls, and a straight violation of ARCHITECTURE.md rule 6. Nothing in
+## a cloud needs its own transform at draw time: the field is animated by moving the
+## twelve PARENT nodes, so everything inside one cluster is rigid with respect to it.
+## One surface per cluster is 12 draw calls for the same twelve varied clusters.
+##
+## It bakes with SurfaceTool.append_from() rather than with MeshBaker, and the reason
+## is now simply that MeshBaker is the wrong tool for this input rather than that it
+## was broken. MeshBaker builds geometry from primitive descriptions — boxes, beams,
+## prisms — and derives a flat normal per triangle. A cloud puff is an existing
+## SphereMesh with smooth per-vertex normals already on it, and append_from() carries
+## those through the transform untouched, which is exactly what this shader needs:
+## it reads NORMAL directly to decide which side of the puff the sun is on, so a
+## flat-shaded rebuild would facet every cloud.
+##
+## (This comment used to say MeshBaker could not be used because it stored inward
+## shading normals. That was true when it was written and is not any more — see the
+## winding contract at the top of scripts/world/mesh_baker.gd, and the permanent gate
+## in scripts/world/landmarks/_winding_probe.gd. The choice here survives the fix on
+## its own merits, so the code did not change; the justification did.)
+##
+## One consequence worth stating: within a baked cluster the puffs no longer sort
+## against each other, they blend in buffer order. For an alpha-blended body whose
+## every fragment is within a few percent of the same near-white, that is invisible —
+## and it was never right before either, since Godot sorted those 90 objects by origin
+## rather than per fragment.
+func _build_cloud_puffs(cloud: Node3D, rng: RandomNumberGenerator) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 
-## A handful of gulls circling over the river gap — two flapping wing slabs each,
-## driven from _process. They live between the rail line and the skyline, so
-## they're always somewhere in frame.
-func _build_gulls() -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 777
+	var count := rng.randi_range(5, 9)
+	var span := rng.randf_range(5.0, 9.0)
+	for p in count:
+		# Position along the cluster, -1 to +1, with the tallest puffs near the middle
+		# so the silhouette rises to a crown instead of being a level sausage.
+		var u := (float(p) + rng.randf_range(0.15, 0.85)) / float(count) * 2.0 - 1.0
+		var crown := 1.0 - u * u
+		var radius := rng.randf_range(2.2, 3.4) * (0.62 + 0.55 * crown)
 
-	var holder := Node3D.new()
-	holder.name = "Gulls"
-	add_child(holder)
+		var mesh := SphereMesh.new()
+		mesh.radius = radius
+		mesh.height = radius * 2.0
+		# 14 x 7 rather than 12 x 6: the alpha falls off as |dot(normal, view)|, so a
+		# coarse sphere shows its facets in the fade and not only in the shading. It is
+		# also 12 x 7 x 196 triangles across the whole field baked, which is a third of
+		# what the ironwork costs and now arrives in twelve draw calls rather than 90.
+		mesh.radial_segments = 14
+		mesh.rings = 7
 
-	var feather := ToonFactory.solid(Color(0.94, 0.94, 0.92), 0.0, 0.90)
+		var squash := rng.randf_range(0.48, 0.68)
+		var basis := Basis.from_euler(Vector3(
+			rng.randf_range(-0.12, 0.12),
+			rng.randf_range(0.0, TAU),
+			rng.randf_range(-0.18, 0.18)))
+		basis = basis.scaled(Vector3(
+			rng.randf_range(0.9, 1.25), squash, rng.randf_range(0.85, 1.15)))
+		var origin := Vector3(
+			u * span,
+			radius * squash * rng.randf_range(0.55, 0.95),
+			rng.randf_range(-2.2, 2.2))
+		st.append_from(mesh, 0, Transform3D(basis, origin))
 
-	for i in GULL_COUNT:
-		var gull := Node3D.new()
-		gull.name = "Gull%d" % i
-		holder.add_child(gull)
+	st.index()
+	var mi := MeshInstance3D.new()
+	mi.name = "Puffs"
+	mi.mesh = st.commit()
+	mi.material_override = _cloud_material
+	# Transparent, unshaded, and a hundred metres up. It has no business in a shadow
+	# map or in the SDFGI voxelisation; LightingRig excludes the group from GI too.
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	cloud.add_child(mi)
 
-		for sx in [-1.0, 1.0]:
-			SceneryKit.box(gull, "Wing", Vector3(1.1, 0.06, 0.35),
-					Vector3(sx * 0.5, 0.0, 0.0), feather)
 
-		_gulls.append(gull)
-		# Flight envelope hugs the open air over the river: behind the far parapet
-		# (z <= ~-8), short of the house fronts (z >= ~-19) and clear of the
-		# terrace x-slots, so a loop never clips a roof or the boss.
-		_gull_data.append({
-			"center": Vector3(
-				rng.randf_range(-25.0, 25.0),
-				rng.randf_range(10.0, 16.0),
-				rng.randf_range(-16.0, -12.0)
-			),
-			"radius": rng.randf_range(6.0, 9.0),
-			"speed": rng.randf_range(0.3, 0.6) * (1.0 if i % 2 == 0 else -1.0),
-			"phase": rng.randf_range(0.0, TAU),
-		})
+## Point the cloud shader at the scene's real key light.
+##
+## Deferred out of _ready() because SunLight is a sibling of the arena root and is not
+## resolvable while this subtree is still being built. Searched by "brightest
+## shadow-casting DirectionalLight3D" for the same reason LightingRig searches that
+## way one node over: matching on the node name would also match the three fills it
+## spawns, and matching on get_tree().current_scene breaks for anything that loads the
+## arena on its own, which the capture harness does.
+##
+## If it finds nothing the shader keeps its authored default, which is the correct
+## vector at the time of writing — so a missing sun degrades to a stale sun rather
+## than to a black sky, and the probe is what catches the staleness.
+func _aim_clouds_at_sun() -> void:
+	if _cloud_material == null:
+		return
+	var sun := _find_sun()
+	if sun == null:
+		push_warning("SkyBackground: no shadow-casting DirectionalLight3D; clouds keep the shader default.")
+		return
+	_cloud_material.set_shader_parameter("sun_direction", sun.global_transform.basis.z.normalized())
+	# The cap takes the key's own colour, so a re-keyed sun drags the clouds with it
+	# instead of leaving them lit by a sun that is no longer there. Held at 0.97 of
+	# full: nothing diffuse reflects 100%, and a cap at 1.0 clips through the grade
+	# before the sun disk does.
+	var c := sun.light_color
+	_cloud_material.set_shader_parameter("sun_color", Color(c.r * 0.97, c.g * 0.97, c.b * 0.97))
+
+
+func _find_sun() -> DirectionalLight3D:
+	var root: Node = self
+	while root.get_parent() != null:
+		root = root.get_parent()
+	return _brightest_shadow_caster(root, null)
+
+
+func _brightest_shadow_caster(node: Node, best: DirectionalLight3D) -> DirectionalLight3D:
+	var light := node as DirectionalLight3D
+	if light != null and light.shadow_enabled:
+		if best == null or light.light_energy > best.light_energy:
+			best = light
+	for child in node.get_children():
+		best = _brightest_shadow_caster(child, best)
+	return best

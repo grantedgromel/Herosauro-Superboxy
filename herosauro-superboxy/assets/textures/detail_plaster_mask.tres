@@ -1,7 +1,7 @@
 [gd_resource type="NoiseTexture2D" format=3]
 
 [sub_resource type="Gradient" id="Gradient_mt3gi"]
-colors = PackedColorArray(0.88, 1, 0, 1, 1, 0.93, 0, 1)
+colors = PackedColorArray(0.8, 0.9, 0, 1, 1, 1, 0, 1)
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_pe7eg"]
 noise_type = 0

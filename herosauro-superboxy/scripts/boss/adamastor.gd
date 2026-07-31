@@ -6,11 +6,29 @@ extends CharacterBody3D
 ## FSM drives patrol + attacks, and we map FSM state -> a skeletal animation clip
 ## (walk / run / stomp / kick). Damage is routed through GameManager: this node
 ## REACTS to boss_damaged (flinch + white flash) and boss_phase_changed (red).
+##
+## This node owns the giant's BODY: his volumes, his push-out, who he is angry
+## at and the ground marks his attacks draw. The FSM owns the TIMING.
+
+## Fired the moment a ground mark is planted, carrying the mark's promise: the
+## attack lands `lead` seconds from now. Node-local, like Hitbox.landed — the
+## GameManager vocabulary is for cross-stream traffic, and both ends of this are
+## the boss stream (the FSM emits it, `_boss_probe` measures against it).
+signal attack_telegraphed(kind: StringName, lead: float)
+## Fired on the frame an attack's damage actually resolves. The gap between this
+## and the matching attack_telegraphed IS the honesty of the tell, and the probe
+## fails the build when it drifts.
+signal attack_impact(kind: StringName)
 
 const GRAVITY := 30.0
-## Solo tuning: one hero eats every attack that used to be split between two, so
-## the giant hits less often and slightly softer than it did in co-op. i-frames
-## (1.5 s on the hero) already gate the rate; this is the size of each bite.
+
+## Per-attack damage does NOT scale with the roster, deliberately. How hard one
+## blow lands is a property of the blow; how OFTEN blows come and how many heroes
+## each one threatens is what a second hero changes, and that is derived in
+## AdamastorStateMachine.reset(). A slam that hurt less because your partner was
+## alive would make the pair weaker together than apart, which is the opposite of
+## what a co-op game is for. The hero's 1.5 s of i-frames already gates the rate;
+## these are the size of each bite.
 const CONTACT_DAMAGE := 6
 const CONTACT_COOLDOWN := 1.2
 const SLAM_DAMAGE := 18
@@ -22,6 +40,42 @@ const NUDGE_DECAY := 22.0
 ## volume, sized so the hitboxes below read fairly, not an anatomical one.
 const BODY_SIZE := Vector3(5.0, 9.0, 4.0)
 const BODY_CENTRE_Y := 4.5
+
+# --- The slam's heavy volume ------------------------------------------------
+## Radius and local offset of the slam's direct hit. Named constants rather than
+## literals at the call site because the AOE telegraph is drawn FROM them: the
+## mark and the hitbox are the same circle by construction, so they cannot drift
+## apart the way a hand-copied radius would.
+const SLAM_RADIUS := 5.2
+const SLAM_OFFSET := Vector3(-4.2, 1.2, 0.0)
+## Hit-stop when the slam catches a hero. The shorter freeze for the slam merely
+## landing on granite is AdamastorStateMachine.SLAM_GROUND_STOP, next to the beat
+## that requests it — both are impacts, only one of them is a hit.
+const SLAM_HIT_STOP := 0.09
+## The killing blow. A boss death is the biggest impact in the run and it gets
+## the biggest freeze; the corpse supplies the audio transient when it lands.
+const DEATH_HIT_STOP := 0.16
+
+# --- Push-out ---------------------------------------------------------------
+## The giant's shove volume is his collider plus this much on X and Z.
+const SHOVE_PAD := Vector3(1.4, 0.0, 1.4)
+## How fast his body shunts a hero out of the space it is trying to occupy, in
+## m/s. Comfortably above his own 9.6 m/s ceiling (AdamastorStateMachine.
+## SPEED_CAP), so he can close on a hero and carry them along in front of him but
+## can never pass through one.
+const SHOVE_RATE := 14.0
+
+# --- Aggro ------------------------------------------------------------------
+## How far out of his way the giant will walk for the hero hurting him most, in
+## metres of apparent distance. Under the 7 m melee range on purpose: enough that
+## out-damaging your partner pulls the giant off them across the deck, never
+## enough that he ignores the hero standing on his foot.
+const THREAT_REACH := 5.0
+## Combo length that counts as "all of the pressure". Six connected hits is a
+## little over two seconds of an unbroken chain at the heroes' 0.45 s attack
+## cooldown, so the chain term reads as "who is hitting me RIGHT NOW" while the
+## score term reads as "who has hurt me most this fight".
+const THREAT_COMBO_FULL := 6.0
 
 # --- Death ------------------------------------------------------------------
 const CORPSE_MASS := 900.0
@@ -72,9 +126,12 @@ var _arm_base_y: float = 0.0
 var _dead: bool = false
 var _corpse: AdamastorCorpse = null
 var _nudge: Vector3 = Vector3.ZERO
+## Whole-body squash and stretch, used by the phase-two roar. Held separately
+## from the attack tween so killing one never leaves the giant the wrong shape.
+var _pose_tween: Tween = null
 
 # Hitboxes replacing the old distance checks. See _build_hitboxes().
-var _body_box: Hitbox = null
+var _prop_box: Hitbox = null
 var _contact_box: Hitbox = null
 var _slam_box: Hitbox = null
 
@@ -87,9 +144,9 @@ func _ready() -> void:
 	# infinitely massive to each other and move_and_slide() would simply stop
 	# the boss dead against the hero. The collision is asymmetric instead: the
 	# giant's LAYER is in the hero's mask, so the hero cannot walk into it, and
-	# _body_box shoves out anyone who ends up inside anyway (knocked in, spawned
-	# in, or squeezed against a rail). Props are handled the same way — a 45 kg
-	# barrel is hurled aside, never an obstacle.
+	# _shove_players() pushes out anyone who ends up inside anyway (knocked in,
+	# spawned in, or squeezed against a rail). Props are handled the same way — a
+	# 45 kg barrel is hurled aside, never an obstacle.
 	collision_mask = PhysicsLayers.WORLD
 	_build_model()
 	_build_hitboxes()
@@ -120,33 +177,39 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 	_clamp_to_arena()
+	# After his own move, so the shunt is solved against where he actually ended
+	# up this frame rather than where he intended to be.
+	if active:
+		_shove_players(delta)
 	_update_animation()
 
 
 # --- Hitboxes ---------------------------------------------------------------
 
-## Three shape-cast volumes replace the giant's old `distance_to() < 5.0` test
-## and the state machine's ad-hoc checks.
+## Two shape-cast volumes plus a hand-rolled push-out replace the giant's old
+## `distance_to() < 5.0` test and the state machine's ad-hoc checks.
 ##
 ## Local -X is the giant's forward: face_toward() solves yaw so that the body's
 ## -X axis points at the target (see the note on that function), so the slam
 ## volume sits at negative X.
 func _build_hitboxes() -> void:
-	# Body volume. Slightly proud of the CharacterBody3D box so a hero pressed
+	# Prop sweep. Slightly proud of the CharacterBody3D box so a barrel pressed
 	# against the giant registers as inside it. damage 0 means "shove, don't
-	# hurt" — no i-frames burned, no hurt sound, no HUD flinch — and props
-	# caught under the giant's feet are hurled away hard enough to shatter.
-	_body_box = Hitbox.box(self, BODY_SIZE + Vector3(1.4, 0.0, 1.4),
-		Vector3(0.0, BODY_CENTRE_Y, 0.0),
-		PhysicsLayers.PLAYERS | PhysicsLayers.PROPS, "BodyVolume")
-	_body_box.damage = 0
-	_body_box.knockback = 9.0
-	# No lift: apply_knockback only touches velocity.y when the impulse has a
-	# vertical component, and a hero bunny-hopping every 0.22 s while pressed
-	# against the giant's shin reads as a bug, not as a shove.
-	_body_box.lift = 0.0
-	_body_box.prop_impulse = 26.0
-	_body_box.rehit_delay = 0.22
+	# hurt", and props caught under the giant's feet are hurled away hard enough
+	# to shatter.
+	#
+	# PLAYERS is deliberately NOT in this mask any more. It used to be, and the
+	# Hitbox's fire-and-forget impulse was the wrong tool for a persistent
+	# contact: see _shove_players() for the measurement and the fix.
+	_prop_box = Hitbox.box(self, BODY_SIZE + SHOVE_PAD,
+		Vector3(0.0, BODY_CENTRE_Y, 0.0), PhysicsLayers.PROPS, "PropSweepVolume")
+	_prop_box.damage = 0
+	# knockback/lift only pick the DIRECTION here — the prop branch normalises and
+	# scales by prop_impulse — so lift 0 keeps barrels skidding rather than popping.
+	_prop_box.knockback = 9.0
+	_prop_box.lift = 0.0
+	_prop_box.prop_impulse = 26.0
+	_prop_box.rehit_delay = 0.22
 
 	# Damage volume, a touch tighter than the shove volume so you always get
 	# pushed out before you start taking chip damage.
@@ -160,26 +223,31 @@ func _build_hitboxes() -> void:
 	# The slam's direct hit, in front of and just above the feet. Opened for the
 	# animation's active frames only; the Shockwave area is the separate, wider,
 	# weaker ring that catches anyone who ran but not far enough.
-	_slam_box = Hitbox.sphere(self, 5.2, Vector3(-4.2, 1.2, 0.0),
+	_slam_box = Hitbox.sphere(self, SLAM_RADIUS, SLAM_OFFSET,
 		PhysicsLayers.PLAYERS | PhysicsLayers.PROPS, "SlamVolume")
 	_slam_box.damage = SLAM_DAMAGE
 	_slam_box.knockback = 16.0
 	_slam_box.lift = 7.0
 	_slam_box.prop_impulse = 45.0
+	_slam_box.landed.connect(_on_slam_landed)
 
 
 func _sync_hitboxes(active: bool) -> void:
-	if _body_box == null:
+	if _prop_box == null:
 		return
-	if active == _body_box.is_armed():
+	if active == _prop_box.is_armed():
 		return
 	if active:
-		_body_box.arm()
+		_prop_box.arm()
 		_contact_box.arm()
 	else:
-		_body_box.disarm()
+		_prop_box.disarm()
 		_contact_box.disarm()
 		_slam_box.disarm()
+		# A mark that outlives the attack it was promising is worse than no mark,
+		# so the run ending (or the giant dying) takes them off the deck.
+		if _fsm:
+			_fsm.cancel_telegraphs()
 
 
 ## Open the slam's active-frames window. Driven by the FSM at the impact beat
@@ -191,6 +259,111 @@ func arm_slam(duration: float = 0.16) -> void:
 	_slam_box.arm(duration)
 
 
+## The heavy half of the slam's impact contract. Hitbox only emits `landed` once
+## the hit was actually DELIVERED — a swing swallowed by a hero's i-frames never
+## reaches here — so the frame never freezes for a hit that did not happen.
+func _on_slam_landed(target: Node3D) -> void:
+	if target == null or not target.is_in_group("players"):
+		return
+	# No hit_stop here any more, and it is worth saying why rather than leaving a
+	# reader to wonder where the slam's freeze went. Hitbox._deliver() calls the
+	# hero's take_hit() BEFORE it emits `landed`, take_hit now freezes in
+	# proportion to damage, and GameManager.hit_stop refuses to nest — so by the
+	# time this runs the frame is already stopped and this call returned
+	# immediately. The freeze still happens; it is just owned by the hero, which
+	# is the only place that knows how hard the hit actually landed.
+	# PlayerBase.HURT_STOP_PER_DAMAGE x SLAM_DAMAGE reproduces SLAM_HIT_STOP
+	# exactly, and _coop_probe asserts that equality so the two cannot drift.
+	GameManager.request_shake(0.85, 0.35)
+
+
+# --- Push-out ---------------------------------------------------------------
+
+## Keep heroes out of the space the giant's body occupies.
+##
+## This replaces a Hitbox that handed every overlapping hero a 9 m/s IMPULSE
+## every 0.22 s. PlayerBase.apply_knockback accumulates into a reservoir that
+## decays at 14 m/s^2, so 9 m/s arriving five times a second gave back only
+## 3.1 m/s to decay in between: the shove ratcheted. The co-op stream measured a
+## chased hero leaving the giant at about 6.5 m, past the 3.7 / 4.0 m reach of
+## both heroes' melee, which made being chased unrecoverable rather than merely
+## dangerous.
+##
+## The root cause is that a persistent contact was being expressed as repeated
+## impulses, so the fix is to stop expressing it that way. This is a POSITIONAL
+## shunt: a hero whose centre is inside the volume is moved out along its
+## shortest exit, by at most SHOVE_RATE * delta a frame. Three consequences, and
+## they are the whole argument for doing it this way:
+##
+##   * It cannot accumulate. There is no momentum to accumulate INTO — the hero
+##     is displaced, not launched — so however long you stand under him the state
+##     is the same, and the frame you step clear the push is simply gone.
+##   * It costs no reach. The furthest the shunt can ever leave a hero is the
+##     volume's own half-extent (3.2 m front, 2.7 m side); with the hero's
+##     capsule that is 3.65 m from his origin, and both heroes' swing volumes
+##     reach his collider face from 5.7 m (Super Boxy) and 6.0 m (Herosauro).
+##     Being stood on is now a position you can hit back from.
+##   * The giant still cannot walk THROUGH a hero, because SHOVE_RATE is well
+##     over his own top speed. Standing in his path costs you ground for as long
+##     as you stay there, which is the bulldozed read the old shove was for.
+##
+## Two things were tried before this and are recorded so they are not tried
+## again. A per-frame VELOCITY governor (top the hero's outward speed up to a
+## target) ratchets, because apply_knockback lands in a reservoir that does not
+## fold into `velocity` for about 0.11 s — the governor cannot see its own last
+## frame and injects again, measured at 28 m/s. Modelling that reservoir in a
+## ledger of our own does not fix it either: PlayerBase decays the reservoir as
+## one vector, so our share of it shrinks by less than our ledger's when anything
+## else has contributed, and the error compounds — measured at 22 m/s and still
+## climbing.
+##
+## What a hero feels as a HIT still comes from _contact_box, which is
+## deliberately tighter: real damage, real knockback, i-frames and the whole
+## impact contract. This only decides where bodies can be.
+func _shove_players(delta: float) -> void:
+	var half := (BODY_SIZE + SHOVE_PAD) * 0.5
+	var inv := global_transform.affine_inverse()
+	var step := SHOVE_RATE * delta
+	for p in get_tree().get_nodes_in_group("players"):
+		var hero := p as Node3D
+		if hero == null:
+			continue
+
+		var local := inv * hero.global_position
+		# Vertical gate. The hero's origin sits at their feet, so this asks "on
+		# the same deck as him", not "inside a 9 m box" — a hero on top of the
+		# giant's head is not being stood on.
+		if local.y < -1.0 or local.y > BODY_SIZE.y:
+			continue
+		var dx := half.x - absf(local.x)
+		var dz := half.z - absf(local.z)
+		if dx <= 0.0 or dz <= 0.0:
+			continue
+
+		# Shortest way out, solved in the giant's own frame so the push follows
+		# his facing through a turn.
+		var out_local := Vector3.ZERO
+		var depth := 0.0
+		if dx < dz:
+			out_local.x = 1.0 if local.x >= 0.0 else -1.0
+			depth = dx
+		else:
+			out_local.z = 1.0 if local.z >= 0.0 else -1.0
+			depth = dz
+
+		var dir := global_transform.basis * out_local
+		dir.y = 0.0
+		if dir.length() < 0.01:
+			continue
+		# Rate-limited rather than snapped to the surface: at 90 Hz this is 16 cm
+		# a frame, which reads as being shouldered aside instead of teleporting.
+		# Downed heroes included — a body in his path gets shunted too, and being
+		# positional this is the one push that works on one (PlayerBase drives a
+		# downed hero's velocity to zero every frame, so an impulse would be
+		# dropped on the floor).
+		hero.global_position += dir.normalized() * minf(depth, step)
+
+
 # --- Animation -------------------------------------------------------------
 
 func _update_animation() -> void:
@@ -198,7 +371,7 @@ func _update_animation() -> void:
 		return
 	var want := _clip_run if _phase2 else _clip_walk
 	if _fsm:
-		if _fsm.state == AdamastorStateMachine.SLAM:
+		if _fsm.state == AdamastorStateMachine.SLAM or _fsm.state == AdamastorStateMachine.ROAR:
 			want = _clip_stomp
 		elif _fsm.state == AdamastorStateMachine.ROCK_THROW:
 			want = _clip_kick
@@ -209,21 +382,111 @@ func _update_animation() -> void:
 
 # --- Public API (used by the state machine / Super Boxy) -------------------
 
-## True while the giant is committed to a slam or rock-throw wind-up (lets the
-## camera ease out to reveal the telegraph / AoE).
+## True while the giant is committed to a heavy move (lets the camera ease out to
+## reveal the telegraph / AoE).
 func is_attacking() -> bool:
-	return _fsm != null and (_fsm.state == AdamastorStateMachine.SLAM or _fsm.state == AdamastorStateMachine.ROCK_THROW)
+	if _fsm == null:
+		return false
+	return _fsm.state == AdamastorStateMachine.SLAM \
+		or _fsm.state == AdamastorStateMachine.ROCK_THROW \
+		or _fsm.state == AdamastorStateMachine.ROAR
 
 
-func nearest_player() -> Node3D:
+## Closest hero who can still be fought. A hero at zero health is in a ~4 s
+## knockdown but STAYS in the `players` group deliberately, because
+## GameManager._all_heroes_down() works off the scene; without this test the
+## giant spent the whole knockdown attacking a body that refuses damage while the
+## partner hit him for free. `include_downed` exists for the one caller that
+## wants a body rather than an opponent — the death topple, which only needs a
+## direction to fall in.
+func nearest_player(include_downed: bool = false) -> Node3D:
 	var best: Node3D = null
 	var best_d := INF
 	for p in get_tree().get_nodes_in_group("players"):
-		var d := global_position.distance_to((p as Node3D).global_position)
+		var body := p as Node3D
+		if body == null:
+			continue
+		if not include_downed and body.has_method("is_downed") and body.is_downed():
+			continue
+		var d := global_position.distance_to(body.global_position)
 		if d < best_d:
 			best_d = d
-			best = p
+			best = body
 	return best
+
+
+## Who the giant attacks. Distance still decides most of it, pulled by up to
+## THREAT_REACH metres toward whoever is hurting him most.
+##
+## Against one hero this is exactly nearest_player(): the pull is a constant
+## added to every candidate's score, so with a single candidate it cannot change
+## the answer. Against two it is the whole co-op fight — the giant turning on the
+## hero who out-damages their partner is what stops one of them farming him from
+## behind while the other tanks, and it makes threat something the pair trade
+## deliberately rather than a coin flip on who stood closer.
+func target_player() -> Node3D:
+	var best: Node3D = null
+	var best_score := INF
+	for p in get_tree().get_nodes_in_group("players"):
+		var body := p as Node3D
+		if body == null:
+			continue
+		if body.has_method("is_downed") and body.is_downed():
+			continue
+		var pid := 1
+		if "player_id" in body:
+			pid = int(body.player_id)
+		var score := global_position.distance_to(body.global_position) \
+			- THREAT_REACH * _threat_of(pid)
+		if score < best_score:
+			best_score = score
+			best = body
+	return best
+
+
+## 0 = has not touched him, 1 = doing all of the damage on an unbroken chain.
+## Half the weight on the fight-long split (GameManager.player_score) and half on
+## the live chain (combo_for), so he remembers who has hurt him AND notices who
+## is hurting him this second.
+func _threat_of(pid: int) -> float:
+	var roster: Array[int] = GameManager.active_player_ids()
+	var total := 0.0
+	for id in roster:
+		total += float(GameManager.player_score.get(id, 0))
+	var share := 1.0 / float(maxi(1, roster.size()))
+	if total > 0.0:
+		share = float(GameManager.player_score.get(pid, 0)) / total
+	var chain: float = clampf(float(GameManager.combo_for(pid)) / THREAT_COMBO_FULL, 0.0, 1.0)
+	return 0.5 * share + 0.5 * chain
+
+
+## The slam's heavy volume, so the FSM can draw its ground mark on exactly the
+## circle the hitbox will use instead of on a copy of the number.
+func slam_radius() -> float:
+	return SLAM_RADIUS
+
+
+func slam_offset() -> Vector3:
+	return SLAM_OFFSET
+
+
+## Re-emitted by the FSM. Kept as methods rather than the FSM touching the
+## signals directly so the boss node stays the only thing that speaks for itself.
+func report_telegraph(kind: StringName, lead: float) -> void:
+	attack_telegraphed.emit(kind, lead)
+
+
+func report_impact(kind: StringName) -> void:
+	attack_impact.emit(kind)
+
+
+## What the FSM actually derived this run, for `_boss_probe`. Tuning that cannot
+## be read cannot be regression-tested, and every number in here is a function of
+## the difficulty and the roster.
+func tuning() -> Dictionary:
+	if _fsm == null:
+		return {}
+	return _fsm.tuning()
 
 
 func bob_arms(_amount: float) -> void:
@@ -236,6 +499,36 @@ func raise_arms(_up: bool) -> void:
 
 func slam_arms_down() -> void:
 	pass
+
+
+## Anticipation for the phase-two roar: the giant coils down over the whole
+## wind-up. Volume is roughly conserved (the horizontals take half the vertical
+## change, the other way), which is what makes it read as a body compressing
+## rather than as a mesh being scaled — the same rule PlayerBase uses.
+func roar_coil(duration: float) -> void:
+	if _model == null:
+		return
+	_kill_pose_tween()
+	_pose_tween = create_tween()
+	_pose_tween.set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	_pose_tween.tween_property(_model, "scale", Vector3(1.11, 0.82, 1.11), duration)
+
+
+## ...and the release: he snaps taller than he started, then settles.
+func roar_release() -> void:
+	if _model == null:
+		return
+	_kill_pose_tween()
+	_pose_tween = create_tween()
+	_pose_tween.tween_property(_model, "scale", Vector3(0.88, 1.22, 0.88), 0.06)
+	_pose_tween.set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_ELASTIC)
+	_pose_tween.tween_property(_model, "scale", Vector3.ONE, 0.55)
+
+
+func _kill_pose_tween() -> void:
+	if _pose_tween and _pose_tween.is_valid():
+		_pose_tween.kill()
+	_pose_tween = null
 
 
 func nudge(world_dir: Vector3, amount: float) -> void:
@@ -258,14 +551,16 @@ func reset_boss() -> void:
 	rotation = Vector3.ZERO
 	velocity = Vector3.ZERO
 	_nudge = Vector3.ZERO
+	_kill_pose_tween()
 	if _model:
 		_model.position = Vector3.ZERO
 		_model.rotation = Vector3.ZERO
+		_model.scale = Vector3.ONE     # a roar interrupted by a restart left him coiled
 	if _anim:
 		_anim.active = true
 	if _contact_box:
-		# Difficulty rides the giant's damage as well as its speed, so EASY is
-		# genuinely gentler on a solo run rather than merely slower.
+		# Difficulty rides the giant's damage as well as his speed, so EASY is
+		# genuinely gentler rather than merely slower.
 		_contact_box.damage = maxi(1, int(round(CONTACT_DAMAGE * GameManager.difficulty_scalar())))
 	_phase2 = false
 	for i in _mesh_mats.size():
@@ -337,16 +632,25 @@ func _die() -> void:
 		# active = false, not pause(): the mixer must stop writing bone poses
 		# entirely, or it keeps re-posing the mesh inside the falling corpse.
 		_anim.active = false
+	# The five parts for the last hit of the fight: the corpse carries the FX and
+	# the audio transient when it lands, GameManager.game_over drives the UI, and
+	# these two are the camera and the freeze.
 	GameManager.request_shake(0.5, 0.5)
+	GameManager.hit_stop(DEATH_HIT_STOP)
 	collision_layer = 0
 	_sync_hitboxes(false)
+	_kill_pose_tween()
 	if _model == null:
 		return
 
 	# Fall away from whoever landed the killing blow, carrying whatever
-	# horizontal momentum it already had.
+	# horizontal momentum it already had. A downed hero cannot have thrown it, so
+	# a standing hero is preferred; the include_downed fallback only matters if
+	# the last blow and the last knockdown landed in the same frame.
 	var away := Vector3.LEFT
 	var killer := nearest_player()
+	if killer == null:
+		killer = nearest_player(true)
 	if killer:
 		var to := global_position - killer.global_position
 		to.y = 0.0

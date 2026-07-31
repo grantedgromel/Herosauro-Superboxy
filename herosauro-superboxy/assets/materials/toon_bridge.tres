@@ -1,33 +1,130 @@
-[gd_resource type="StandardMaterial3D" load_steps=3 format=3]
+[gd_resource type="StandardMaterial3D" load_steps=6 format=3]
 
 [ext_resource type="Texture2D" path="res://assets/textures/detail_granite_normal.tres" id="1_normal"]
 [ext_resource type="Texture2D" path="res://assets/textures/detail_granite_mask.tres" id="2_mask"]
+[ext_resource type="Texture2D" path="res://assets/textures/detail_fine_normal.tres" id="3_fine_normal"]
+[ext_resource type="Texture2D" path="res://assets/textures/detail_fine_albedo.tres" id="4_fine_albedo"]
+[ext_resource type="Texture2D" path="res://assets/textures/detail_granite_albedo.tres" id="5_surface_albedo"]
 
-; Deck surface and parapet walls of the Dom Luis bridge: dark granite roadway.
+; The structural granite mass of the Dom Luis deck: the 100 x 1.96 x 14 box in
+; bridge_arena.tscn.
 ;
-; This was authored as "structural steel" (metallic 0.4, pale blue-grey albedo).
-; On the deck -- a large flat up-facing plane -- that sampled sky IBL as a cold
-; sheen and read as fresh snow, while the vertical parapets crushed to near
-; black under the raking sun. Granite is both truer to the real bridge and far
-; better behaved: dielectric, dark, rough, so deck and parapet stay in the same
-; exposure range from every angle.
+; WHAT THIS ACTUALLY DRESSES, corrected. The header used to call this "the deck
+; surface", and it is not. bridge_arena.gd lays the carriageway bays, the tram bed,
+; the kerbs and the flagstones ON TOP of the box as separate geometry with their own
+; materials, so all the box's top face ever shows is the 4 cm inside every paving
+; seam. What this material really owns is the slab's OUTER FASCIA -- the 100 m x
+; 1.96 m vertical band down each side -- and its soffit. In 01_deck_mid that fascia
+; is the single largest surface in shot: 14% of the frame.
+;
+; --- The bug that made that 14% pure black ---------------------------------
+;
+; Round 1 measured 01_deck_mid at y 478-605, across all 1280 px, as constant
+; RGB (0, 1, 2) with a standard deviation of exactly 0.0, unchanged under a
+; 3.2-gamma lift, and read it as "a surface with no material that not even ambient
+; reaches".
+;
+; It was not a lighting failure. It was this line:
+;
+;     detail_blend_mode = 2
+;
+; BaseMaterial3D.BlendMode is MIX = 0, ADD = 1, SUB = 2, MUL = 3. The comment beside
+; it asserted that 2 was MUL. It is SUB. Godot's detail pass was therefore computing
+; ALBEDO - detail_tex.rgb, and detail_fine_albedo runs 0.68-1.00 against this
+; material's 0.32, so the subtraction went negative on every texel of the surface and
+; clamped to zero. The (0, 1, 2) the harness read back is not this surface at all: it
+; is the grade LUT's own stop at input 0, Color(0, 0.002, 0.008), which is exactly
+; (0, 1, 2) once written to 8-bit sRGB. That is why the standard deviation was 0.0 and
+; why the gamma lift did nothing -- there was no signal underneath to lift.
+;
+; Corrected to 3. _atmosphere_probe.gd now asserts it against
+; BaseMaterial3D.BLEND_MODE_MUL by name, because the whole reason this file exists is
+; to carry the same LAYERS ToonFactory does by hand, and by hand is where an enum
+; gets mis-copied.
+;
+; The layers match stone() exactly: granite normal + mask + surface albedo on a coarse
+; triplanar tile, the shared fine pair on a 0.28 m one, dielectric, AO on the mask
+; green. The VALUES deliberately do not, and the two that differ are the two that are
+; about scale rather than about material: stone() runs roughness 0.92 / normal_scale
+; 1.15 against this 0.88 / 0.34, because stone() dresses metre-scale masonry seen from
+; any angle and this dresses a 100 m plane. Anything above ~0.5 of normal here reads
+; as loose gravel rather than as cut stone.
 
 [resource]
 resource_name = "BridgeGranite"
-albedo_color = Color(0.283, 0.279, 0.271, 1)
+; Authored value (0.283, 0.2788, 0.2708) -- dark river granite -- carrying BOTH
+; texture layers' mean corrections, because albedo_color is what both of them
+; multiply:
+;   x 1.130                   the fine layer's mean, ToonFactory.DETAIL_ALBEDO_GAIN
+;   x (1.293, 1.257, 1.265)   the surface albedo map's mean, per channel, i.e.
+;                             ToonFactory._albedo_map_gain(GRANITE)
+; 0.283 x 1.130 x 1.293 = 0.4134. Read this as the value the BRIGHTEST texel on the
+; surface reaches, not as the surface's colour: the MEAN across it is the authored
+; neutral (0.283, 0.2788, 0.2708), which is the whole point of the per-channel gain
+; and is what _atmosphere_probe.gd now asserts directly rather than by hex compare.
+;
+; ROUND 3 moved this line, and moved it in a way worth understanding rather than
+; copying. The three gains used to be near-identical (1.159, 1.159, 1.171) because
+; the granite albedo map was near-monochrome; they now differ by 3% because the map
+; carries real hue variation and its per-channel means differ. So albedo_color is
+; deliberately WARMER than the authored colour: red is divided by a smaller map mean
+; and therefore multiplied by a larger gain. Multiply it back by the map and the
+; surface's mean is neutral again. A "correction" that re-neutralises this line by
+; hand would tint the whole fascia cool.
+;
+; This number has now moved three times in two rounds -- when the factory stopped
+; integrating the ramp uniformly, when that measurement was corrected to cover the
+; whole noise field, and now when the ramp stopped being monotone. That is exactly
+; why the probe recomputes it from the live descriptors instead of trusting it.
+albedo_color = Color(0.4134, 0.3961, 0.3872, 1)
+; The same map stone() wears. Metre-scale mottling between one block and the next.
+; Round 3: that mottling is now non-monotone in hue -- warm-cool flips at every ramp
+; stop against a rising value trend -- so the 100 m fascia stops being one colour
+; times a grey mask. Round 2 measured this exact band at channel correlation
+; r-g 0.994 / r-b 0.964 and 1.98% unique colours; see the recipe in
+; generate_detail_maps.gd for what the ramp is and why.
+albedo_texture = ExtResource("5_surface_albedo")
 metallic = 0.0
-metallic_specular = 0.35
+; F0 4%: the dielectric response every real mineral surface has. It matters more now
+; than it did -- the fascia is a VERTICAL face, and with the sun re-keyed to 34
+; degrees the sky it catches is most of what stops the band reading as a flat panel.
+metallic_specular = 0.5
 roughness = 0.88
-; Kept deliberately low: the granite detail normal is high-contrast noise, and
-; at deck scale anything above ~0.4 reads as loose gravel rather than paving.
+; 0.34: the granite mask's roughness spread runs 0.52-1.00 and its AO channel is
+; un-inverted, so the map has plenty to say; still well under the ~0.5 where
+; deck-scale speckle starts reading as loose gravel rather than cut stone.
 normal_enabled = true
-normal_scale = 0.22
+normal_scale = 0.34
 normal_texture = ExtResource("1_normal")
 roughness_texture = ExtResource("2_mask")
+; ao_light_affect matches stone(). Held at 0.52 rather than raised again: a
+; 34-degree sun rakes across the joints instead of reaching down into them, so the
+; key draws more of the crevice shading itself than it did at 51, and AO acting on
+; direct light is both unphysical and the term that flattens relief inside a shadow.
 ao_enabled = true
-ao_light_affect = 0.3
+ao_light_affect = 0.52
 ao_texture = ExtResource("2_mask")
 ao_texture_channel = 1
+; 0.34 = one granite tile per 2.94 m. The surface albedo map rides the same uv1, so
+; its mottling lands about a metre across on the fascia -- the scale of the masonry
+; courses a real abutment face is built from.
 uv1_scale = Vector3(0.34, 0.34, 0.34)
 uv1_triplanar = true
+; The close-range layer. 1/0.28 = 3.571 tiles per metre, i.e. ~1.1 mm per texel, which
+; is what is still resolving in 04_cobble_macro at a metre and a half from the surface
+; at a grazing angle -- the shot that exists specifically because flat texturing is
+; impossible to hide there. detail_uv_layer 1 is UV2; detail_blend_mode 3 is MUL, so
+; the map modulates the granite colour instead of subtracting itself from it.
+detail_enabled = true
+detail_uv_layer = 1
+detail_blend_mode = 3
+detail_albedo = ExtResource("4_fine_albedo")
+detail_normal = ExtResource("3_fine_normal")
+uv2_scale = Vector3(3.571, 3.571, 3.571)
+uv2_triplanar = true
+; A rim term on a horizontal plane seen from above does nothing but lift the far end of
+; the deck toward the sky colour, which is the opposite of the RUBRIC's "the playable
+; corridor is the brightest, highest-contrast thing in frame". Off here, unlike the
+; factory's default, and this is the one place the two deliberately disagree.
+rim_enabled = false
 texture_filter = 5

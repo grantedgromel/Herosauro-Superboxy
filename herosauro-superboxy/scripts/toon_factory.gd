@@ -24,6 +24,55 @@ extends RefCounted
 ##
 ## Detail maps live in res://assets/textures/ as NoiseTexture2D descriptors —
 ## no bitmaps in the repo. See generate_detail_maps.gd there for the recipes.
+##
+## --- Three rules this factory now enforces centrally ------------------------
+##
+## All three are RUBRIC lines that were being missed identically by every caller,
+## which is the case for fixing them in one place rather than in forty:
+##
+## a) TWO TEXTURE SCALES, always. A surface map tiled at its authored real-world
+##    size is magnified about elevenfold at half a metre and resolves as blur; the
+##    same map tiled to resolve there tiles visibly at twenty metres. Every textured
+##    material therefore also wears the shared fine pair at ~0.28 m — grit in the
+##    normal, patchy discolouration in the albedo. That second layer is what the
+##    RUBRIC means by "a detail layer still doing work at 0.5 m", and shot
+##    03_rail_macro exists to test exactly it. It costs six more triplanar taps and
+##    that is what the bar costs.
+##
+## b) ALBEDO VARIATION, always, at BOTH scales, and — since Round 3 — WITH HUE IN IT
+##    AT BOTH. Before Round 1 every material in the game was one flat albedo colour
+##    with a bump map on it. Round 1 gave it a fine layer and Round 2 gave it a
+##    surface-scale one, and Round 2's own measurement is what showed that was still
+##    not enough: five stone surfaces in two frames came back at channel-deviation
+##    correlations of 0.88-0.995 (cobbles 0.945/0.894, granite 0.987/0.882, kerb
+##    0.995/0.975, parapet 0.994/0.964, walkway 0.995/0.952), which is the signature
+##    of ONE FLAT ALBEDO MULTIPLIED BY A GREY MASK. Both layers were varying all
+##    three channels together, so all that variance was luminance and none of it was
+##    ever colour — the granite carried sd=19.6 and the walkway sd=40.6 and both
+##    still read as cardboard.
+##
+##    The lever is hue, and it is NOT more grunge. Every ramp in the stone family is
+##    now non-monotone: warm-cool and green-magenta axes that reverse against each
+##    other while value climbs, which is what a mineral mixture actually is and what
+##    a monotone "cool at the dark end, warm at the bright end" ramp can never be,
+##    however far apart its ends are pitched. Delivered correlations went granite
+##    +1.000/+0.999 -> +0.43/+0.06, cobble +1.000/+0.999 -> +0.52/+0.04, plaster
+##    +1.000/+1.000 -> +0.66/+0.18. See the recipes in generate_detail_maps.gd, and
+##    _atmosphere_probe.gd, which now gates the number.
+##
+##    Two scales, because they answer different distances: the fine layer tiles at
+##    0.28 m and is gone by four metres, so per-object variation — one sett against
+##    the next, a rust bloom across a whole gusset — needs a map at the material's
+##    own tile size. Granite, cobble, iron and plaster carry one on albedo_texture;
+##    see _ALBEDO_MAPS below.
+##
+## c) METALS ARE 0 OR 1. Call sites currently ask for 0.20, 0.28, 0.30, 0.35, 0.42,
+##    0.45, 0.55, 0.60, 0.65 and 0.85. Every value strictly between is
+##    unphysical — it desaturates the diffuse term and tints the specular at the
+##    same time, so the surface reads as neither painted steel nor bare steel — and
+##    it is a specific RUBRIC failure. build() snaps at 0.6 and gives the dielectric
+##    side a raised metallic_specular instead, which is the thing the half-metal was
+##    actually faking: painted ironwork catching the sky.
 
 # --- Surfaces ---------------------------------------------------------------
 
@@ -52,6 +101,36 @@ const _MASK_MAPS := {
 	Surface.WOOD: preload("res://assets/textures/detail_wood_mask.tres"),
 }
 
+## Surface-scale COLOUR variation, riding albedo_texture on uv1 at the material's own
+## tile size. Four of the seven surfaces have one, and the argument for each is next
+## to its recipe in generate_detail_maps.gd. Terracotta and wood have none: three more
+## triplanar taps is a real cost and nothing measured has asked for them there.
+##
+## This is the map that answers Round 1's two material findings and Round 2's one. The
+## fine layer below tiles at 0.28 m, so it delivers grit and damp patches at arm's
+## length and nothing at all past four metres; what the deck and the ironwork were
+## missing is variation at the scale of the OBJECT — one sett against the next, a rust
+## bloom across a whole gusset — and that needs hue, at the surface's own tile. Since
+## Round 3 "hue" means hue that REVERSES across the ramp rather than tracking value,
+## which is the only kind that survives the channel-correlation measurement.
+##
+## albedo_texture MULTIPLIES albedo_color, so a call site's colour still decides what
+## the surface is; this only modulates it. _albedo_map_gain divides the modulation's
+## own mean back out, per channel, so a map whose average is a warm 0.82 does not
+## quietly darken and warm forty call sites' palettes.
+const _ALBEDO_MAPS := {
+	Surface.GRANITE: preload("res://assets/textures/detail_granite_albedo.tres"),
+	Surface.IRON: preload("res://assets/textures/detail_iron_albedo.tres"),
+	Surface.COBBLE: preload("res://assets/textures/detail_cobble_albedo.tres"),
+	Surface.PLASTER: preload("res://assets/textures/detail_plaster_albedo.tres"),
+}
+
+## The shared close-range layer, one pair for every surface. See rule (a) above and
+## the header of generate_detail_maps.gd for why it is shared and for what the
+## albedo map's alpha channel is doing.
+const _FINE_NORMAL := preload("res://assets/textures/detail_fine_normal.tres")
+const _FINE_ALBEDO := preload("res://assets/textures/detail_fine_albedo.tres")
+
 # --- Palette ----------------------------------------------------------------
 # Defaults so a caller that just wants "some granite" can write ToonFactory.stone().
 
@@ -68,14 +147,92 @@ const GLASS_TINT := Color(0.72, 0.82, 0.86)
 # --- Shared look ------------------------------------------------------------
 
 ## A little Fresnel rim on everything. It is the one deliberate survivor of the
-## toon pass: it keeps silhouettes reading against the hazy golden-hour sky now
-## that the hard black outline is gone, without costing a second draw call.
-const RIM_AMOUNT := 0.22
-const RIM_TINT := 0.45
+## toon pass: it keeps silhouettes reading now that the hard black outline is gone,
+## without costing a second draw call.
+##
+## 0.22 -> 0.14, and tint 0.45 -> 0.65. A rim term is a fake grazing-angle lift, and
+## against a hazy low-contrast sunset sky it was buying silhouette separation cheaply.
+## Against a hard blue sky under a strong key it buys much less — the key does that job
+## now — while costing more, because a uniform white-ish edge highlight on every
+## object in a bright frame is exactly the "plastic sheen" tell a critic looks for.
+## The higher tint pushes what is left toward the surface's own albedo, so a terracotta
+## roof rims terracotta rather than rimming white.
+const RIM_AMOUNT := 0.14
+const RIM_TINT := 0.65
 const DEFAULT_ROUGHNESS := 0.80
+
+# --- Physical guards --------------------------------------------------------
+
+## Real diffuse surfaces live between about 2% (fresh asphalt, soot) and 90% (fresh
+## snow, titanium white) reflectance, and the RUBRIC states that range as a rule.
+## Several call sites are outside it — TRIM_WHITE at 0.93, the cloud puffs at 0.95,
+## gull feathers at 0.94 — and an albedo above 0.9 does not read as "brighter", it
+## reads as an object that cannot take a shadow. Clamped by scaling the whole colour
+## rather than per channel, so nothing shifts hue on the way in.
+##
+## THIS APPLIES TO THE AUTHORED COLOUR, before the texture gains — see
+## _physical_albedo() for the full reasoning. It used to be applied after them, and
+## Round 3 walked straight into the consequence: the effective ceiling on a call
+## site's authored reflectance was 0.90 divided by both gains, about 0.616 for
+## granite, and it MOVED whenever an albedo map was re-authored. Re-authoring the
+## granite ramp for hue dropped the map's mean 0.863 -> 0.774, raised the gain
+## 1.159 -> 1.293, and silently darkened TRIM_WHITE, GRANITE_DRESS and DRESSED by
+## 10%, 10% and 2% — three world-stream call sites that had nothing to do with the
+## texture edit that moved them.
+##
+## A guard that fires because somebody changed a noise ramp is not measuring physics.
+## Against the authored value it means exactly what it says, it is stable under
+## texture work, and it lands on the stream that authored the colour. Those three
+## call sites are still above what granite physically reflects and are still clamped
+## — but now for the reason stated on the tin.
+const ALBEDO_CEILING := 0.90
+const ALBEDO_FLOOR := 0.02
+
+## Below this, `metallic` means "dielectric"; at or above it, "bare metal". Nothing
+## in between survives — see rule (c) in the header. 0.6 is where the call sites
+## actually separate: the tram railheads (0.85), the rivet plates (0.60) and the
+## barrel hoops (0.65) are bare steel, and everything else on this bridge is painted.
+const METALLIC_SNAP := 0.6
+
+## metallic_specular for a snapped-to-zero dielectric that asked to be a metal.
+## 0.5 is Godot's default and means F0 = 4%, which is glass and most plastics.
+## Painted or oxidised steel sits nearer 5.5-6%, and that extra is the sky catching
+## the ironwork — the read the half-metallic value was reaching for by the wrong
+## route, because it was also washing the colour out of the diffuse term to get it.
+const DIELECTRIC_METAL_SPECULAR := 0.62
+
+# --- Close-range detail layer -----------------------------------------------
+
+## Tile size of the shared fine pair, in metres. 0.28 m over a 256-px map is about
+## 1.1 mm per texel: still resolving at the 0.5 m the RUBRIC names, and small enough
+## that by 4-5 m it has gone sub-pixel and stopped contributing anything but a very
+## slight softening — which is the correct behaviour for a second layer.
+const DETAIL_TILE_METERS := 0.28
+
+## The fine layer's NET multiplier on albedo runs 0.65 at the bottom of its range to
+## 1.00 at the top and averages 0.876, so leaving it alone would quietly darken every
+## authored colour in the game by roughly 12% and make forty call sites' palettes mean
+## something they do not say. This puts that back. It is not a look dial — the
+## RUBRIC's "exposure-driven, not multiplier-driven" rule is about fixing LIGHTING
+## with albedo, and this is a texture-mean correction. It is applied before
+## ALBEDO_CEILING, so it can never push a colour out of range.
+##
+## ONE SCALAR, not three, and that is a constraint on the fine ramp rather than a
+## simplification here. The surface maps each get a per-channel gain, so they may
+## average any colour they like; this layer is SHARED by every textured material in
+## the game, so if its channels average differently the whole game is tinted and
+## nothing divides it back out. Round 3 made the layer chromatic and therefore had to
+## hold its three channel means equal — measured spread 0.54%, and
+## _atmosphere_probe.gd now fails past 2%.
+##
+## 1.13 against a measured reciprocal of 1.140: a 0.9% underscale, inherited, and left
+## alone deliberately. It is inside the probe's 3% and moving it would shift every
+## palette in the game by 1% for no reason anyone asked for.
+const DETAIL_ALBEDO_GAIN := 1.13
 
 static var _cache: Dictionary = {}
 static var _derived_normals: Dictionary = {}
+static var _map_gains: Dictionary = {}
 
 
 # --- Legacy API -------------------------------------------------------------
@@ -104,35 +261,123 @@ static func glow(color: Color, energy: float = 3.0, _legacy_outline_width: float
 # --- Material helpers -------------------------------------------------------
 
 ## Granite: piers, quay walls, the Clérigos shaft, thrown masonry.
+##
+## Carries the surface-scale granite albedo map: metre-scale mottling at the coarse
+## tile, so one block differs from the next. The bump and the fine layer were already
+## doing the speckle; what a kerb run or a quay wall was missing is the difference
+## between its stones — and, since Round 3, a difference in HUE and not only in value.
+## The ramp walks iron-stained dark, damp blue-grey, pink feldspar, quartz blue-white,
+## warm bleached, lichen grey-green, hot bleached, so a warm block sits against a cool
+## one at metre scale. Delivered channel correlation r-g +0.43 / r-b +0.06, from
+## +1.000 / +0.999 when the ramp still ran cool-dark to warm-bright in one direction.
+##
+## ao_strength 0.35 -> 0.52. This granite stands two metres above a tidal river, and
+## the mask's crevices are now both darker (the AO channel was inverted before this
+## pass) and glossier (roughness 0.52-1.00 across the surface), which together is the
+## damp-in-the-joints, dry-on-the-face read the RUBRIC asks for by name. normal_scale
+## up 1.0 -> 1.15 because the fine layer stacks at 55% and the surface normal has to
+## stay the dominant one at arm's length and beyond.
 static func stone(color: Color = STONE_GREY, tile_meters: float = 2.4) -> StandardMaterial3D:
-	return build(color, Surface.GRANITE, 0.92, 0.0, tile_meters, 1.0, 0.35)
+	return build(color, Surface.GRANITE, 0.92, 0.0, tile_meters, 1.15, 0.52)
 
 
-## Cobbled setts: the Ribeira cais, any paved promenade.
+## Cobbled setts: the Ribeira cais, the deck footways, the tram bed, any paved
+## promenade. ao 0.45 -> 0.60: the grout between setts is where the moss is, and it is
+## the deepest AO of the six recipes.
+##
+## The surface-scale albedo map is aimed at Round 1's finding that the deck cobble was
+## "a normal-map-only material — contrast-stretched, every sett the identical
+## pinkish-mauve". Its noise is the SAME cellular field as the mask, at the same
+## frequency, jitter and seed, but returning per-cell values instead of border
+## distances, and its gradient interpolates as CONSTANT — so each sett takes one flat
+## colour off a six-stop ramp and the colour boundaries land exactly on the joints the
+## normal map is already grooving. Under SceneryKit.world_mapped(), which is how the
+## deck and the quays take it, that variation runs across a hundred metres of paving
+## instead of restarting per box.
+##
+## Round 3 replaced the six stops with six STONES — three value levels crossed with
+## warm and cool — which is the arrangement that makes value and hue exactly
+## orthogonal over an equal-share cell field, and took the delivered correlation from
+## r-g +1.000 / r-b +0.999 to +0.52 / +0.04. The sett-to-sett VALUE ratio came down
+## from 1.6x to 1.5x to pay for it, on the brief's own reasoning that this surface
+## already had more monochrome variance than it could use. This is not the calçada
+## portuguesa mosaic and deliberately is not; the recipe says why.
 static func cobblestone(color: Color = COBBLE_GREY, tile_meters: float = 1.4) -> StandardMaterial3D:
-	return build(color, Surface.COBBLE, 0.88, 0.0, tile_meters, 1.2, 0.45)
+	return build(color, Surface.COBBLE, 0.88, 0.0, tile_meters, 1.35, 0.60)
 
 
 ## Painted / weathered structural steel: the arch, lattice, rails, lampposts.
-## Semi-metallic so it picks up the sunset sky instead of reading as grey card.
+##
+## metallic default 0.55 -> 0.0, which is what this material has always physically
+## been: the Dom Luís lattice is painted steel, and paint is a dielectric. The old
+## half-metal was reaching for "picks up the sky instead of reading as grey card" and
+## getting there by washing the diffuse colour out, which is why the ironwork never
+## looked painted. The sky pickup is bought properly instead, with
+## DIELECTRIC_METAL_SPECULAR and the iron mask's 0.34-1.00 roughness spread: intact
+## paint is smooth enough to mirror the dome, a rust bloom is not, and the two sit
+## next to each other on every member.
+##
+## Call sites that genuinely want bare steel — the tram railheads at 0.85, the rivet
+## plates at 0.60, the barrel hoops at 0.65 — clear METALLIC_SNAP and get metallic 1.
+##
+## And the surface-scale albedo map, which is the direct answer to Round 1's highest-
+## leverage finding: the Dom Luís ironwork measured mean RGB (11, 16, 27), standard
+## deviation 3, maximum (22, 28, 41), with no specular return anywhere along the top
+## rail against a 210-blue sky — a black cutout in a game about a wrought-iron bridge.
+## Three things address it and only one of them is a material:
+##   * the map runs intact paint -> chalked edge -> oxide bloom on the SAME noise as
+##     the normal and the roughness mask, so rust sits where the plate is proud and
+##     rough and nowhere else. That is the rust bleed and the failed paint.
+##   * the sun swung 66 degrees east of +x, so the lattice's broad +-z faces went from
+##     N.L 0.315 to 0.757 — 2.4x the key, on the largest visible surface of the asset.
+##   * sky_fill_energy went 0.32 -> 0.46, which is what lifts its upward faces, and
+##     DIELECTRIC_METAL_SPECULAR at F0 6.2% against the iron mask's 0.34-1.00 roughness
+##     spread is what puts a specular roll along the top rail.
+## The one thing here that is NOT solved at material scale is the paint chipped
+## specifically at the handrail contact line: that is a position-dependent wear mask,
+## it needs world-space authoring on the geometry, and the geometry is not this
+## stream's. It is in this pass's report.
 static func iron(color: Color = IRON_GREY, tile_meters: float = 1.6,
-		metallic: float = 0.55, roughness: float = 0.62) -> StandardMaterial3D:
-	return build(color, Surface.IRON, roughness, metallic, tile_meters, 0.9, 0.25)
+		metallic: float = 0.0, roughness: float = 0.62) -> StandardMaterial3D:
+	return build(color, Surface.IRON, roughness, metallic, tile_meters, 1.05, 0.38,
+			Color.BLACK, 0.0, 1.0, DIELECTRIC_METAL_SPECULAR)
 
 
-## Limewashed render — Ribeira facades, lodge walls, chapel body.
+## Limewashed render — Ribeira facades, lodge walls, chapel body. Sun-faded and
+## chalky: roughness 0.94 with the plaster mask's 0.80-1.00 on top, and the fine albedo
+## layer blotching it, which on a pale wall reads as exactly the uneven weathering
+## every limewashed facade in the Ribeira has.
+##
+## It also carries a surface-scale albedo map, at a much lower frequency than the
+## other three (~1.3 m blotches). That is aimed at one report: the world stream gave
+## these facades real reveals, sills, shutters and downpipes and they still read as
+## flat-coloured cards at 60-120 m — which they would, because at that range the fine
+## layer has gone sub-pixel and a wall was one authored colour again. See the recipe
+## for why the VALUE range is the tightest of the four and what it costs the brightest
+## authored plaster colours.
+##
+## Round 3 made that map non-monotone like the rest of the stone family, at half
+## granite's amplitude: damp streaks go grey-green, sun-baked panels go warm-ochre,
+## and the delivered correlation went r-g +1.000 / r-b +1.000 to +0.66 / +0.18. A
+## second critic independently measured these same facades getting MORE saturated
+## with distance (0.265 / 0.301 / 0.323, near to far), and a near wall carrying its
+## own hue variation is half the answer to that; the other half is the fog term and
+## belongs to the atmosphere stream.
 static func plaster(color: Color = PLASTER_CREAM, tile_meters: float = 2.0) -> StandardMaterial3D:
-	return build(color, Surface.PLASTER, 0.94, 0.0, tile_meters, 0.7, 0.20)
+	return build(color, Surface.PLASTER, 0.94, 0.0, tile_meters, 0.85, 0.30)
 
 
-## Clay barrel roof tiles.
+## Clay barrel roof tiles. Rain-polished on the crowns, gritty in the pans between
+## them, with the deepest normal of the six because a roof is only ever seen from
+## above at a steep angle and the tile relief is its entire silhouette.
 static func terracotta(color: Color = TERRACOTTA_RED, tile_meters: float = 0.85) -> StandardMaterial3D:
-	return build(color, Surface.TERRACOTTA, 0.86, 0.0, tile_meters, 1.0, 0.35)
+	return build(color, Surface.TERRACOTTA, 0.86, 0.0, tile_meters, 1.2, 0.45)
 
 
-## Timber: rabelo hulls, masts, barrels, decking.
+## Timber: rabelo hulls, masts, barrels, decking. Worn pale and smooth where feet
+## land, rough in the split between boards.
 static func wood(color: Color = WOOD_BROWN, tile_meters: float = 1.1) -> StandardMaterial3D:
-	return build(color, Surface.WOOD, 0.80, 0.0, tile_meters, 0.8, 0.25)
+	return build(color, Surface.WOOD, 0.80, 0.0, tile_meters, 0.95, 0.32)
 
 
 ## Woven cloth: sails, awnings, banners. Fully rough, no spec highlight to speak
@@ -142,9 +387,15 @@ static func cloth(color: Color = CLOTH_LINEN, tile_meters: float = 0.45) -> Stan
 
 
 ## Glazed ceramic — the azulejo panels. Wet-looking: that hard specular kick off
-## a tile front is the whole reason azulejos read as Porto and not as blue paint.
+## a tile front is the whole reason azulejos read as Porto and not as blue paint,
+## and under a hard blue sky it is a far bigger part of the frame than it was under a
+## hazy one. Godot's metallic_specular is F0 = 0.16 * s^2, so 0.65 is F0 = 6.8%: a
+## fired lead glaze rather than the 4% the 0.5 default assumes for everything, and the
+## difference between a tile panel that flashes as the camera passes and one that does
+## not.
 static func ceramic(color: Color = AZULEJO_BLUE, tile_meters: float = 0.5) -> StandardMaterial3D:
-	return build(color, Surface.TERRACOTTA, 0.14, 0.0, tile_meters, 0.25, 0.10)
+	return build(color, Surface.TERRACOTTA, 0.14, 0.0, tile_meters, 0.30, 0.14,
+			Color.BLACK, 0.0, 1.0, 0.65)
 
 
 ## Window / lantern glazing. Transparent, so it lands in the alpha pass — keep
@@ -165,23 +416,46 @@ static func water(color: Color = Color(0.16, 0.34, 0.42), alpha: float = 0.78) -
 ## geometry stream can dial in something the named helpers don't cover, but
 ## prefer the helpers: fewer distinct parameter sets means fewer materials means
 ## fewer draw calls.
+##
+## `specular` and `fine_detail` are appended, never inserted: terrain_batch.gd calls
+## this positionally with seven arguments and every other caller goes through a named
+## helper, so anything new has to arrive at the end with a default that reproduces the
+## old behaviour. `specular` is metallic_specular, i.e. F0 for the dielectric case;
+## `fine_detail` switches off the shared close-range layer for surfaces the camera
+## never gets near, where six triplanar taps buy nothing.
 static func build(color: Color, surface: Surface = Surface.FLAT,
 		roughness: float = DEFAULT_ROUGHNESS, metallic: float = 0.0,
 		tile_meters: float = 2.0, normal_scale: float = 1.0, ao_strength: float = 0.0,
 		emission: Color = Color.BLACK, emission_energy: float = 0.0,
-		alpha: float = 1.0) -> StandardMaterial3D:
-	var key := "%s|%d|%.3f|%.3f|%.3f|%.3f|%.3f|%s|%.3f|%.3f" % [
-		color.to_html(false), surface, roughness, metallic, tile_meters,
+		alpha: float = 1.0, specular: float = 0.5,
+		fine_detail: bool = true) -> StandardMaterial3D:
+	# Snap and clamp BEFORE the key is built, so two callers asking for 0.30 and 0.45
+	# metallic — which is most of the ironwork — collapse onto one cached material
+	# instead of two identical ones under different names.
+	var bare_metal := metallic >= METALLIC_SNAP
+	var metal := 1.0 if bare_metal else 0.0
+	var f0 := specular
+	if not bare_metal and metallic > 0.0:
+		# The caller asked for a metal and got a dielectric. Give it back the sky
+		# reflection it wanted, at a physical F0, instead of the washed-out diffuse
+		# a half-metal would have traded for it.
+		f0 = maxf(specular, DIELECTRIC_METAL_SPECULAR)
+	var albedo := _physical_albedo(color, surface, surface != Surface.FLAT and fine_detail)
+
+	var key := "%s|%d|%.3f|%.3f|%.3f|%.3f|%.3f|%s|%.3f|%.3f|%.3f|%d" % [
+		albedo.to_html(false), surface, roughness, metal, tile_meters,
 		normal_scale, ao_strength, emission.to_html(false), emission_energy, alpha,
+		f0, 1 if fine_detail else 0,
 	]
 	var cached: StandardMaterial3D = _cache.get(key)
 	if cached != null:
 		return cached
 
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(color.r, color.g, color.b, alpha)
+	m.albedo_color = Color(albedo.r, albedo.g, albedo.b, alpha)
 	m.roughness = roughness
-	m.metallic = metallic
+	m.metallic = metal
+	m.metallic_specular = f0
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	m.rim_enabled = true
 	m.rim = RIM_AMOUNT
@@ -205,6 +479,13 @@ static func build(color: Color, surface: Surface = Surface.FLAT,
 		m.normal_scale = normal_scale
 		m.normal_texture = _NORMAL_MAPS[surface]
 
+		# Surface-scale colour, on the same uv1 as the normal it is registered to.
+		# SceneryKit.world_mapped() flips uv1 to WORLD triplanar on the deck and the
+		# quays, which is exactly right here: the sett colours then vary across a
+		# hundred metres of paving instead of restarting inside every box.
+		if _ALBEDO_MAPS.has(surface):
+			m.albedo_texture = _ALBEDO_MAPS[surface]
+
 		var mask: Texture2D = _MASK_MAPS[surface]
 		m.roughness_texture = mask
 		m.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
@@ -214,8 +495,162 @@ static func build(color: Color, surface: Surface = Surface.FLAT,
 			m.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
 			m.ao_light_affect = ao_strength
 
+		if fine_detail:
+			_add_fine_detail(m)
+
 	_cache[key] = m
 	return m
+
+
+## The second texture scale: the close-range half of the albedo variation, the
+## surface-scale maps above being the other half.
+##
+## Rides UV2 with its own triplanar mapping, which is what lets it tile at 0.28 m
+## while the surface layer tiles at whatever real-world size its material wants.
+## Godot's detail pass is
+##     detail     = mix(ALBEDO, ALBEDO * detail_tex.rgb, detail_tex.a);
+##     detail_nrm = mix(NORMAL_MAP, detail_norm_tex.rgb, detail_tex.a);
+## so MUL is the blend mode that makes the albedo map a modulation of whatever colour
+## the caller asked for rather than a replacement of it, and the map's own alpha
+## (0.55, baked in by generate_detail_maps.gd) is what stops the fine normal wiping
+## out the surface normal instead of stacking with it.
+static func _add_fine_detail(m: StandardMaterial3D) -> void:
+	m.detail_enabled = true
+	m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
+	m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	m.detail_albedo = _FINE_ALBEDO
+	m.detail_normal = _FINE_NORMAL
+	m.uv2_triplanar = true
+	m.uv2_scale = Vector3.ONE / DETAIL_TILE_METERS
+
+
+## Put a caller's colour inside the range a real diffuse surface can occupy, and
+## pre-multiply out both texture layers' means so the authored colour still means what
+## it says once they have multiplied it.
+##
+## The CEILING and FLOOR are applied to the AUTHORED colour, BEFORE the texture
+## gains — because the authored colour is the physical claim being made ("this
+## wall reflects 63% of the light that hits it") and the gains are a correction
+## that makes the surface's rendered MEAN come out at exactly that. The value
+## after the gains is an intermediate: it is what the shader multiplies by a
+## texture whose mean divides it straight back out.
+##
+## Clamping the intermediate, which is what this used to do, makes the effective
+## ceiling on a call site 0.90 divided by both gains — about 0.616 for granite —
+## and, far worse, MOVES IT WHENEVER AN ALBEDO MAP IS RE-AUTHORED. Round 3
+## re-authored the granite map for hue, its gain went 1.159 to 1.293, and three
+## world-stream call sites silently darkened by 2 to 10% as a side effect of a
+## texture edit they had nothing to do with. A physical guard that fires because
+## somebody changed a noise ramp is not measuring physics.
+##
+## Applied to the authored value the ceiling means what it says, is stable
+## against texture work, and lands on the stream that actually authored the
+## colour. Note the returned colour may now exceed 1.0 per channel by design:
+## 0.90 x 1.13 x 1.293 is 1.315, and the texture it multiplies has a mean of
+## 1/1.315, so the surface still presents 0.90. Godot does not clamp
+## albedo_color, and the product is what reaches ALBEDO.
+##
+## The ceiling scales the colour as a whole and is never clamped per channel:
+## clamping (0.93, 0.91, 0.85) channel-wise pulls red down and leaves blue alone,
+## which desaturates and cools the surface. Scaling keeps the hue and moves only
+## the value, which is what "this wall is a bit too bright to be real" means.
+static func _physical_albedo(color: Color, surface: Surface, has_fine_detail: bool) -> Color:
+	var c := color
+	var peak := maxf(c.r, maxf(c.g, c.b))
+	if peak > ALBEDO_CEILING and peak > 0.0:
+		c *= ALBEDO_CEILING / peak
+	# A floor as well as a ceiling: nothing in the real world reflects less than a
+	# couple of percent, and a near-black albedo is a surface that can only ever be
+	# a silhouette. Applied to the darkest channel so window reveals and void caps
+	# keep their shape instead of all flattening to the same grey.
+	var dim := minf(c.r, minf(c.g, c.b))
+	if dim < ALBEDO_FLOOR:
+		c = Color(maxf(c.r, ALBEDO_FLOOR), maxf(c.g, ALBEDO_FLOOR), maxf(c.b, ALBEDO_FLOOR))
+
+	if has_fine_detail:
+		c = Color(c.r * DETAIL_ALBEDO_GAIN, c.g * DETAIL_ALBEDO_GAIN, c.b * DETAIL_ALBEDO_GAIN)
+	var map := _albedo_map_gain(surface)
+	return Color(c.r * map.r, c.g * map.g, c.b * map.b)
+
+
+## The reciprocal of a surface albedo map's own mean, per channel — what
+## _physical_albedo multiplies the authored colour by so the map modulates rather
+## than tints.
+##
+## PER CHANNEL rather than by luminance, and that is the whole point: the cobble ramp
+## averages a faintly warm grey and the iron ramp a rust-leaning one, so a single
+## luminance gain would leave every cobbled and every iron surface in the game shifted
+## a few percent toward the map's own hue. Dividing each channel makes the map's
+## average exactly neutral white, i.e. exactly a no-op on the mean.
+##
+## MEASURED off the noise field, not integrated over the ramp. The first version of
+## this did integrate uniformly over the ramp's parameter, and _atmosphere_probe.gd
+## caught it immediately: the iron map came out 10% off, because an fBm histogram
+## bunches hard toward the middle and the rust living in its top 16% is reached far
+## less often than a uniform reading assumes. Only the cobble's per-cell field is
+## actually uniform. So this rasterises the field itself — Noise.get_image() is
+## synchronous, unlike NoiseTexture2D's own worker-thread path — and averages the
+## ramped, linearised result.
+##
+## Sampled THROUGH the seamless path and, critically, over the SAME REGION OF THE
+## NOISE FIELD the full-size descriptor covers.
+##
+## That second half is the part that is easy to get wrong and was got wrong twice here
+## before the probe caught it. Noise.get_image(w, h) evaluates the field at integer
+## coordinates 0..w-1, and FastNoiseLite.frequency is per unit of that coordinate — so
+## asking for a smaller image does not downsample the texture, it samples a smaller
+## WINDOW of the same field. At 48 x 48 the cobble map's cells are 36 units across, so
+## the window contained about two of them and its mean was a coin flip; the probe read
+## it 9% off. Scaling the frequency by (native size / sample size) puts the window back
+## over the whole field, so 96 x 96 sees the same fifty-odd cells the 256 x 256 map
+## does, at a sixteenth of the cost.
+##
+## Under 30,000 noise evaluations for all three surfaces, once per run, cached. The
+## probe recomputes the same quantity at 160 x 160 and fails past 4%, which makes it a
+## real convergence check rather than the same code run twice.
+const _GAIN_SAMPLES := 96
+
+static func _albedo_map_gain(surface: Surface) -> Color:
+	if _map_gains.has(surface):
+		return _map_gains[surface]
+	var gain := Color(1.0, 1.0, 1.0)
+	var tex: NoiseTexture2D = _ALBEDO_MAPS.get(surface)
+	if tex != null and tex.color_ramp != null and tex.noise != null:
+		var img := sample_noise(tex, _GAIN_SAMPLES)
+		if img != null:
+			var ramp: Gradient = tex.color_ramp
+			var sum := Color(0.0, 0.0, 0.0)
+			for y in _GAIN_SAMPLES:
+				for x in _GAIN_SAMPLES:
+					# The noise image is greyscale, so its red channel IS the field
+					# value, and that value is what NoiseTexture2D feeds the gradient.
+					# The albedo sampler carries a source_color hint, so what actually
+					# multiplies ALBEDO is the LINEAR value of an sRGB-authored stop.
+					var c := ramp.sample(img.get_pixel(x, y).r).srgb_to_linear()
+					sum += Color(c.r, c.g, c.b)
+			var n := float(_GAIN_SAMPLES * _GAIN_SAMPLES)
+			gain = Color(n / maxf(sum.r, 0.001), n / maxf(sum.g, 0.001),
+					n / maxf(sum.b, 0.001))
+	_map_gains[surface] = gain
+	return gain
+
+
+## Rasterise a NoiseTexture2D descriptor's field at `size`, covering the whole region
+## the descriptor itself covers. Shared with _atmosphere_probe.gd, which is the only
+## reason it is not private: the probe has to be able to reproduce this independently
+## at a different resolution for its convergence check, and two copies of the
+## frequency-scaling rule is exactly how the two would drift apart.
+static func sample_noise(tex: NoiseTexture2D, size: int) -> Image:
+	if tex == null or tex.noise == null or size <= 0:
+		return null
+	var noise: Noise = tex.noise.duplicate()
+	var fnl := noise as FastNoiseLite
+	if fnl != null:
+		fnl.frequency *= float(maxi(tex.width, 1)) / float(size)
+	if tex.seamless:
+		return noise.get_seamless_image(size, size, false, false,
+				tex.seamless_blend_skirt, tex.normalize)
+	return noise.get_image(size, size, false, false, tex.normalize)
 
 
 # --- Imported model upgrade -------------------------------------------------

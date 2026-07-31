@@ -19,6 +19,22 @@
 !/web/.gdignore
 !/web/.nojekyll
 
+# Harness scratch: captures, contact sheets and diff heatmaps are outputs of a
+# review round, not sources. They are large, they change on every run, and the
+# thing worth keeping from a round is the findings, not the pixels.
+/shots/
+tools/__pycache__/
+
+# Throwaway investigation probes. CI runs EVERY scripts/**/_*probe.gd as a gate,
+# so a one-off scratch probe left in the tree becomes a permanent CI job that
+# nobody owns — and the lead's checkpoint commits use `git add -A`, which will
+# happily sweep one in. Name a temporary probe `_scratch_*.gd` and it stays local.
+# A probe worth keeping earns a real name and a real verdict.
+scripts/**/_scratch_*.gd
+scripts/**/_scratch_*.gd.uid
+scripts/**/_render_tmp.gd
+scripts/**/_render_tmp.gd.uid
+
 # OS cruft
 .DS_Store
 Thumbs.db

@@ -24,8 +24,11 @@ const MenuRow := preload("res://scripts/ui/menu/menu_row.gd")
 signal activated(id: StringName)
 signal difficulty_changed(index: int)
 
-const ROW_HEIGHT := 52.0
-const ROW_GAP := 6.0
+## Rows are plates now rather than words, so they need the height a plate needs:
+## 27 px of type plus the padding that stops a 3 px keyline crowding the cap
+## line. Anything under about 50 makes the column read as a list again.
+const ROW_HEIGHT := 56.0
+const ROW_GAP := 7.0
 const ENTRY_SLIDE := 38.0
 const ENTRY_TIME := 0.42
 

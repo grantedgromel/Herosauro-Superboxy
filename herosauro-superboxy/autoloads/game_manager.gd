@@ -7,6 +7,12 @@ extends Node
 ## All cross-cutting game events flow through this node's signals so that
 ## entities and UI stay decoupled: gameplay nodes CALL the mutator methods
 ## (damage_boss, damage_player, ...) and everyone else REACTS to the signals.
+##
+## TWO HEROES. Health, combo and score attribution are all keyed by `player_id`
+## (1 = Herosauro, 2 = Super Boxy), and `active_player_ids()` is the single place
+## that decides which of them a given session actually fields. In co-op a hero at
+## zero health is DOWN and comes back via `revive_player()`; the run ends only
+## when no hero is left standing.
 
 signal state_changed(new_state: int)
 signal game_started
@@ -34,21 +40,43 @@ const BOSS_PHASE2_RATIO := 0.5
 const COMBO_TIMEOUT := 2.5
 const SCORE_PER_HIT := 10
 
+## Health a hero comes back with after being helped up in co-op. Deliberately
+## not full: going down has to cost something, or the pair just trade knockouts.
+const REVIVE_HEALTH := int(MAX_PLAYER_HEALTH * 0.5)
+
 var state: int = State.MENU
 var score: int = 0
 var fight_time: float = 0.0
 
 # --- Session config (written by the main menu, read at spawn time) ---------
 var difficulty: int = Difficulty.NORMAL
-var player_count: int = 2     # 1 = solo + AI ally, 2 = local co-op
+## 1 = solo (one hero, chosen by human_hero), 2 = two-player local co-op.
+## There is no AI ally: a hero that is not a seat at the machine is not spawned.
+var player_count: int = 2
 var human_hero: int = 1       # in 1P: which hero the human drives (1 or 2)
 
 var player_health := {1: MAX_PLAYER_HEALTH, 2: MAX_PLAYER_HEALTH}
 var boss_health: int = MAX_BOSS_HEALTH
 var boss_phase: int = 1
-var p2_combo: int = 0
 
-var _combo_window: float = 0.0
+## Combo is PER HERO, with its own window each. `combo_changed` has always
+## carried a player_id and it was a lie while one shared counter backed it — a
+## two-hero HUD cannot draw two chains from one number. Each hero keeps their own
+## chain alive, and the multiplier they earn is theirs.
+var combo := {1: 0, 2: 0}
+## Score is a single TEAM number (that is what `score_changed` carries), but the
+## split is tracked so a results screen can say who did what.
+var player_score := {1: 0, 2: 0}
+
+var _combo_window := {1: 0.0, 2: 0.0}
+var _last_scorer: int = 1
+
+
+## Deprecated. Reports the combo of whoever last landed a hit, and exists only so
+## the UI stream's in-flight probe keeps resolving while the HUD is rebuilt for
+## two heroes. Call combo_for(player_id).
+var p2_combo: int:
+	get: return combo_for(_last_scorer)
 
 
 func _ready() -> void:
@@ -61,11 +89,22 @@ func _process(delta: float) -> void:
 		return
 	fight_time += delta
 	timer_updated.emit(fight_time)
-	if _combo_window > 0.0:
-		_combo_window -= delta
-		if _combo_window <= 0.0 and p2_combo != 0:
-			p2_combo = 0
-			combo_changed.emit(2, 0)
+	for pid in _combo_window.keys():
+		if _combo_window[pid] <= 0.0:
+			continue
+		_combo_window[pid] -= delta
+		if _combo_window[pid] <= 0.0 and int(combo[pid]) != 0:
+			combo[pid] = 0
+			combo_changed.emit(pid, 0)
+
+
+## Hero ids this session actually spawns. The single source of truth for the
+## roster: main.gd spawns exactly these, start_game syncs exactly these, and the
+## defeat test falls back to exactly these.
+func active_player_ids() -> Array[int]:
+	if player_count <= 1:
+		return [clampi(human_hero, 1, 2)] as Array[int]
+	return [1, 2] as Array[int]
 
 
 ## Reset everything and begin a new fight.
@@ -73,18 +112,22 @@ func start_game() -> void:
 	score = 0
 	fight_time = 0.0
 	player_health = {1: MAX_PLAYER_HEALTH, 2: MAX_PLAYER_HEALTH}
+	player_score = {1: 0, 2: 0}
 	boss_health = MAX_BOSS_HEALTH
 	boss_phase = 1
-	p2_combo = 0
-	_combo_window = 0.0
+	combo = {1: 0, 2: 0}
+	_combo_window = {1: 0.0, 2: 0.0}
+	_last_scorer = active_player_ids()[0]
 	change_state(State.PLAYING)
 	game_started.emit()
 	# Push an initial sync so freshly-shown HUD elements start at the right value.
+	# Only the heroes that exist: a solo run must not tell the HUD to draw a
+	# second health bar for a hero nobody is going to spawn.
 	boss_damaged.emit(0, boss_health)
-	player_damaged.emit(1, 0, player_health[1])
-	player_damaged.emit(2, 0, player_health[2])
+	for pid in active_player_ids():
+		player_damaged.emit(pid, 0, player_health[pid])
+		combo_changed.emit(pid, 0)
 	score_changed.emit(score)
-	combo_changed.emit(2, 0)
 	timer_updated.emit(0.0)
 
 
@@ -134,7 +177,7 @@ func toggle_pause() -> void:
 # --- Combat mutators -------------------------------------------------------
 
 func damage_player(player_id: int, amount: int) -> void:
-	if state != State.PLAYING:
+	if state != State.PLAYING or not player_health.has(player_id):
 		return
 	player_health[player_id] = max(0, int(player_health[player_id]) - amount)
 	player_damaged.emit(player_id, amount, player_health[player_id])
@@ -142,12 +185,29 @@ func damage_player(player_id: int, amount: int) -> void:
 		_end_game(false)
 
 
+## Help a downed hero back up. Called by PlayerBase once its revive timer runs
+## out, which only happens while a partner is still standing — with nobody left
+## to do the helping, `_all_heroes_down` has already ended the run.
+##
+## Re-uses `player_damaged` (with amount 0) rather than adding a signal: every
+## listener already keys off the health it carries, so a bar that emptied refills
+## and a portrait that dimmed lights back up with no new vocabulary.
+func revive_player(player_id: int, health: int = REVIVE_HEALTH) -> void:
+	if state != State.PLAYING or not player_health.has(player_id):
+		return
+	player_health[player_id] = clampi(health, 1, MAX_PLAYER_HEALTH)
+	player_damaged.emit(player_id, 0, player_health[player_id])
+	player_respawned.emit(player_id)
+
+
 ## True once every hero actually in the world is at zero health.
 ##
 ## This used to test `player_health[1] and player_health[2]` directly, which
 ## could never fire in the single-hero game — the absent second hero sat at full
 ## health forever, so the player simply could not lose. Ask the scene instead of
-## assuming a roster, so solo and any future co-op both terminate correctly.
+## assuming a roster, so solo and co-op both terminate correctly: in co-op one
+## hero at zero is DOWN, not defeat, and the run only ends when the partner is
+## down too.
 func _all_heroes_down() -> bool:
 	var found := false
 	for p in get_tree().get_nodes_in_group("players"):
@@ -157,9 +217,13 @@ func _all_heroes_down() -> bool:
 			pid = int(p.player_id)
 		if int(player_health.get(pid, 0)) > 0:
 			return false
-	# No hero nodes yet (menu, teardown): fall back to the health table.
+	# No hero nodes yet (menu, teardown): fall back to the health table — but
+	# only over the roster this session actually fields, or a solo run as hero 2
+	# would be held up forever by hero 1's untouched 100 health.
 	if not found:
-		return int(player_health[1]) <= 0 and int(player_health[2]) <= 0
+		for pid in active_player_ids():
+			if int(player_health.get(pid, 0)) > 0:
+				return false
 	return true
 
 
@@ -174,11 +238,16 @@ func damage_boss(amount: int, source_player: int) -> void:
 	boss_damaged.emit(amount, boss_health)
 
 	# Combo used to be hard-wired to source_player == 2, so it went dead the
-	# moment the game became single-hero. Any hero's chained hits count now.
-	p2_combo += 1
-	_combo_window = COMBO_TIMEOUT
-	var points := SCORE_PER_HIT * p2_combo
-	combo_changed.emit(source_player, p2_combo)
+	# moment the game became single-hero. It is now per hero: each of them keeps
+	# their own chain alive and earns their own multiplier, which is the only way
+	# the player_id on `combo_changed` means anything.
+	var pid := source_player if combo.has(source_player) else 1
+	combo[pid] = int(combo[pid]) + 1
+	_combo_window[pid] = COMBO_TIMEOUT
+	_last_scorer = pid
+	var points := SCORE_PER_HIT * int(combo[pid])
+	combo_changed.emit(pid, int(combo[pid]))
+	player_score[pid] = int(player_score[pid]) + points
 	add_score(points)
 
 	if boss_phase == 1 and float(boss_health) / float(MAX_BOSS_HEALTH) <= BOSS_PHASE2_RATIO:
@@ -187,6 +256,10 @@ func damage_boss(amount: int, source_player: int) -> void:
 
 	if boss_health <= 0:
 		_end_game(true)
+
+
+func combo_for(player_id: int) -> int:
+	return int(combo.get(player_id, 0))
 
 
 func add_score(points: int) -> void:

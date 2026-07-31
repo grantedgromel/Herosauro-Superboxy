@@ -154,6 +154,8 @@ const BARGE_UPPER := Color(0.72, 0.68, 0.60)
 
 @export var gull_flocks: bool = true
 @export var vessels: bool = true
+## Rabelos tied up along both quays. Static, unlike `vessels`.
+@export var moored_fleet: bool = true
 @export var surface_foam: bool = true
 ## Forward+ only — GL Compatibility has no volumetric fog for a FogVolume to
 ## write into, so it is skipped rather than left to warn.
@@ -171,6 +173,9 @@ const BARGE_UPPER := Color(0.72, 0.68, 0.60)
 var _flocks: Array[Dictionary] = []
 var _vessels: Array[Dictionary] = []
 var _rng := RandomNumberGenerator.new()
+## Seconds of simulated time since this node entered the tree. The animation
+## clock for every gull and vessel — see the note in _process().
+var _decor_time: float = 0.0
 
 
 func _ready() -> void:
@@ -179,18 +184,29 @@ func _ready() -> void:
 		_build_gulls()
 	if vessels:
 		_build_vessels()
+	if moored_fleet:
+		_build_moored_fleet()
 	if surface_foam:
 		_build_surface_foam()
 	if river_mist and RenderingServer.get_current_rendering_method() == "forward_plus":
 		_build_mist()
 
 
-func _process(_delta: float) -> void:
-	# Wall clock rather than accumulated delta, matching sky_background.gd, so the
-	# two sets of decor never drift apart and a frame spike cannot desync a flock.
-	var t := float(Time.get_ticks_msec()) / 1000.0
-	_animate_gulls(t)
-	_animate_vessels(t)
+func _process(delta: float) -> void:
+	# Accumulated delta, NOT Time.get_ticks_msec(). This used to read the wall
+	# clock "so the two sets of decor never drift apart", and accumulating does
+	# that strictly better: sky_background.gd integrates the same delta from the
+	# same first frame, so the two stay locked without either of them depending
+	# on how long the engine happened to spend booting.
+	#
+	# The wall clock also made every screenshot a different screenshot. Two runs
+	# reach this line milliseconds apart, so every gull and every rabelo sat
+	# somewhere new in every capture, and the per-pixel regression gate in
+	# tools/harness.py could never report anything but failure. See ARCHITECTURE.md,
+	# "Why the determinism rules exist".
+	_decor_time += delta
+	_animate_gulls(_decor_time)
+	_animate_vessels(_decor_time)
 
 
 # --- Gulls -------------------------------------------------------------------
@@ -260,19 +276,52 @@ func _build_gulls() -> void:
 
 
 ## One gull, facing -Z (Godot forward) so Basis.looking_at drives it directly.
-## 60 triangles: enough for a silhouette with a head and a tail at 60-120 m, which
-## is the only range these are ever read at.
+##
+## ~130 triangles. What that buys over the 60 it replaces is a WING PLANFORM.
+## Round 1's finding — "bent rectangles hinged at a point, no wing shape, no body,
+## no tail, they read as blowing litter" — was aimed at the five hand-animated
+## birds sky_background.gd builds, which really are two slabs each, but the flock
+## mesh here had the same defect in a milder form: one constant-chord rectangle
+## per wing, which in silhouette is a plank.
+##
+## A gull's wing is long, narrow and swept: broad at the shoulder, half that at
+## the wrist, and a pointed hand raked back behind the shoulder line. Three
+## boxes per side get all three of those, and the silhouette is the only thing
+## anyone reads at sixty metres. The shader is untouched — it rotates anything
+## past `body_half` about the shoulder and fades the primaries in by span, so a
+## tapered wing drives the existing tip colouring correctly and for free.
 func _gull_mesh() -> ArrayMesh:
 	var b := MeshBaker.new()
-	b.add_box(Vector3(0.14, 0.12, 0.56), Transform3D.IDENTITY)                          # body
-	b.add_box(Vector3(0.10, 0.10, 0.16), Transform3D(Basis(), Vector3(0.0, 0.03, -0.34)))  # head
-	b.add_box(Vector3(0.18, 0.03, 0.22), Transform3D(Basis(), Vector3(0.0, 0.0, 0.36)))    # tail
-	# Wings, flat. The dihedral is not baked in — the vertex shader's flap_bias
-	# holds them in a shallow V and the wingbeat swings about that, so a baked one
-	# would only fight it. Inner edge at x = 0.07 = the body's half width, which is
-	# the hinge the shader rotates about.
-	for sx in [-1.0, 1.0]:
-		b.add_box(Vector3(0.60, 0.028, 0.24), Transform3D(Basis(), Vector3(sx * 0.37, 0.006, 0.01)))
+	# Body, in three tapering blocks: a gull is deepest at the breast and runs
+	# out to nothing at the tail, and one box is a brick.
+	b.add_box(Vector3(0.145, 0.135, 0.28), Transform3D(Basis(), Vector3(0.0, 0.0, -0.10)))
+	b.add_box(Vector3(0.115, 0.105, 0.22), Transform3D(Basis(), Vector3(0.0, -0.005, 0.13)))
+	b.add_box(Vector3(0.075, 0.065, 0.14), Transform3D(Basis(), Vector3(0.0, -0.012, 0.29)))
+	# Head on a short neck, and a beak: two boxes that turn a torpedo into a bird.
+	b.add_box(Vector3(0.095, 0.095, 0.13), Transform3D(Basis(), Vector3(0.0, 0.035, -0.30)))
+	b.add_box(Vector3(0.035, 0.035, 0.10), Transform3D(Basis(), Vector3(0.0, 0.025, -0.40)))
+	# Tail, fanned: wider than the body and tapering to the trailing edge.
+	b.add_box(Vector3(0.20, 0.022, 0.16), Transform3D(Basis(), Vector3(0.0, -0.012, 0.40)))
+	b.add_box(Vector3(0.115, 0.020, 0.10), Transform3D(Basis(), Vector3(0.0, -0.012, 0.52)))
+
+	# Wings. The dihedral is not baked in — the vertex shader's flap_bias holds
+	# them in a shallow V and the beat swings about that, so a baked one would
+	# fight it. Inner edge at x = 0.07 = body_half, which is the hinge.
+	#
+	# Each entry is (half-span centre, span, chord, thickness, sweep back in Z),
+	# arm then wrist then hand. Sweep is what makes the outline a gull's rather
+	# than an aeroplane's.
+	var panels := [
+		Vector4(0.185, 0.23, 0.235, 0.030),
+		Vector4(0.415, 0.23, 0.170, 0.024),
+		Vector4(0.640, 0.22, 0.095, 0.018),
+	]
+	var sweeps := [0.010, 0.055, 0.125]
+	for sx: float in [-1.0, 1.0]:
+		for i in panels.size():
+			var p: Vector4 = panels[i]
+			b.add_box(Vector3(p.y, p.w, p.z), Transform3D(Basis(),
+					Vector3(sx * p.x, 0.006, 0.01 + sweeps[i])))
 	var proto := b.commit(null, "GullProto", false)
 	var mesh: ArrayMesh = proto.mesh
 	proto.free()
@@ -500,6 +549,118 @@ func _animate_vessels(t: float) -> void:
 		# corkscrews gently instead of see-sawing on one axis.
 		node.rotation.x = sin(t * 0.55 + phase) * 0.018
 		node.rotation.z = sin(t * 0.41 + phase * 1.7) * 0.026
+
+
+# --- Moored fleet -------------------------------------------------------------
+
+## Rabelos tied up along both quay walls.
+##
+## Round 1: "The Douro carries one 6 px white speck and no rabelo boats." Both
+## halves of that are worth fixing and the second one is the Porto cue — the
+## barcos rabelos moored bow-on to the Ribeira and Gaia quays are on every
+## postcard of this exact view, and the river between two dressed banks was the
+## last large empty surface in the frame.
+##
+## Static, and deliberately so. sky_background.gd owns three rabelos that ride the
+## wave field out in the channel; these are tied to a wall, and a moored boat
+## bobbing on a swell twenty metres from a quay that is not moving reads as a bug.
+## One bake for the hulls and one for the canvas, whatever the fleet size.
+const MOORING_Y := WATER_Y + 0.45
+## Clear water between a hull's centreline and the wall it is tied to: half a
+## 2.6 m beam plus a fender's worth.
+const MOORING_STANDOFF := 1.55
+
+## (z along the river, side: -1 Porto / +1 Gaia). Kept off |z| < 12, which is
+## where the bridge abutments come up through the quay.
+##
+## The line runs a long way upstream on purpose. From the deck the near quays are
+## behind our own parapet — in 07_ribeira the nearest visible water is at about
+## z = -66, because everything closer is cut off by the railing at the bottom of
+## the frame — so a fleet moored only alongside the near reach is a fleet nobody
+## ever sees from the bridge. The near ones still earn their place in the water
+## shots, which look along the river rather than across it.
+const MOORINGS := [
+	Vector2(-104.0, -1.0), Vector2(-92.0, -1.0), Vector2(-81.0, -1.0),
+	Vector2(-70.0, -1.0), Vector2(-58.0, -1.0), Vector2(-47.0, -1.0),
+	Vector2(-36.0, -1.0), Vector2(-24.0, -1.0), Vector2(-15.5, -1.0),
+	Vector2(16.0, -1.0), Vector2(25.0, -1.0),
+	Vector2(-98.0, 1.0), Vector2(-86.0, 1.0), Vector2(-74.0, 1.0),
+	Vector2(-42.0, 1.0), Vector2(-19.0, 1.0), Vector2(20.0, 1.0),
+]
+
+
+func _build_moored_fleet() -> void:
+	var hull_b := MeshBaker.new()
+	var canvas_b := MeshBaker.new()
+	for spot: Vector2 in MOORINGS:
+		var z := spot.x
+		var side := spot.y
+		# Asked, never assumed. The gorge narrows 0.028 per metre going upstream
+		# and each quay wall wanders another metre either way, so at z = -92 the
+		# Ribeira face stands at |x| = 49.2 rather than the nominal 52 — and a
+		# fleet laid out against 52 is a fleet buried inside the masonry. front_x()
+		# is the same query the wall itself was built from, and TerrainBuilder is
+		# this stream's own file rather than another subsystem's.
+		var face: float = TerrainBuilder.front_x(side, 0, z)
+		var x := face - side * (MOORING_STANDOFF + _rng.randf_range(0.0, 0.5))
+		var yaw := _rng.randf_range(-0.06, 0.06)
+		_build_rabelo(hull_b, canvas_b,
+				Transform3D(Basis(Vector3.UP, yaw), Vector3(x, MOORING_Y, z)),
+				_rng.randf_range(0.88, 1.12))
+	_decor(self, hull_b.commit(ToonFactory.wood(HULL_DARK, 1.4), "MooredHulls", false))
+	_decor(self, canvas_b.commit(ToonFactory.cloth(UPPERWORKS, 0.4), "MooredCanvas", false))
+
+
+## One rabelo: a long shallow hull, the upswept bow and the high stern platform
+## the espadela is worked from, a stubby mast, and port pipes on deck.
+##
+## The upswept ends and the stern platform ARE the silhouette — a rabelo read
+## from a bridge is a dark banana with a stack of barrels in it — so those get the
+## geometry and the rest is two boxes.
+func _build_rabelo(hull: MeshBaker, canvas: MeshBaker, at: Transform3D, scale: float) -> void:
+	# 14 m and 3.4 of beam, not the 9 x 2.6 this started at. Two reasons, and the
+	# first is that 9 m was simply wrong — a rabelo is a 15-20 m cargo boat, not a
+	# skiff. The second is legibility: the nearest moored boat 07_ribeira can see
+	# past its own parapet is 90 m out, where a 4.6 m mast is 26 px tall and 0.9 px
+	# wide, which is not a boat, it is a scratch on the water.
+	var l := 14.0 * scale
+	var beam := 3.4 * scale
+	hull.add_box(Vector3(beam, 0.78, l * 0.72),
+			at * Transform3D(Basis(), Vector3(0.0, -0.10, 0.0)))
+	# Bow and stern, raked up out of the water at opposite angles.
+	for sz: float in [-1.0, 1.0]:
+		hull.add_box(Vector3(beam * 0.74, 0.62, l * 0.30),
+				at * Transform3D(Basis(Vector3.RIGHT, sz * 0.30),
+					Vector3(0.0, 0.20 * scale, sz * l * 0.45)))
+	# Rubbing strake down each side — the line that separates hull from water.
+	for sx: float in [-1.0, 1.0]:
+		hull.add_box(Vector3(0.14, 0.20, l * 0.74),
+				at * Transform3D(Basis(), Vector3(sx * beam * 0.5, 0.24, 0.0)))
+	# The stern platform, its trestle, and the steering oar trailing off it.
+	hull.add_box(Vector3(beam * 0.62, 0.14, 1.5 * scale),
+			at * Transform3D(Basis(), Vector3(0.0, 1.30 * scale, l * 0.36)))
+	for sx: float in [-1.0, 1.0]:
+		hull.add_beam(at * Vector3(sx * beam * 0.26, 0.28, l * 0.30),
+				at * Vector3(sx * beam * 0.26, 1.28 * scale, l * 0.36), 0.10)
+	hull.add_beam(at * Vector3(0.0, 1.44 * scale, l * 0.40),
+			at * Vector3(0.35, 0.55 * scale, l * 0.66), 0.09)
+	# Mast and yard. Sails are furled in port, so the canvas is a bundle on the
+	# yard rather than a set square sail — which is also what stops ten moored
+	# boats reading as a regatta.
+	hull.add_cylinder(0.13 * scale, 7.0 * scale,
+			at * Transform3D(Basis(), Vector3(0.0, 3.5 * scale, -l * 0.10)), 6)
+	hull.add_box(Vector3(0.16, 0.16, 3.4 * scale),
+			at * Transform3D(Basis(), Vector3(0.0, 5.9 * scale, -l * 0.10)))
+	canvas.add_box(Vector3(0.52, 0.46, 3.0 * scale),
+			at * Transform3D(Basis(), Vector3(0.0, 5.62 * scale, -l * 0.10)))
+	# Two rows of pipes on deck. The cargo IS the boat's reason to exist and the
+	# reason the hull sits as low as it does.
+	for i in 3:
+		for sx: float in [-1.0, 1.0]:
+			hull.add_cylinder(0.36 * scale, 0.95 * scale,
+					at * Transform3D(Basis(Vector3.RIGHT, PI * 0.5),
+						Vector3(sx * 0.55 * scale, 0.62 * scale,
+							(float(i) - 1.0) * 1.05 * scale)), 7)
 
 
 # --- Static water surface ----------------------------------------------------

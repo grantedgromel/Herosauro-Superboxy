@@ -1,22 +1,28 @@
 extends Control
 ## Victory / Defeat card.
 ##
-## Two-column: the character who decided the fight on the left (the hero on a
+## Two-column: the character who decided the fight on the left (the heroes on a
 ## win, the giant on a loss) and the verdict, the run's numbers and the two
 ## things you can do next on the right. Using the concept art here is the whole
 ## point — a results screen with a face on it is authored, one with a font on it
 ## is a debug print.
 ##
-## It animates in rather than appearing: the scrim fades, the card rises and
-## settles, then the verdict pops. Roughly half a second, and it turns "the game
-## stopped" into "the game is telling you something".
+## IN CO-OP BOTH HEROES TAKE THE WIN. The partner is staged behind and to the
+## side of the lead figure rather than being left out, because a two-player run
+## that ends on a portrait of player one is the same slight the old single-hero
+## HUD was making, moved to the last screen of the game.
+##
+## It does not appear, it ARRIVES: the scrim fades, the card drops in past its
+## resting size and springs back, then the verdict punches. Roughly half a
+## second, and it turns "the game stopped" into "the game is telling you
+## something".
 
-const CARD_W := 760.0
+const CARD_W := 780.0
 ## Declared height. The PanelContainer grows past this if its content demands it,
 ## so the reveal takes its pivot from the measured size, not from this constant.
-const CARD_H := 452.0
+const CARD_H := 462.0
 const ART_H := 310.0
-const REVEAL := 0.42
+const REVEAL := 0.46
 
 var _dim: ColorRect
 ## Full-rect wrapper the card is centred inside. The rise animation moves THIS,
@@ -27,10 +33,13 @@ var _stage: Control
 var _card: PanelContainer
 var _glow: TextureRect
 var _art: TextureRect
+## The co-op partner, staged behind and outboard of the lead figure. Hidden in a
+## solo run and on a defeat, where the giant stands alone.
+var _art2: TextureRect
 var _title: Label
 var _subtitle: Label
 var _rows: VBoxContainer
-var _badge: Label
+var _badge: PanelContainer
 var _again_btn: Button
 var _menu_btn: Button
 ## Input is ignored until the reveal finishes, so a mashed attack button on the
@@ -75,11 +84,11 @@ func _ready() -> void:
 
 func _build_art_column() -> Control:
 	var holder := Control.new()
-	holder.custom_minimum_size = Vector2(232, ART_H)
+	holder.custom_minimum_size = Vector2(252, ART_H)
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	holder.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
-	# Soft coloured bloom behind the figure so the line art lifts off the panel.
+	# Soft coloured bloom behind the figures so the line art lifts off the panel.
 	_glow = TextureRect.new()
 	_glow.stretch_mode = TextureRect.STRETCH_SCALE
 	_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -90,14 +99,28 @@ func _build_art_column() -> Control:
 	_glow.offset_top = -20.0
 	_glow.offset_bottom = 20.0
 
-	_art = TextureRect.new()
-	_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_art.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	holder.add_child(_art)
-	_art.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Partner first, so the lead figure draws over it. Smaller, pushed left and
+	# down, and knocked back a touch — a staged group shot, not two cut-outs.
+	_art2 = _figure(holder)
+	_art2.offset_left = -58.0
+	_art2.offset_right = -58.0
+	_art2.offset_top = 34.0
+	_art2.modulate = Color(0.86, 0.88, 0.92, 1.0)
+	_art2.visible = false
+
+	_art = _figure(holder)
 	return holder
+
+
+func _figure(holder: Control) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(tr)
+	tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return tr
 
 
 func _build_body_column() -> Control:
@@ -121,8 +144,10 @@ func _build_body_column() -> Control:
 	_rows.add_theme_constant_override("separation", UIStyle.SPACE_XS)
 	col.add_child(_rows)
 
-	_badge = UIStyle.text("NEW PERSONAL BEST", UIStyle.Scale.LABEL, UIStyle.GOLD,
-		HORIZONTAL_ALIGNMENT_LEFT)
+	# A solid gold chip, not a gold sentence. A personal best is the one piece of
+	# good news on this card and it should look like a sticker stuck to it.
+	_badge = UIStyle.pill("NEW PERSONAL BEST", UIStyle.GOLD, UIStyle.BASE, UIStyle.Scale.LABEL)
+	_badge.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_badge.visible = false
 	col.add_child(_badge)
 
@@ -154,13 +179,21 @@ func _on_game_over(victory: bool) -> void:
 
 	var accent := UIStyle.VICTORY if victory else UIStyle.DEFEAT
 	var actor: int = UIStyle.Actor.HEROSAURO if victory else UIStyle.Actor.ADAMASTOR
+	var co_op := GameManager.player_count >= 2
 
 	_title.text = "VICTORY!" if victory else "DEFEAT"
 	_title.add_theme_color_override("font_color", accent)
-	_subtitle.text = "Porto stands. The giant of the Douro is stone again." if victory \
-		else "Adamastor still holds the bridge. The city waits."
+	if victory:
+		_subtitle.text = "Porto stands. The giant of the Douro is stone again."
+	else:
+		_subtitle.text = "Adamastor still holds the bridge. The city waits."
 
 	_art.texture = UIStyle.portrait_scaled(actor, int(ART_H * 1.6))
+	# Both heroes take a co-op win. A defeat is the giant's moment and he takes
+	# the frame alone — putting the losers next to him would undercut it.
+	_art2.visible = victory and co_op
+	if _art2.visible:
+		_art2.texture = UIStyle.portrait_scaled(UIStyle.Actor.SUPERBOXY, int(ART_H * 1.34))
 	_glow.texture = _bloom(accent)
 
 	var beat := UIProgress.submit(GameManager.score, GameManager.fight_time, victory)
@@ -211,24 +244,34 @@ func _bloom(tint: Color) -> GradientTexture2D:
 	return gt
 
 
+## The card SLAMS in. It starts oversized and above its resting place and drops
+## onto it with a back overshoot, which is a different move from the old gentle
+## rise: a verdict that eases in politely reads as a dialog box, and this one is
+## supposed to read as the game landing a full stop.
 func _reveal() -> void:
 	visible = true
 	_interactive = false
 	_dim.modulate.a = 0.0
 	_stage.modulate.a = 0.0
-	_stage.position.y = 28.0
+	_stage.position.y = -46.0
 	_card.pivot_offset = _card.size * 0.5
-	_card.scale = Vector2(0.94, 0.94)
-	_title.scale = Vector2(0.72, 0.72)
+	_card.scale = Vector2(1.10, 1.10)
+	_title.scale = Vector2(0.55, 0.55)
 	_title.pivot_offset = Vector2(0.0, _title.size.y * 0.5)
 
 	var t := create_tween()
 	t.set_parallel(true)
-	t.tween_property(_dim, "modulate:a", 1.0, REVEAL * 0.6)
-	t.tween_property(_stage, "modulate:a", 1.0, REVEAL * 0.7)
-	t.tween_property(_stage, "position:y", 0.0, REVEAL).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.tween_property(_card, "scale", Vector2.ONE, REVEAL).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.chain().tween_property(_title, "scale", Vector2.ONE, 0.30) \
+	t.tween_property(_dim, "modulate:a", 1.0, REVEAL * 0.55)
+	t.tween_property(_stage, "modulate:a", 1.0, REVEAL * 0.5)
+	t.tween_property(_stage, "position:y", 0.0, REVEAL) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	t.tween_property(_card, "scale", Vector2.ONE, REVEAL) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# The verdict lands a beat AFTER the card, so the two reads are sequential
+	# rather than fighting each other for the same quarter second.
+	t.chain().tween_property(_title, "scale", Vector2(1.08, 1.08), 0.16) \
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	t.chain().tween_property(_title, "scale", Vector2.ONE, 0.26) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	t.chain().tween_callback(func() -> void:
 		_interactive = true

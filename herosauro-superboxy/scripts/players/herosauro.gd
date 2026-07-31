@@ -1,7 +1,10 @@
 extends PlayerBase
-## Herosauro: the green dino-suit hero and the one hero you play. His signature
-## move is the Dino Energy projectile — he summons a green T-Rex spectrum to
-## charge Adamastor, hadouken-style, down whatever line the camera is aiming.
+## Herosauro: the green dino-suit hero, PLAYER ONE. His signature move is the
+## Dino Energy projectile — he summons a green T-Rex spectrum to charge
+## Adamastor, hadouken-style, down whatever line the camera is aiming.
+##
+## The long-reach, heavy-hitting half of the pair: a slower jab that hits harder
+## than Super Boxy's, and a ranged special against his close-range dash.
 ##
 ## Visual is a Meshy-generated, RIGGED + ANIMATED glTF (walk / run / cast / jab),
 ## driven by PlayerBase's AnimationTree.
@@ -50,7 +53,10 @@ func _perform_ability() -> void:
 
 	var energy := DinoEnergyScene.instantiate()
 	energy.direction = facing_dir
-	energy.source_player = 1
+	# player_id, not a literal 1: the projectile carries the attribution all the
+	# way to GameManager.damage_boss, and a hard-coded 1 would credit Herosauro's
+	# combo for a solo run driven as hero 2.
+	energy.source_player = player_id
 	var root := get_tree().get_first_node_in_group("spawn_root")
 	if root == null:
 		root = get_tree().current_scene
@@ -58,3 +64,6 @@ func _perform_ability() -> void:
 	energy.global_position = global_position + facing_dir * 1.6 + Vector3(0.0, 0.3, 0.0)
 
 	AudioManager.play_dino_fire()
+	# The summon has weight of its own before the orb ever reaches the giant: a
+	# short push on the camera, so the cast reads as a shove rather than a spawn.
+	GameManager.request_shake(0.14, 0.18)

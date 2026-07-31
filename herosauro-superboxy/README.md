@@ -1,8 +1,9 @@
-# Herosauro & Super Boxy: Legends of Porto
+# Herosauro & Super Boxy: The Guardian Brothers of Porto
 
-A third-person action game built in **Godot 4.7**, set on the **Ponte de Dom Luís I**
-over the Douro in Porto. You play **Herosauro**, defending the bridge from
-**Adamastor**, the giant of Portuguese myth, while the sun sets over the Ribeira.
+A third-person **two-player co-op** action game built in **Godot 4.7**, set on the
+**Ponte de Dom Luís I** over the Douro in Porto. You play **Herosauro** and
+**Super Boxy**, defending the bridge from **Adamastor**, the giant of Portuguese
+myth, under a bright Porto morning.
 
 ![engine](https://img.shields.io/badge/engine-Godot%204.7.1-blue) ![renderer](https://img.shields.io/badge/desktop-Forward%2B%20(PBR%2C%20GI%2C%20SSR)-green) ![web](https://img.shields.io/badge/web-GL%20Compatibility-orange)
 
@@ -56,13 +57,19 @@ A plain `file://` open will not work — wasm needs to be served over HTTP.
 
 | Input | Action |
 |---|---|
-| `WASD` | Move (camera-relative) |
-| Mouse / right stick | Look |
-| `Space` | Jump |
-| `Shift` | Sprint |
-| `LMB` / `Q` | Attack |
-| `RMB` / `E` | Dino Energy special |
-| `Esc` | Pause / release mouse |
+| | Player 1 — Herosauro | Player 2 — Super Boxy |
+|---|---|---|
+| Move | `WASD` | left stick / `IJKL` |
+| Look | mouse / arrows | right stick |
+| Jump | `Space` | pad **A** / `M` |
+| Sprint | `L-Shift` | pad **L3** / `R-Shift` |
+| Attack | `LMB` / `Q` | pad **X** / `U` |
+| Special | `RMB` / `E` | pad **Y** / `O` |
+| Pause | `Esc` | `Esc` |
+
+Player 1 carries no joypad binding at all: the usual couch rig is one keyboard
+and one pad, so the first pad plugged in has to be player two. Solo merges both
+sets onto the one human.
 
 ## Architecture
 
@@ -84,14 +91,35 @@ scripts/
   world/              # bridge geometry, Porto skyline, city backdrop, lighting rig
   fx/ · abilities/ · ui/
 assets/
-  environments/  porto_golden_hour.tres     # Environment + sky
+  environments/  porto_daylight.tres        # Environment + sky
   textures/      procedural detail normal / roughness+AO maps (NoiseTexture2D)
   shaders/       water_wave.gdshader
   models/backdrop/   photogrammetry city scan (see ATTRIBUTION.md)
 tools/
-  shotrunner.{gd,tscn}   # headless screenshot harness, fixed vantage points
+  harness.py             # capture / diff / sheet / verify / check — the review loop
+  baseline.{gd,tscn}     # reproducible single-shot capture, one process per shot
+  shots.json             # the shot manifest, shared by the harness and the capture
+  profile.{gd,tscn}      # frame-cost distribution over a live fight + budget gate
   playtest.{gd,tscn}     # headless scripted playthrough
+  critic/RUBRIC.md       # what an adversarial reviewer scores frames against
 ```
+
+### Quality tooling
+
+Visual work is driven by a render-and-review loop rather than by inspection —
+see `docs/REVIEW_LOOP.md`, and `ARCHITECTURE.md` for the contract that makes
+parallel work on it safe.
+
+```bash
+python3 tools/harness.py check                          # pre-commit smoke
+python3 tools/harness.py capture --out /tmp/r1 --jobs 2 # render the shot set
+python3 tools/harness.py sheet /tmp/r1                  # one image to review
+python3 tools/harness.py diff /tmp/r1 /tmp/r2           # per-pixel regression gate
+```
+
+The gate is per-pixel, which only works because captures are reproducible:
+fixed timestep, seeded RNG, no wall-clock animation, and one fresh process per
+shot. `harness.py verify` proves that property rather than assuming it.
 
 ### Notable systems
 

@@ -1,0 +1,116 @@
+{
+  "_comment": [
+    "The shot manifest — one source of truth, read by tools/baseline.gd and by",
+    "tools/harness.py. Vantage points are deliberately fixed forever: a review",
+    "pass is only comparable to the previous one if the camera has not moved.",
+    "",
+    "kind:  world  free camera over scenes/world/bridge_arena.tscn, no actors.",
+    "       game   a real match from scenes/main.tscn, the game's own camera.",
+    "       menu   scenes/main.tscn left in MENU state.",
+    "settle: engine frames pumped before the shutter. Under --fixed-fps this is",
+    "       an exact simulation duration, so temporal effects (sky radiance,",
+    "       SSAO/SSIL accumulation, auto-exposure, tweens) converge from the same",
+    "       phase on every run and on every machine.",
+    "script: [action, frames] beats fed as synthetic input before settling.",
+    "       An empty action just waits."
+  ],
+  "shots": [
+    {
+      "name": "01_deck_mid",
+      "kind": "world",
+      "settle": 24,
+      "pos": [0, 5, 16], "look": [0, 2.5, 0], "fov": 55,
+      "intent": "The playable corridor. The single most-looked-at surface in the game."
+    },
+    {
+      "name": "02_deck_eye",
+      "kind": "world",
+      "settle": 24,
+      "pos": [-6, 3.6, 4], "look": [30, 2.5, -1], "fov": 65,
+      "intent": "Eye level down the deck toward Porto — the game's signature view."
+    },
+    {
+      "name": "03_rail_macro",
+      "kind": "world",
+      "settle": 24,
+      "pos": [-2, 3.2, 3.2], "look": [-2, 3.0, -6], "fov": 45,
+      "intent": "Material bar: granite and wrought iron at half a metre. Detail layer must still be working here."
+    },
+    {
+      "name": "04_cobble_macro",
+      "kind": "world",
+      "settle": 24,
+      "pos": [4, 1.6, 6], "look": [-2, 0.4, -1], "fov": 50,
+      "intent": "Material bar: the deck surface at grazing angle. Where flat texturing is impossible to hide."
+    },
+    {
+      "name": "05_arch_under",
+      "kind": "world",
+      "settle": 24,
+      "pos": [0, -8, 22], "look": [0, -2, -4], "fov": 60,
+      "intent": "The structure from below. Tests the soffit and the truss — the parts a fill light has to reach."
+    },
+    {
+      "name": "06_river_wide",
+      "kind": "world",
+      "settle": 24,
+      "pos": [-70, 18, 70], "look": [10, -2, -20], "fov": 50,
+      "intent": "The whole bridge in context. Silhouette and aerial perspective."
+    },
+    {
+      "name": "07_ribeira",
+      "kind": "world",
+      "settle": 24,
+      "pos": [0, 12, 20], "look": [0, 10, -60], "fov": 55,
+      "intent": "The Porto facades. The 'is this recognisably Porto' test."
+    },
+    {
+      "name": "08_gaia_end",
+      "kind": "world",
+      "settle": 24,
+      "pos": [38, 6, 14], "look": [62, 4, -18], "fov": 60,
+      "intent": "The Gaia abutment. Checks the far end is dressed, not just the middle."
+    },
+    {
+      "name": "09_water_close",
+      "kind": "world",
+      "settle": 24,
+      "pos": [0, -10, 18], "look": [0, -14, -6], "fov": 55,
+      "intent": "The Douro surface. Wave normals, glint, and the shore transition."
+    },
+    {
+      "name": "10_skyline_high",
+      "kind": "world",
+      "settle": 24,
+      "pos": [-20, 30, 55], "look": [0, 8, -30], "fov": 55,
+      "intent": "High wide. Tests the three-layer depth read and the sky."
+    },
+    {
+      "name": "11_fight_open",
+      "kind": "game",
+      "settle": 40,
+      "script": [["", 60]],
+      "intent": "The opening frame of a real fight: hero, giant, camera framing, HUD, all live."
+    },
+    {
+      "name": "12_fight_close",
+      "kind": "game",
+      "settle": 20,
+      "script": [["", 40], ["move_up", 200], ["", 20], ["attack", 30]],
+      "intent": "Mid-combat. Hero at the giant, mid-swing — the game's core loop in one frame."
+    },
+    {
+      "name": "13_menu",
+      "kind": "menu",
+      "settle": 140,
+      "intent": "The title screen, after the cinematic camera has settled."
+    },
+    {
+      "name": "14_hud",
+      "kind": "game",
+      "settle": 90,
+      "script": [["", 30]],
+      "intent": "The HUD reading a live fight. UI legibility over a bright 3D scene."
+    }
+  ]
+}

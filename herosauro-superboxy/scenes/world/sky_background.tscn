@@ -1,7 +1,7 @@
 [gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/world/sky_background.gd" id="1_sky"]
-[ext_resource type="Environment" path="res://assets/environments/porto_golden_hour.tres" id="2_env"]
+[ext_resource type="Environment" path="res://assets/environments/porto_daylight.tres" id="2_env"]
 [ext_resource type="Script" path="res://scripts/world/lighting_rig.gd" id="3_rig"]
 
 [node name="SkyBackground" type="Node3D"]

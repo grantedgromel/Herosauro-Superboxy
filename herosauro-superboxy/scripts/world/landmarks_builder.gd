@@ -48,12 +48,13 @@ extends RefCounted
 ## *object* space and a scaled node would smear the texel density.
 ##
 ## WINDING. Faces are wound so a triangle's right-hand normal points the way the
-## surface should be seen — the convention facade_geo.gd states and MeshBaker's
-## stored normals follow. Godot's rasteriser wants the opposite (front faces are
-## clockwise, so the front normal is -RH). That mismatch is in MeshBaker, it
-## affects every baked mesh in the project equally, and the fix belongs there;
-## nothing in this file compensates for it locally, because a local compensation
-## would break the moment the central one lands.
+## surface should be seen. That is MeshBaker's contract, stated in full at the top
+## of mesh_baker.gd, and it is now honoured: MeshBaker reverses the vertex order
+## on the way into the surface, because Godot's front face is the clockwise one.
+## It did not used to, and until it was fixed every face in this file was
+## back-facing — the tiled church flank, the lodge roofs and the arcades were
+## simply absent from any camera in front of them. Nothing here compensates
+## locally, which is why nothing here had to change.
 
 const Geo := preload("res://scripts/world/landmarks/landmark_geo.gd")
 const Batch := preload("res://scripts/world/landmarks/landmark_batch.gd")
@@ -129,7 +130,13 @@ const SERRA_CLOISTER_X := 16.5              ## cloister centre, offset from the 
 # --- Lodges ------------------------------------------------------------------
 
 ## Invented names. Deliberately not the real houses on that bank.
-const LODGE_NAMES := ["CAVES DO CORVO", "QUINTA VELHA", "ADEGA DOURO", "VINHO DO PORTO"]
+##
+## ONE WORD EACH, and short ones, because the roof frame is sized to the string:
+## six cells per character across a 15 m shed gives "CAVES DO CORVO" a cell of
+## 0.15 m, i.e. a one-metre capital seen from ninety metres. That is not lettering,
+## it is a grey smear with the cost of lettering. The same five sheds carrying
+## "CORVO" get a cell of 0.38 and a 2.7 m capital off exactly the same frame.
+const LODGE_NAMES := ["CORVO", "QUINTA", "DOURO", "VELHA"]
 
 ## A 5x7 cell alphabet for the rooftop signs. Building the letters as geometry
 ## rather than hanging a Label3D on the roof costs no extra draw call, needs no
@@ -1038,15 +1045,61 @@ static func _lodge_sign(batch: Batch, at: Transform3D, spec: LodgeSpec, ridge_y:
 	if detail == Detail.LOW or text.is_empty():
 		return
 	# Centre the seven-cell cap height between the frame's two rails.
+	#
+	# SOLID letters, standing a third of a cell off the frame. Flat lettering on an
+	# open frame has one value at every sun angle, so it reads as a stencil rather
+	# than as a row of steel characters — the exact fault an adversarial critic
+	# scored on the hillside hoardings, and this is the same font on the same bank.
 	var y0 := ridge_y + 0.2 + (spec.sign_height - 0.2 - cell * 7.0) * 0.5
-	_sign_text(batch.baker(Batch.sign_face()), at, text, -text_w * 0.5 + cell * 0.5, y0, cell)
+	sign_text_solid(batch.baker(Batch.sign_face()), at, text,
+			-text_w * 0.5 + cell * 0.5, y0, cell, cell * 0.5)
 
 
 ## Lay out a string in 5x7 cells as quads, merging each row's runs so a letter
 ## costs a dozen triangles instead of thirty-five.
-static func _sign_text(b: MeshBaker, at: Transform3D, text: String, x0: float, y0: float,
+##
+## Public because the port houses' lettering is not only on their own roofs: the
+## Gaia bank carries the same names on standing frames up the hillside, and
+## quay_kit.gd builds those. One alphabet in the project, one implementation of
+## it, and callers hand over whatever MeshBaker they want the glyphs in.
+static func sign_text(b: MeshBaker, at: Transform3D, text: String, x0: float, y0: float,
 		cell: float) -> void:
 	var face := at * Transform3D(Basis(), Vector3(0.0, 0.0, 0.06))
+	for r in glyph_rects(text, x0, y0, cell):
+		Geo.rect(b, face, r.position.x, r.position.y, r.end.x, r.end.y, 0.0)
+
+
+## The same string as SOLID LETTERS standing `depth` proud of the frame.
+##
+## Flat lettering was the whole reason round 2's hoardings scored as "a debug
+## texture that was never replaced": a zero-thickness glyph has one value at every
+## sun angle, so a word is a stencil rather than a row of objects. Extruded, each
+## letter has a lit face, a shadow side and a cast shadow on whatever is behind
+## it — which at ninety metres is the only thing that separates a sign from a
+## decal. The real port-house hoardings are exactly this: individual steel letters
+## standing off an open frame, and you can see daylight between them.
+##
+## Cost is the reason this is not the default: a box is twelve triangles where a
+## quad is two. glyph_rects() merges vertically as well as horizontally, so a
+## capital I is one box rather than seven, and a five-letter word lands around
+## fifty boxes rather than a hundred and seventy-five.
+static func sign_text_solid(b: MeshBaker, at: Transform3D, text: String, x0: float,
+		y0: float, cell: float, depth: float) -> void:
+	for r in glyph_rects(text, x0, y0, cell):
+		Geo.box(b, at, r.position.x + r.size.x * 0.5, r.position.y + r.size.y * 0.5,
+				depth * 0.5, r.size.x, r.size.y, depth)
+
+
+## The 5x7 bitmap of `text`, reduced to as few axis-aligned rectangles as a greedy
+## row-then-column merge finds. Face space: +X along the baseline, +Y up, the
+## first glyph's left edge at `x0` and its baseline at `y0`.
+##
+## Merging both ways rather than only along the row matters more than it looks:
+## the alphabet is mostly vertical stems, so a row-only merge emits seven
+## one-cell rectangles for every upright and the letter comes out as a stack of
+## stripes the moment it has any thickness.
+static func glyph_rects(text: String, x0: float, y0: float, cell: float) -> Array[Rect2]:
+	var out: Array[Rect2] = []
 	var pen := x0
 	for i in text.length():
 		var ch := text[i]
@@ -1054,20 +1107,39 @@ static func _sign_text(b: MeshBaker, at: Transform3D, text: String, x0: float, y
 			pen += cell * 6.0   # space, and anything unmapped
 			continue
 		var rows: Array = SIGN_FONT[ch]
-		for r in rows.size():
-			var row: String = rows[r]
-			# Rows run top to bottom; the glyph is 7 cells tall.
-			var cy := y0 + cell * float(rows.size() - 1 - r)
-			var run := -1
-			for c in range(row.length() + 1):
-				var on := c < row.length() and row[c] == "1"
-				if on and run < 0:
-					run = c
-				elif not on and run >= 0:
-					Geo.rect(b, face, pen + float(run) * cell, cy,
-							pen + float(c) * cell, cy + cell, 0.0)
-					run = -1
+		var height := rows.size()
+		# open[(start, end)] -> the row index the run started on. Rows are walked
+		# top to bottom, so a run that repeats simply grows downward and is only
+		# emitted once it stops.
+		var open: Dictionary = {}
+		for r in range(height + 1):
+			var seen: Dictionary = {}
+			if r < height:
+				var row: String = rows[r]
+				var run := -1
+				for c in range(row.length() + 1):
+					var on := c < row.length() and row[c] == "1"
+					if on and run < 0:
+						run = c
+					elif not on and run >= 0:
+						seen[Vector2i(run, c)] = true
+						run = -1
+			# Close every open run this row did not repeat.
+			for key: Vector2i in open.keys():
+				if seen.has(key):
+					continue
+				var from: int = open[key]
+				# Row 0 is the TOP of the glyph, so a run spanning rows
+				# [from, r) occupies cells (height - r) .. (height - from).
+				out.append(Rect2(
+					pen + float(key.x) * cell, y0 + float(height - r) * cell,
+					float(key.y - key.x) * cell, float(r - from) * cell))
+				open.erase(key)
+			for key: Vector2i in seen.keys():
+				if not open.has(key):
+					open[key] = r
 		pen += cell * 6.0
+	return out
 
 
 # --- Detail helpers ----------------------------------------------------------

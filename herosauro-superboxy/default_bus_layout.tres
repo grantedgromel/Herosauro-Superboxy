@@ -1,4 +1,4 @@
-[gd_resource type="AudioBusLayout" format=3]
+[gd_resource type="AudioBusLayout" load_steps=3 format=3]
 
 ; Master / Music / SFX.
 ;
@@ -6,6 +6,35 @@
 ; stream to Music, so the two can be mixed — and ducked — independently. The
 ; pause duck and the phase-2 crossfade both work on the Music bus rather than on
 ; individual players, which is why the buses exist at all.
+;
+; Both buses that can be summed into carry a hard limiter, and they are declared
+; here rather than built in code because a mix decision belongs somewhere a
+; person can see it without reading a script.
+;
+;   SFX     the pile-up bus. The props stream measured twelve props destroyed in
+;           one frame; a destruction is two voices, so that frame asks for
+;           twenty-four transients whose attacks land within a couple of
+;           milliseconds of each other. AudioManager's per-sound stacking limit
+;           takes the identical-material worst case down to about +2.5 dB over a
+;           single hit, but four different materials breaking at once, plus two
+;           heroes swinging, plus the giant landing, is still well over unity —
+;           and without this it clips. Clipping does not sound like a big moment,
+;           it sounds like a fault. -1.0 dBFS leaves the Master something to work
+;           with.
+;   Master  the safety net, and only that. It should engage on the phase-two
+;           roar and on essentially nothing else; if it is working during
+;           ordinary combat the fix is upstream, in AudioManager.SFX_GAIN_DB.
+;
+; 40 ms release on both: fast enough not to hold the tail of a shockwave down
+; under the hit that caused it, slow enough not to modulate a 60 Hz sub.
+
+[sub_resource type="AudioEffectHardLimiter" id="HardLimiter_sfx"]
+ceiling_db = -1.0
+release = 0.04
+
+[sub_resource type="AudioEffectHardLimiter" id="HardLimiter_master"]
+ceiling_db = -0.5
+release = 0.04
 
 [resource]
 bus/0/name = &"Master"
@@ -14,6 +43,8 @@ bus/0/mute = false
 bus/0/bypass_fx = false
 bus/0/volume_db = 0.0
 bus/0/send = &""
+bus/0/effect/0/effect = SubResource("HardLimiter_master")
+bus/0/effect/0/enabled = true
 bus/1/name = &"Music"
 bus/1/solo = false
 bus/1/mute = false
@@ -26,3 +57,5 @@ bus/2/mute = false
 bus/2/bypass_fx = false
 bus/2/volume_db = 0.0
 bus/2/send = &"Master"
+bus/2/effect/0/effect = SubResource("HardLimiter_sfx")
+bus/2/effect/0/enabled = true
