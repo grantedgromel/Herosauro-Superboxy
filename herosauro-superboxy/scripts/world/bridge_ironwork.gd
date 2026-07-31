@@ -92,32 +92,58 @@ const SPANDREL_PANEL := 3.0        # lattice panel height
 const SPANDREL_ATTACH_Z := Vector2(4.8, 6.2)   # clamp for where a column head can land
 
 # --- Parapet -----------------------------------------------------------------
-# Plinth, coping, kick rail, lattice frieze, mid rail, handrail. Everything tops
-# out at 3.33 — exactly 1.20 m over the footway, the ceiling before a
-# third-person camera starts fighting the railing instead of seeing over it.
+# Plinth, coping, kick rail, lattice girder, mid rails, handrail.
 #
-# The plinth is built HERE, and lower than bridge_arena.gd's 2.55, for one
-# reason: a 1.20 m parapet standing on a 0.42 m plinth leaves 0.78 m of iron, and
-# a lattice X across a 2.5 m panel in a 0.35 m band lies at 8 degrees, which reads
-# as a painted zigzag stripe. Dropping the stone to 2.30 buys a 0.56 m band, and
-# a W-lattice pitched at a quarter of the post bay then sits at 41 degrees — a
-# real truss angle. The stone lost is worth the ironwork gained.
+# --- WHY THIS IS NOW A GIRDER AND NOT A RAILING ------------------------------
+#
+# It used to top out at 3.33, and the reasoning was sound for what it thought it
+# was doing: 1.20 m over the footway is the ceiling before a third-person camera
+# fights the railing instead of seeing over it. What it missed is that the
+# railing was the ONLY bridge structure the fight camera could see. Measured
+# across every gameplay pose, 0 of 324 arch sample points are unoccluded — the
+# crescent is 4 m under the walking surface and the deck is its own opaque lid
+# (see ArchCurve.RIB_Z, and note that widening the ribs does NOT fix this: from
+# the deck-centre camera the crown would have to stand 16.7 m outboard against a
+# 7 m half-width). So above y = 2.0 the player got a 1.33 m parapet, some lamp
+# globes and tram catenary. A generic 19th-century tram street.
+#
+# Everything above the deck is unoccludable by construction, which makes the
+# parapet the only surface that can carry the bridge's identity into the frame
+# people actually play in. The old comment already knew the frieze was a
+# miniature — "the arch's own X-lattice at 1/40 scale" — and the fix is to stop
+# quoting the arch and build the thing at a size the camera resolves.
+#
+# RAIL_TOP 3.33 -> 5.00, chosen by the owner between a measured 4 (68 px of iron
+# above the deck line, 9% of frame) and 6 (138 px, 19%). 5.00 lands ~105 px, and
+# it sits 0.22 m BELOW the spawn camera's eye at y = 5.22 — so the rails converge
+# to the vanishing point as two strong lines while the river and the Ribeira are
+# still seen over the top. The old ceiling was about a camera looking THROUGH the
+# rail; this one is behind and above it.
+#
+# The lattice band goes 0.56 -> 1.99 m, which is what pays for the change. At
+# 0.56 m the old note had to drop the plinth to 2.30 just to pitch a W-lattice at
+# 41 degrees; at 1.99 m over a 2.5 m post bay a true X-brace sits at 58 degrees
+# with room for two intermediate rails. That is a lattice girder, and it is what
+# carries the real upper deck.
 
 const PLINTH_TOP := 2.30
 const PARAPET_THICK := 0.45        # bridge_arena.gd's PARAPET_THICKNESS
 const COPING_TOP := 2.42
-## Derived, not chosen: the third-person camera has to see over this, and 1.20 m
-## above the surface the player is standing on is where that stops being true.
-const RAIL_TOP := WALKWAY_TOP + 1.20
+## 2.87 over the footway. See the note above for why the old 1.20 ceiling was
+## solving the wrong problem.
+const RAIL_TOP := WALKWAY_TOP + 2.87
 const RAIL_KICK_Y := 2.49
-const RAIL_MID_Y := 3.165
-const RAIL_HAND_Y := 3.26        # 0.14 deep, so its top is exactly RAIL_TOP
-const LATTICE_LOW := 2.56
-const LATTICE_HIGH := 3.12
+## Two intermediate rails now, not one: a 2 m girder with a single mid rail reads
+## as a fence with a bar across it. These split the band into the three courses a
+## lattice girder of this depth actually has.
+const RAIL_MID_Y := 3.30
+const RAIL_MID2_Y := 4.15
+const RAIL_HAND_Y := 4.93         # 0.14 deep, so its top is exactly RAIL_TOP
+const LATTICE_LOW := 2.61
+const LATTICE_HIGH := 4.60
 const POST_PITCH := 2.5
-## Lattice nodes per post bay. Four gives a W whose ends land on the posts, so
-## the frieze is tied into the frame rather than floating between it.
-const LATTICE_PER_BAY := 4
+## LATTICE_PER_BAY is gone with the W it subdivided. The X-brace spans a whole
+## post bay by definition, so its nodes land on the posts without a sub-ladder.
 const HEAVY_POST_PITCH := 10.0
 ## Posts sit on a SYMMETRIC LADDER through x = 0, not on a course offset half a
 ## bay, so the heavy posts land on round metres. That is load-bearing:
@@ -485,8 +511,6 @@ func _build_parapets(b: MeshBaker, trim: MeshBaker, stone: MeshBaker) -> void:
 	var heavies := _ladder(HEAVY_LADDER_X, HEAVY_POST_PITCH)
 	heavies.append(-POST_LADDER_X)
 	heavies.append(POST_LADDER_X)
-	var node_pitch := POST_PITCH / float(LATTICE_PER_BAY)
-	var nodes := _ladder(POST_LADDER_X, node_pitch)
 
 	for si in 2:
 		var side := -1.0 if si == 0 else 1.0
@@ -504,16 +528,27 @@ func _build_parapets(b: MeshBaker, trim: MeshBaker, stone: MeshBaker) -> void:
 
 		b.add_box(Vector3(span, 0.14, 0.34), Transform3D(Basis(), Vector3(0.0, RAIL_KICK_Y, z)))
 		b.add_box(Vector3(span, 0.09, 0.26), Transform3D(Basis(), Vector3(0.0, RAIL_MID_Y, z)))
+		b.add_box(Vector3(span, 0.09, 0.26), Transform3D(Basis(), Vector3(0.0, RAIL_MID2_Y, z)))
 		b.add_box(Vector3(span, 0.14, 0.40), Transform3D(Basis(), Vector3(0.0, RAIL_HAND_Y, z)))
 
-		# W-lattice: one continuous zig-zag between the kick and mid rails, its
-		# nodes landing on every post. Crossing X diagonals would double the
-		# member count for the same 0.56 m of band, and a hundred metres of
-		# railing is the geometry closest to the camera on the entire bridge.
-		for i in nodes.size() - 1:
-			var y0 := LATTICE_LOW if i % 2 == 0 else LATTICE_HIGH
-			var y1 := LATTICE_HIGH if i % 2 == 0 else LATTICE_LOW
-			IronKit.bar(b, Vector3(nodes[i], y0, z), Vector3(nodes[i + 1], y1, z),
+		# X-BRACE, not the old W. The W was the right call in a 0.56 m band, where
+		# crossing diagonals would have doubled the member count for the same
+		# stripe. Over 1.99 m it is the wrong one twice over: a zig-zag whose
+		# nodes land every 0.625 m across 2 m of depth stands at 72 degrees, which
+		# reads as vertical bars, and a zig-zag is a fence pattern where an X is a
+		# truss. This is the panel the whole change exists to build, so it gets
+		# the arch's own bracing at the arch's own angle.
+		#
+		# One X per POST BAY (2.5 m), which puts the diagonals at 58 degrees and
+		# lands every node on a post rather than floating between them. 80 bays
+		# over both sides is ~160 bars — nothing against a 400k-triangle deck, and
+		# it is the geometry closest to the camera on the entire bridge.
+		for i in posts.size() - 1:
+			var x0: float = posts[i]
+			var x1: float = posts[i + 1]
+			IronKit.bar(b, Vector3(x0, LATTICE_LOW, z), Vector3(x1, LATTICE_HIGH, z),
+					0.085, 0.05, Vector3.BACK)
+			IronKit.bar(b, Vector3(x0, LATTICE_HIGH, z), Vector3(x1, LATTICE_LOW, z),
 					0.085, 0.05, Vector3.BACK)
 		for x in posts:
 			if _near_any(heavies, x):

@@ -60,7 +60,13 @@ const WALKWAY_OUTER := 6.55
 const PARAPET_THICKNESS := DECK_HALF_WIDTH - WALKWAY_OUTER
 const PARAPET_MID := (WALKWAY_OUTER + DECK_HALF_WIDTH) * 0.5
 const PLINTH_TOP := 2.55          # granite base course under the ironwork
-const HANDRAIL_TOP := 3.50        # ~1.37 m over the pavement: chest height, see-over
+## Drives the ParapetBody collision box and, through ABUTMENT_TOP, the end walls.
+## 3.50 -> 5.17, tracking BridgeIronwork.RAIL_TOP 3.33 -> 5.00 with the same
+## 0.17 margin it always carried. RAISING THE VISUAL WITHOUT THIS WOULD BE A BUG:
+## the parapet would stand 3 m over the footway and stop you at 1.5, so a hero
+## would vault a girder he is visibly standing behind. See the ironwork's note
+## for why the girder grew.
+const HANDRAIL_TOP := 5.17
 const MIDRAIL_Y := 2.98
 
 ## Metro tramway down the middle. The rail heads sit exactly at DECK_TOP so there
