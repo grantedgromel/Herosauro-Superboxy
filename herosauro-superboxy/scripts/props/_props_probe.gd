@@ -350,7 +350,7 @@ func _check_five_legs() -> void:
 	var fx_before := ImpactFX.live_count()
 	var debris_before := get_tree().get_nodes_in_group("debris").size()
 	_watch()
-	var audio_before := _last_sfx_name()
+	var audio_before := _sfx_cursor()
 
 	crate.apply_hit_impulse(Vector3.RIGHT * 9.0, crate.global_position)
 
@@ -358,23 +358,25 @@ func _check_five_legs() -> void:
 	# synchronously and only then awaits its own (time-scale-immune) timer.
 	var froze := Engine.time_scale
 	var fx_after := ImpactFX.live_count()
-	var audio_after := _last_sfx_name()
+	var sounds := _sfx_since(audio_before)
+	var audio_name := _last_sfx_name()
 	await _thaw()
 	var debris_after := get_tree().get_nodes_in_group("debris").size()
 	_unwatch()
 
 	print("\n  -- one crate, one hero swing: %d FX burst(s), %d shards, shake peak %.2f x%d, "
 		% [fx_after - fx_before, debris_after - debris_before, _shake_peak, _shakes]
-		+ "time_scale %.2f, score +%d, sfx '%s' -> '%s'"
-			% [froze, _score_delta, audio_before, audio_after])
+		+ "time_scale %.2f, score +%d, %d sample(s) ending on '%s'"
+			% [froze, _score_delta, sounds, audio_name])
 
 	_ok(fx_after > fx_before, "leg 1/5 visual FX: ImpactFX raised a burst")
 	_ok(debris_after > debris_before,
 		"leg 1/5 visual FX: %d physical shards left the crate" % (debris_after - debris_before))
 	_ok(_shakes > 0 and _shake_peak > 0.0,
 		"leg 2/5 camera: %d shake request(s), peak %.2f" % [_shakes, _shake_peak])
-	_ok(audio_after != "" and audio_after != audio_before,
-		"leg 3/5 audio: the SFX pool was handed '%s'" % audio_after)
+	_ok(sounds >= 2,
+		"leg 3/5 audio: %d samples dispatched — the material's crack plus a scatter tail"
+			% sounds)
 	_ok(froze < 1.0, "leg 4/5 hit-stop: Engine.time_scale dropped to %.2f" % froze)
 	_ok(_score_delta > 0, "leg 5/5 UI: score moved by %d" % _score_delta)
 
@@ -970,7 +972,7 @@ func _start() -> void:
 	GameManager.set_player_count(2)
 	GameManager.start_game()
 	await _settle(6)
-	_score_seen = GameManager.score
+	_score_base = GameManager.score
 	_score_delta = 0
 
 
