@@ -74,6 +74,15 @@ const WATER_SHADER_PATH := "res://assets/shaders/water_wave.gdshader"
 
 var _fails := 0
 
+## What ToonFactory delivers for the three large playable ground surfaces, filled in
+## by _check_materials() and read by _check_exposure_anchor(). Measured end to end
+## through _presents() there rather than re-derived here, for the reason spelt out
+## above the corridor check: the factory chains a ceiling, a floor, a knee and two
+## per-channel texture gains, and anything that recomputed that chain would agree with
+## a bug in it. The kerb is deliberately absent — it is a 30 cm trim and is SUPPOSED to
+## be the brightest line on the deck.
+var _corridor_presents: Dictionary = {}
+
 
 func _initialize() -> void:
 	print("=== shaders parse ===")
@@ -85,6 +94,8 @@ func _initialize() -> void:
 	_check_env(env)
 	print("=== materials ===")
 	_check_materials()
+	print("=== exposure anchor ===")
+	_check_exposure_anchor(env)
 	print("=== aerial perspective ===")
 	_check_fog(env)
 	print("=== the river reflects ===")
@@ -444,6 +455,163 @@ func _luma(c: Color) -> float:
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 
 
+# --- Exposure anchor ---------------------------------------------------------
+#
+# ROUND 5, and this is the gate for the defect the OWNER found by looking at the
+# running build: "everything is just so bright to the point of being white". The deck
+# fascia — the single largest surface in 01_deck_mid, 16.9% of the frame — rendered at
+# L 187 out of 255, level with the far river's fog band at L 176, so the bridge and the
+# sky read as one white mass. Nothing in the atmosphere had changed: the sky rows of
+# that frame are identical to Round 3's, block for block.
+#
+# WHAT ACTUALLY HAPPENED, because it is a class of failure rather than an incident.
+# Five separate, individually-correct changes raised what the arena reflects — the
+# stone albedo floor (carriageway 0.325 -> 0.490, tram bed 0.235 -> 0.476), the deck
+# fascia's albedo_color climbing 0.283 -> 0.452 over six rounds, new surface maps, the
+# detail-blend fix that made the fascia render at all. Not one of them touched the
+# tonemap. But porto_daylight.tres says in its own first line that the daylight is made
+# in the tonemap and not in any albedo, and the RUBRIC says "exposure-driven, not
+# multiplier-driven" — and the corollary nobody had written down is that an exposure
+# has to be RE-SOLVED when the multipliers move. Six rounds of multipliers moved and
+# the exposure sat at the value that was solved for the first one.
+#
+# So this does not gate a picture, it gates an identity, and it fires on whichever
+# stream breaks it. Two halves:
+#
+#   1. THE GREY CARD. A Lambertian 18% grey card lying flat on the deck, lit by this
+#      rig, must land on the tonemapper's own middle grey. That is the textbook
+#      definition of a correctly exposed frame and it makes tonemap_exposure derived
+#      rather than dialled: exposure = 1 / E_h.
+#
+#   2. THE KNEE. The three large playable ground surfaces, at whatever albedo the
+#      materials stream is currently delivering, must stay off the flat part of the
+#      display transform. Measured through the shipped resource with a full-frame
+#      unshaded quad at known scene-referred values (the table is in the tonemap block
+#      of porto_daylight.tres): the curve carries 64-70 levels per stop below u = 0.18
+#      and only 33-45 above u = 0.5. A surface pushed past the knee pays for its
+#      brightness in its own texture and its own chroma, because both are DIFFERENCES
+#      and the curve has stopped spending levels on differences up there. That is the
+#      measured signature of the regression and not a guess: the near deck in
+#      02_deck_eye lost 41% of its local contrast (CoV 0.199 -> 0.117) and 41% of its
+#      saturation (0.124 -> 0.073) while gaining 55 levels of luminance.
+#
+# Both would have caught this the round it landed. At the shipped exposure of 0.72 the
+# grey card sat +0.50 EV hot and all three ground surfaces sat at u = 0.64-0.74,
+# a third of a stop past the knee.
+
+## The tonemapper's own middle grey. Measured, not assumed: a full-frame flat field at
+## u = 0.18 through this exact resource comes back at 125/255, which is where middle
+## grey belongs. So the CURVE is not the problem and never was — only where the scene
+## was being placed on it.
+const AGX_MIDDLE_GREY := 0.18
+## Reflectance of a photographic grey card. The reference surface, chosen because it is
+## the one albedo in photography that means "correctly exposed" rather than "bright".
+const GREY_CARD_ALBEDO := 0.18
+## How far the grey card may drift from middle grey before this is a different picture,
+## in stops. A third of a stop is under half the smallest exposure step anyone would
+## make deliberately, and the fault this gate exists for was half a stop.
+const GREY_CARD_TOLERANCE_EV := 0.33
+## Tonemapper input above which the measured transfer falls under 45 levels per stop.
+## See the table in porto_daylight.tres's tonemap block.
+const TRANSFER_KNEE := 0.55
+
+
+## The total irradiance an up-facing surface on the deck receives, from this stream's
+## own constants and nothing else.
+##
+## The two bounce fills contribute exactly zero here and that is structural rather than
+## incidental — QuayBounce arrives from below and RibeiraBounce is pinned to elevation
+## 0.000 precisely so no warm term can reach a horizontal surface — so this asserts it
+## rather than assuming it.
+##
+## SDFGI and SSIL are deliberately excluded. They are occluded terms that vary across
+## the deck, so exposing for them means exposing for whichever patch of paving happens
+## to be gathering the most bounce. They land on top of everything computed here, which
+## is why the render is still checked rather than trusted.
+func _horizontal_irradiance(env: Environment, sun_color: Color, sun_energy: float,
+		elev: float) -> Dictionary:
+	var key := _luma(sun_color) * sun_energy * sin(deg_to_rad(elev))
+	var fill_total := 0.0
+	var rig: Node3D = RigScript.new()
+	for fill in [
+		[RigScript.SKY_FILL_DIR, RigScript.SKY_FILL_COLOR, rig.sky_fill_energy, "SkyFill"],
+		[RigScript.QUAY_BOUNCE_DIR, RigScript.QUAY_BOUNCE_COLOR, rig.bounce_energy,
+			"QuayBounce"],
+		[RigScript.RIBEIRA_BOUNCE_DIR, RigScript.RIBEIRA_BOUNCE_COLOR,
+			rig.ribeira_bounce_energy, "RibeiraBounce"],
+	]:
+		var dir: Vector3 = (fill[0] as Vector3).normalized()
+		var contribution: float = _luma(fill[1]) * float(fill[2]) * maxf(dir.dot(Vector3.UP), 0.0)
+		if fill[3] != "SkyFill" and contribution > 0.0:
+			_fail("%s reaches a horizontal deck at %.4f; both bounces are aimed so that they cannot"
+					% [fill[3], contribution])
+		fill_total += contribution
+	rig.free()
+	# ambient_light_energy as an upper bound on the flat term: with source SKY it is
+	# that energy times the dome's own average radiance, which is under 1.
+	return {
+		"key": key,
+		"fill": fill_total,
+		"ambient": env.ambient_light_energy,
+		"total": key + fill_total + env.ambient_light_energy,
+	}
+
+
+func _check_exposure_anchor(env: Environment) -> void:
+	var packed: PackedScene = load(ARENA_PATH)
+	if packed == null:
+		_fail("could not load %s to re-derive the exposure anchor" % ARENA_PATH)
+		return
+	var state := packed.get_state()
+	var sun_color := Color.WHITE
+	var sun_energy := 0.0
+	var elev := 0.0
+	for i in state.get_node_count():
+		if state.get_node_name(i) != "SunLight":
+			continue
+		var xf := Transform3D.IDENTITY
+		for p in state.get_node_property_count(i):
+			match state.get_node_property_name(i, p):
+				"transform": xf = state.get_node_property_value(i, p)
+				"light_color": sun_color = state.get_node_property_value(i, p)
+				"light_energy": sun_energy = state.get_node_property_value(i, p)
+		elev = rad_to_deg(asin(clampf(xf.basis.z.normalized().y, -1.0, 1.0)))
+	if sun_energy <= 0.0:
+		_fail("no SunLight energy found; the exposure anchor cannot be derived")
+		return
+
+	var terms := _horizontal_irradiance(env, sun_color, sun_energy, elev)
+	var e_h: float = terms["total"]
+	var solved := 1.0 / maxf(e_h, 1e-4)
+	print("  horizontal E %.3f  (key %.3f + directional fill %.3f + ambient %.3f)"
+			% [e_h, terms["key"], terms["fill"], terms["ambient"]])
+
+	var card := GREY_CARD_ALBEDO * e_h * env.tonemap_exposure
+	var drift := log(card / AGX_MIDDLE_GREY) / log(2.0)
+	print("  grey card    18%% card on the deck lands at u %.3f, want %.3f  (%+.2f EV)"
+			% [card, AGX_MIDDLE_GREY, drift])
+	print("  exposure     %.3f shipped, %.3f solved as 1 / E   (tolerance %.2f EV)"
+			% [env.tonemap_exposure, solved, GREY_CARD_TOLERANCE_EV])
+	if absf(drift) > GREY_CARD_TOLERANCE_EV:
+		_fail(("an 18%% grey card on the deck lands %+.2f EV off the tonemapper's middle "
+				+ "grey. Something raised what the arena reflects and nobody re-solved "
+				+ "tonemap_exposure; it wants %.3f, not %.3f.")
+				% [drift, solved, env.tonemap_exposure])
+
+	if _corridor_presents.is_empty():
+		_fail("the corridor's delivered albedos were not measured; the knee cannot be checked")
+		return
+	for name in _corridor_presents:
+		var u: float = float(_corridor_presents[name]) * e_h * env.tonemap_exposure
+		print("  knee         %-12s presents %.3f -> u %.3f  (knee %.2f)"
+				% [name, _corridor_presents[name], u, TRANSFER_KNEE])
+		if u > TRANSFER_KNEE:
+			_fail(("the %s sits at u %.3f, past the transfer's knee at %.2f. Above it the "
+					+ "curve carries under 45 levels per stop, so the surface the game is "
+					+ "played on is spending its own texture and chroma on being bright.")
+					% [name, u, TRANSFER_KNEE])
+
+
 # --- Materials ---------------------------------------------------------------
 
 ## ToonFactory is this pass's other half. None of the look can be judged here, but
@@ -779,6 +947,13 @@ func _check_materials() -> void:
 		# structure left in it at all. Printed anyway, because a kerb that stops leading
 		# is its own defect.
 		var reference := _luma(walk)
+		# Handed to _check_exposure_anchor(): these three are the ground the game is
+		# played on, and what the tonemap has to be solved against.
+		_corridor_presents = {
+			"carriageway": _luma(road),
+			"tram bed": _luma(tram),
+			"footway": reference,
+		}
 		print("  corridor     carriageway %.3f  tram bed %.3f  vs footway %.3f (kerb trim %.3f)"
 				% [_luma(road), _luma(tram), reference, _luma(kerb)])
 		print("               ratios %.2f and %.2f (want >= %.2f; measured 0.52 in the render before the floor)"

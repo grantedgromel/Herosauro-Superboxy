@@ -72,16 +72,58 @@ const SUN_ALPHA := 0.12
 const SUN_CENTRE := Vector2(0.68, 0.40)
 const SUN_RADIUS := 0.46                # of the frame's diagonal
 
-# --- Grade over the top ------------------------------------------------------
+# --- The title block ---------------------------------------------------------
 #
-# These survive the switch to key art unchanged, and that is the point of keeping
-# them: cinematic key art is a bright, busy, full-bleed image, and the menu column
-# still has to be readable when it lands. Carried over from the layer this file
-# replaced, minus the two pieces that only made sense over a moving render — the
-# additive horizon glare and the drifting motes.
+# A dark field down the left edge that the lockup and the menu column sit in.
+#
+# THIS IS THE ONE PLACE THE KEY ART AND THE UI GENUINELY FIGHT, so it is worth
+# writing down why it is shaped the way it is rather than leaving the next person
+# to rediscover it with a screenshot.
+#
+# The cinematic is a CENTRE-WEIGHTED poster: Herosauro stands at 0.26-0.37 of the
+# frame width with his head at 0.29-0.47 of its height, Adamastor fills the
+# middle, Super Boxy is at 0.54-0.75 and the bridge closes the right. The UI is a
+# left column running 0.06-0.40. Those overlap, and no reframing fixes it —
+# panning Herosauro clear of the column needs a 1.54x blow-up, which throws away
+# the bridge entirely and softens what is left. The art fits the frame almost
+# exactly (1.777:1 against 1.778:1), so there is no crop headroom to spend either.
+#
+# So the column is given a field to sit in instead, and the shape of that field is
+# doing three specific things:
+#
+#   * it HOLDS its full value right across Herosauro's head, not just across the
+#     type. That is the whole trick, and the two renders it took to find it are
+#     worth recording: a ramp that FALLS OFF over his face lights one cheek and
+#     shadows the other with the strapline running along the join, which looks
+#     like a mistake. A field that covers him evenly reads as shade;
+#   * it is only HALF strength. At 0.58 he went to a silhouette, and a title that
+#     says HEROSAURO over a hidden Herosauro is worse than the collision it was
+#     fixing. At 0.50 his mask, cape and pose all still read — he is subordinate
+#     to the type rather than removed by it, which is what a title block does to
+#     the art behind it;
+#   * it STOPS well short of the middle. Over half the frame — the giant, Super
+#     Boxy, the bridge, the whole Ribeira right of centre — is untouched art.
+#
+# THAT LAST POINT IS THE ONE TO PROTECT. The complaint that started this work was
+# a screen washed out to near-white, and the reflex correction is a full-frame
+# scrim, which trades one flat frame for another. A local, shaped field over a
+# third of the width is a title block; the same value spread over the whole frame
+# is a fog. If this ever needs to move, move the SHAPE, not the coverage.
+#
+# If the art is ever recomposed with a quiet left third, all four numbers below
+# should come down together — the field exists to solve this cinematic, not as a
+# permanent tax on whatever is behind the column.
 
-const LEFT_SCRIM := 0.44                # fraction of the width the pocket spans
-const LEFT_STRENGTH := 0.30
+const LEFT_SCRIM := 0.48                # fraction of the width the field spans
+const LEFT_STRENGTH := 0.50
+## Where the field is still at full value, and where it has mostly let go, as
+## fractions of LEFT_SCRIM. 0.77 of 0.48 is x = 0.371 — the right edge of
+## Herosauro's head, so his whole face is in the field rather than half-lit by a
+## ramp running across it. 0.91 is x = 0.437, past his shoulder.
+const LEFT_HOLD := 0.77
+const LEFT_RELEASE := 0.91
+const LEFT_RELEASE_STRENGTH := 0.36     # fraction of LEFT_STRENGTH at the release
+
 const BOTTOM_SCRIM := 0.26
 const BOTTOM_STRENGTH := 0.36
 const VIGNETTE_ALPHA := 0.34
@@ -213,16 +255,16 @@ func _sun() -> TextureRect:
 
 
 ## Horizontal twin of UIStyle.scrim(). Not in UIStyle because only this screen has
-## a column of UI running down one edge of a full-bleed image.
+## a column of UI running down one edge of a full-bleed image. See the note above
+## the constants for the shape and why it is that shape.
 func _left_scrim() -> TextureRect:
 	var grad := Gradient.new()
-	# Holds most of its weight out to 60% of its span before letting go, so the
-	# far end of the menu column — the difficulty pills — still has something
-	# under it rather than sitting straight on the art.
-	grad.offsets = PackedFloat32Array([0.0, 0.60, 1.0])
+	grad.offsets = PackedFloat32Array([0.0, LEFT_HOLD, LEFT_RELEASE, 1.0])
 	grad.colors = PackedColorArray([
 		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, LEFT_STRENGTH),
-		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, LEFT_STRENGTH * 0.40),
+		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, LEFT_STRENGTH),
+		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b,
+				LEFT_STRENGTH * LEFT_RELEASE_STRENGTH),
 		Color(UIStyle.BASE.r, UIStyle.BASE.g, UIStyle.BASE.b, 0.0),
 	])
 	var gt := GradientTexture2D.new()

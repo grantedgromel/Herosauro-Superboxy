@@ -283,6 +283,34 @@ const COMPAT_FOG_DENSITY := 0.99
 ## had no bloom on anything, sun included. 0.80 catches roughly the top 1.5% — the sun
 ## disk, the water's glint path and the glazed azulejo highlights — which is the same
 ## population Forward+ selects at its own (HDR, and therefore quite different) 1.00.
+##
+## ROUND 5, and this is the one number in this file that lives in DISPLAY space rather
+## than in scene space, so it is the only one that had to be re-checked when
+## porto_daylight.tres re-solved tonemap_exposure 0.72 -> 0.51. It comes through
+## unchanged, and that is a result rather than an oversight — the check found that 0.80
+## had quietly stopped meaning what the paragraph above says it means, and the exposure
+## fix is what restored it.
+##
+## Godot's glow high-pass keys off max(r, g, b), not off luminance, so the number to
+## watch is the brightest CHANNEL in the frame and not its brightest pixel. The sky's
+## blue channel is that channel across most of the arena, and by the round the owner
+## reported a white frame it had climbed to 201/255 = 0.788 — 0.012 under this
+## threshold. Fraction of the frame the web build was therefore selecting into its
+## bloom, measured off the shipped captures:
+##
+##                       before (exposure 0.72)   after (exposure 0.51)
+##     01_deck_mid              14.15%                    1.43%
+##     02_deck_eye               4.93%                    0.42%
+##
+## Five to fourteen per cent is not a bloom, it is a screen-blend of the sky, and it
+## would have shipped to the web tier only — the tier nobody captures. The exposure
+## re-solve drops the sky's blue channel to 179/255 = 0.702, which puts 0.098 of margin
+## back under the threshold and returns the selected population to the top 1.5% this
+## constant was chosen for.
+##
+## The lesson worth keeping: a display-space threshold under an exposure that other
+## streams' albedos can move is a coupling, and it is invisible on Forward+ because
+## Forward+ selects in HDR at 1.00. If tonemap_exposure moves again, re-measure this.
 const COMPAT_GLOW_THRESHOLD := 0.80
 
 ## Buys back the indirect that SSIL and SDFGI were providing. 1.8 -> 1.6, and it went

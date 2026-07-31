@@ -124,13 +124,18 @@ func _build() -> void:
 	_backdrop.name = "Backdrop"
 	add_child(_backdrop)
 
-	_stage = HeroStageScript.new()
-	_stage.name = "HeroStage"
 	# The key art is a full cast shot. Staging the cut-outs over it would put a
-	# second Adamastor next to the painted one, so the stage stands down and lets
-	# the art carry the right of the frame instead.
-	_stage.visible = not _backdrop.has_key_art()
-	add_child(_stage)
+	# second Adamastor next to the painted one, so the stage stands down entirely
+	# and lets the art carry the right of the frame.
+	#
+	# Not built rather than built-and-hidden: three figures means three Lanczos
+	# resamples of a 900 px character sheet, which is most of what this screen
+	# costs to stand up. Paying it for something nobody sees is the kind of thing
+	# that turns a fast screen slow again one small decision at a time.
+	if not _backdrop.has_key_art():
+		_stage = HeroStageScript.new()
+		_stage.name = "HeroStage"
+		add_child(_stage)
 
 	_logo = TitleLogoScript.new()
 	_logo.name = "TitleLogo"
@@ -218,7 +223,11 @@ func _wake() -> void:
 	# does not fire on a Control that was not laid out at the time.
 	_relayout()
 	_logo.play_entry(0.0)
-	_stage.play_entry(STAGE_DELAY, STAGE_STAGGER)
+	# Null whenever the key art is in — see `_build()`. Guarded rather than
+	# replaced with a hidden stub so the "no cast to stage" case stays visible in
+	# the code instead of hiding behind a node that does nothing.
+	if _stage != null:
+		_stage.play_entry(STAGE_DELAY, STAGE_STAGGER)
 	_list.play_entry(LIST_DELAY, LIST_STAGGER)
 	_list.focus_row(_return_focus)
 

@@ -292,10 +292,6 @@ static func clerigos_tower(detail: Detail = Detail.FULL,
 ## the frame's -Z side.
 static func add_clerigos_tower(batch: Batch, at: Transform3D, detail: Detail = Detail.FULL,
 		height: float = CLERIGOS_HEIGHT) -> void:
-	# One cell per monument on the reduced tier, so the skyline is culled and
-	# shadow-mapped building by building rather than as one 240 m instance
-	# spanning Clerigos to Serra do Pilar. A no-op on desktop; see LandmarkBatch.
-	batch.locate(at.origin)
 	# One unit of trim, tied to the tower's height so mouldings scale with it.
 	var u := height / CLERIGOS_HEIGHT
 	var hw := height * CLERIGOS_SLENDER
@@ -490,7 +486,6 @@ static func se_cathedral(detail: Detail = Detail.FULL, scale: float = 1.0) -> No
 ## Bake the cathedral into `batch`. The west front — rose window, portal, towers
 ## — faces the frame's +Z, so point that at the river.
 static func add_se_cathedral(batch: Batch, at: Transform3D, detail: Detail = Detail.FULL) -> void:
-	batch.locate(at.origin)
 	var stone := batch.baker(Batch.granite())
 	var dress := batch.baker(Batch.dress())
 	var dark := batch.baker(Batch.void_dark())
@@ -627,7 +622,6 @@ static func serra_do_pilar(detail: Detail = Detail.FULL) -> Node3D:
 ## along +X.
 static func add_serra_do_pilar(batch: Batch, at: Transform3D,
 		detail: Detail = Detail.FULL) -> void:
-	batch.locate(at.origin)
 	var stone := batch.baker(Batch.granite())
 	var dress := batch.baker(Batch.dress())
 	var dark := batch.baker(Batch.void_dark())
@@ -745,7 +739,6 @@ static func igreja_azulejo(detail: Detail = Detail.FULL) -> Node3D:
 ## +X, so a caller wanting the tile seen from the bridge should yaw accordingly.
 static func add_igreja_azulejo(batch: Batch, at: Transform3D,
 		detail: Detail = Detail.FULL) -> void:
-	batch.locate(at.origin)
 	var stone := batch.baker(Batch.granite())
 	var dress := batch.baker(Batch.dress())
 	var dark := batch.baker(Batch.void_dark())
@@ -942,7 +935,6 @@ static func gaia_lodges(count: int = 4, detail: Detail = Detail.FULL,
 ## Bake one lodge into `batch`, its loading front on the frame's +Z.
 static func add_gaia_lodge(batch: Batch, at: Transform3D, spec: LodgeSpec,
 		detail: Detail = Detail.FULL, rng: RandomNumberGenerator = null) -> void:
-	batch.locate(at.origin)
 	if rng == null:
 		rng = RandomNumberGenerator.new()
 		rng.seed = 7301

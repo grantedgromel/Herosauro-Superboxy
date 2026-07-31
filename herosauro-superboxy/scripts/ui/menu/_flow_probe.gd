@@ -227,9 +227,15 @@ func _layout_report() -> void:
 		if c != null:
 			ui.append([id, Rect2(c.global_position, c.size)])
 
+	# The cast is only staged as cut-outs when there is no key art; the cinematic
+	# already has all three in it. Said out loud rather than left as an empty
+	# section, because "no OVERLAP reported" means nothing if there was nothing to
+	# overlap and the reader cannot tell which case they are in.
 	var art: Array[Array] = []
 	var stage := menu.find_child("HeroStage", true, false)
-	if stage != null and (stage as CanvasItem).visible:
+	if stage == null:
+		_log.append("    (key art is in — no cut-outs staged, nothing to collide)")
+	else:
 		for fig in stage.get_children():
 			var c := fig as Control
 			if c != null:

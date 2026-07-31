@@ -306,35 +306,19 @@ static func build(seed: int = DEFAULT_SEED) -> Node3D:
 	var far := TerrainBatch.new()
 	far.cast_shadows = false
 
-	# WHERE THE BAKE IS CUT, on the reduced tier only. TerrainBatch.locate() puts
-	# everything emitted after it into one world cell, and (bank, terrace level) is
-	# the granularity this hillside is actually built on: each level is a band of
-	# wall, coping and platform at a known X, so cutting there gives every chunk a
-	# tight AABB in the axis that matters. Without it `TerrainNear_0` is 44,784
-	# triangles spanning both banks at once and nothing in it can be culled.
-	#
-	# `front_x` is the signed world X of a level's face, so it is exactly the
-	# representative point a cell wants. z = 0 is the bridge line; the near/far
-	# split at NEAR_Z_FAR already cuts the other axis.
 	for side_i in 2:
 		var side := PORTO if side_i == 0 else GAIA
 		var bank_seed := seed + side_i * 4093
 		for l in _levels(side).size():
-			_locate(near, far, Vector3(front_x(side, l, 0.0), 0.0, 0.0))
 			_build_level(near, far, side, l, bank_seed)
-		_locate(near, far, Vector3(front_x(side, 0, 0.0), 0.0, 0.0))
 		_build_stairs(near, side, bank_seed)
-		_build_waterfront(near, side, bank_seed)
-		_build_quay_dressing(near, side, bank_seed)
-		_locate(near, far, Vector3(front_x(side, _levels(side).size(), 0.0), 0.0, 0.0))
 		_build_upland(near, far, side)
+		_build_waterfront(near, side, bank_seed)
 		_build_planting(near, far, side, bank_seed)
+		_build_quay_dressing(near, side, bank_seed)
 
-	_locate(near, far, Vector3(GAIA * 120.0, 0.0, -40.0))
 	_build_bluff(near, far, seed)
-	_locate(near, far, Vector3(0.0, 0.0, HEADLAND_Z))
 	_build_headlands(near, seed)
-	_locate(near, far, Vector3(GAIA * 60.0, 0.0, 0.0))
 	_build_gaia_signage(near, seed)
 
 	root.add_child(near.commit("TerrainNear"))
@@ -348,14 +332,6 @@ static func build(seed: int = DEFAULT_SEED) -> Node3D:
 		"far_surfaces": far.surface_count(),
 	}
 	return root
-
-
-## Move both bakes to the same cell. They are two halves of one reach and a
-## feature that writes to both — a wall run, a planted slope — must not land in
-## two different cells depending on which side of NEAR_Z_FAR it fell.
-static func _locate(near: TerrainBatch, far: TerrainBatch, at: Vector3) -> void:
-	near.locate(at)
-	far.locate(at)
 
 
 # --- Ground sheets -----------------------------------------------------------

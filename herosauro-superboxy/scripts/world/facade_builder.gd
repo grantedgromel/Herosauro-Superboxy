@@ -285,44 +285,8 @@ static func build_row(specs: Array[Spec], rng: RandomNumberGenerator,
 
 ## Add one building to a caller-owned batch, for mixing rows, quays and one-offs
 ## into a single commit.
-##
-## Two things happen here that do not happen inside `_assemble`, and both are
-## about the tier rather than about architecture.
-##
-## `batch.locate()` puts everything this building emits into the world cell it
-## stands in, so the committed surfaces have tight AABBs instead of one spanning
-## both banks. It is a no-op on desktop.
-##
-## `_reduce_detail` is the reduced tier's single biggest triangle lever. It
-## MUTATES the spec, which is deliberate and safe: a Spec is built per building by
-## `random_spec` or `_spec_from_plot` and discarded after this call, and every
-## emitter below reads `spec.detail` rather than taking it as a parameter, so
-## clamping it here is the one place that reaches all of them. It is also honest
-## about what it is doing — the caller asked for FULL and got FULL on the tier
-## that can afford it.
 static func add_to_batch(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> void:
-	batch.locate(spec.position)
-	if WorldTier.is_reduced():
-		_reduce_detail(spec)
 	_assemble(batch, spec, rng)
-
-
-## Clamp a building's detail to what its distance from the arena earns on the web
-## tier. See WorldTier for the two ranges and why they are where they are.
-##
-## Nothing here touches massing, roofline, colour or position, so the skyline the
-## player actually reads at 50-130 m is unchanged; what goes is the sub-pixel
-## half — shutter leaves, balcony balusters, string courses, tile panels, washing,
-## window reveals — plus the flank and rear elevations of anything deep enough in
-## a terrace that no camera in tools/shots.json can see them.
-static func _reduce_detail(spec: Spec) -> void:
-	var d := WorldTier.plan_distance(spec.position)
-	if d > WorldTier.FACADE_LOW_RANGE:
-		spec.detail = Detail.LOW
-	elif d > WorldTier.FACADE_MEDIUM_RANGE and spec.detail == Detail.FULL:
-		spec.detail = Detail.MEDIUM
-	if d > WorldTier.FACADE_RETURN_RANGE:
-		spec.laundry = false
 
 
 # --- Spec generation ---------------------------------------------------------
@@ -551,22 +515,11 @@ static func _assemble(batch: Batch, spec: Spec, rng: RandomNumberGenerator) -> v
 
 	# Returns and rear, for every building that is not pure silhouette. No longer
 	# gated on `spec.side`; see the note over _emit_returns().
-	#
-	# The reduced tier drops them past WorldTier.FACADE_RETURN_RANGE. A return is
-	# only ever seen obliquely, and at ninety metres in a terrace it is seen by
-	# nothing at all — the neighbour's party wall is five centimetres away.
-	if detailed and _wants_returns(spec):
+	if detailed:
 		_emit_returns(batch, base, spec, rng, lines, wall_h)
 
 	if _hangs_washing(spec, rng):
 		_emit_laundry(batch, front, spec, rng, lines)
-
-
-## Does this building get its flank and rear elevations? Always, on desktop.
-static func _wants_returns(spec: Spec) -> bool:
-	if not WorldTier.is_reduced():
-		return true
-	return WorldTier.plan_distance(spec.position) <= WorldTier.FACADE_RETURN_RANGE
 
 
 static func _wall_material(spec: Spec) -> StandardMaterial3D:
