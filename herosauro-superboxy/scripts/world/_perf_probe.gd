@@ -29,7 +29,6 @@ const SHOTS := [
 	["07_ribeira", Vector3(0, 12, 20), Vector3(0, 10, -60), 55.0],
 	["06_river_wide", Vector3(-70, 18, 70), Vector3(10, -2, -20), 50.0],
 ]
-const SPLITS := [0.06, 0.16, 0.42]
 const DISTANCES := [80.0, 100.0, 120.0, 140.0, 160.0, 200.0, 260.0]
 
 
@@ -47,15 +46,33 @@ func _initialize() -> void:
 
 	var total := 0
 	var caster_tris := 0
+	var groups: Dictionary = {}
+	for e in entries:
+		var g: String = String(e["path"]).split("/")[0]
+		if String(e["path"]).begins_with("SkyBackground/"):
+			g = String(e["path"]).split("/")[1]
+		var row: Array = groups.get(g, [0, 0, 0, 0])
+		row[0] += 1
+		row[1] += e["tris"]
+		if e["shadow"]:
+			row[2] += 1
+			row[3] += e["tris"]
+		groups[g] = row
+	print("=== GROUPS (%s) ===" % RenderingServer.get_current_rendering_method())
+	print("%-22s %8s %10s %8s %10s" % ["group", "surfs", "tris", "castSurf", "castTris"])
+	for g in groups:
+		var row: Array = groups[g]
+		print("%-22s %8d %10d %8d %10d" % [g, row[0], row[1], row[2], row[3]])
 	print("=== GEOMETRY BY SURFACE ===")
 	print("%-28s %9s %6s %8s  %s" % ["node", "tris", "shadow", "dist_m", "world aabb"])
 	for e in entries:
 		total += e["tris"]
 		if e["shadow"]:
 			caster_tris += e["tris"]
-		print("%-28s %9d %6s %8.1f  %s .. %s" % [
-			e["path"], e["tris"], "Y" if e["shadow"] else "-", e["dist"],
-			str(e["aabb"].position.round()), str(e["aabb"].end.round())])
+		if e["tris"] >= 4000:
+			print("%-28s %9d %6s %8.1f  %s .. %s" % [
+				e["path"], e["tris"], "Y" if e["shadow"] else "-", e["dist"],
+				str(e["aabb"].position.round()), str(e["aabb"].end.round())])
 	print("TOTAL triangles %d, of which shadow-casting %d" % [total, caster_tris])
 
 	var sun := _find_sun(root)
@@ -64,17 +81,40 @@ func _initialize() -> void:
 		quit(1)
 		return
 	var light_dir := -sun.global_transform.basis.z.normalized()
+	var splits := _splits_of(sun)
+	var live := sun.directional_shadow_max_distance
 	print("\n=== SHADOW CASCADE SUBMISSION (triangles re-rendered per frame) ===")
-	print("light travel dir %s, splits %s" % [str(light_dir), str(SPLITS)])
+	print("cascades %d, splits %s, live max_distance %.0f" % [splits.size() + 1, str(splits), live])
 	for shot in SHOTS:
 		print("\n-- %s --" % shot[0])
-		print("%10s %12s %12s %12s %12s %12s" % [
-			"max_dist", "cascade0", "cascade1", "cascade2", "cascade3", "TOTAL"])
-		for d in DISTANCES:
-			var per := _cascade_tris(entries, shot[1], shot[2], shot[3], d, light_dir)
-			print("%10.0f %12d %12d %12d %12d %12d" % [
-				d, per[0], per[1], per[2], per[3], per[0] + per[1] + per[2] + per[3]])
+		print("%10s %10s %10s %10s %10s %12s" % [
+			"max_dist", "casc0", "casc1", "casc2", "casc3", "TOTAL"])
+		var sweep: Array = DISTANCES.duplicate()
+		if not sweep.has(live):
+			sweep.append(live)
+		sweep.sort()
+		for d in sweep:
+			var per := _cascade_tris(entries, shot[1], shot[2], shot[3], d, light_dir, splits)
+			var sum := 0
+			for v in per:
+				sum += v
+			print("%10.0f %10d %10d %10d %10d %12d%s" % [
+				d, per[0], per[1] if per.size() > 1 else 0,
+				per[2] if per.size() > 2 else 0, per[3] if per.size() > 3 else 0,
+				sum, "   <- live" if is_equal_approx(d, live) else ""])
 	quit()
+
+
+## The cascade split fractions this light is actually configured with, so the
+## report describes the tier it is running in rather than a hard-coded desktop.
+func _splits_of(sun: DirectionalLight3D) -> Array[float]:
+	match sun.directional_shadow_mode:
+		DirectionalLight3D.SHADOW_ORTHOGONAL:
+			return []
+		DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS:
+			return [sun.directional_shadow_split_1]
+	return [sun.directional_shadow_split_1, sun.directional_shadow_split_2,
+			sun.directional_shadow_split_3]
 
 
 # --- Collection --------------------------------------------------------------
@@ -134,7 +174,7 @@ func _instance_aabb(geo: GeometryInstance3D, mesh: Mesh) -> AABB:
 # --- Cascades ----------------------------------------------------------------
 
 func _cascade_tris(entries: Array, pos: Vector3, look: Vector3, fov: float,
-		max_dist: float, light_dir: Vector3) -> Array:
+		max_dist: float, light_dir: Vector3, splits: Array[float]) -> Array:
 	var fwd := (look - pos).normalized()
 	var right := fwd.cross(Vector3.UP).normalized()
 	var up := right.cross(fwd).normalized()
@@ -147,12 +187,12 @@ func _cascade_tris(entries: Array, pos: Vector3, look: Vector3, fov: float,
 	var ly := lz.cross(lx).normalized()
 
 	var bounds: Array[float] = [CAMERA_NEAR]
-	for s in SPLITS:
+	for s in splits:
 		bounds.append(max_dist * s)
 	bounds.append(max_dist)
 
 	var out: Array = []
-	for c in 4:
+	for c in bounds.size() - 1:
 		var sphere := _slice_sphere(pos, fwd, right, up, tan_h, tan_v, bounds[c], bounds[c + 1])
 		var centre: Vector3 = sphere[0]
 		var radius: float = sphere[1]

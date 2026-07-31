@@ -49,7 +49,10 @@ const KEY_ART_PATH := "res://assets/ui/key_art.png"
 # bottom. Values are kept well under the type's — TEXT_PRIMARY is near-white and
 # GOLD is the loudest thing on the screen, and both have to stay that way.
 
-const GRADE_OFFSETS := PackedFloat32Array([0.0, 0.46, 0.72, 1.0])
+## Plain Array rather than PackedFloat32Array: a packed array built from a
+## literal is not a constant expression in GDScript, so this is converted at the
+## one call site instead of being folded here.
+const GRADE_OFFSETS: Array[float] = [0.0, 0.46, 0.72, 1.0]
 const GRADE_SKY_HIGH := Color("0d2a4a")
 const GRADE_HAZE := Color("2c6489")
 const GRADE_RIVER := Color("123049")
@@ -153,7 +156,7 @@ func _key_art_rect() -> TextureRect:
 
 func _composed_ground() -> TextureRect:
 	var grad := Gradient.new()
-	grad.offsets = GRADE_OFFSETS
+	grad.offsets = PackedFloat32Array(GRADE_OFFSETS)
 	grad.colors = PackedColorArray([
 		GRADE_SKY_HIGH, GRADE_HAZE, GRADE_RIVER, GRADE_DEEP,
 	])

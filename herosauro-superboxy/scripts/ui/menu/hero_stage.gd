@@ -1,5 +1,5 @@
 extends Control
-## HeroStage — the cast, composited over the live Porto as foreground art.
+## HeroStage — the cast, staged on the right of the title screen as foreground art.
 ##
 ## The three character sheets are the game's identity, so they are staged rather
 ## than decorated with: Adamastor looms enormous and dark on the right, cropped
@@ -11,19 +11,28 @@ extends Control
 ## Each figure is three stacked copies of the same texture:
 ##
 ##   shadow  a dark displaced copy. Alpha-keyed line art dropped straight onto a
-##           photographic daylight render reads as a sticker; a displaced dark
-##           copy is the cheapest thing that puts it in the scene, and it suits
+##           painted daylight ground reads as a sticker; a displaced dark copy is
+##           the cheapest thing that puts it in the scene, and it suits
 ##           hand-drawn cartoon art in a way a soft blur would not.
 ##   rim     a slightly enlarged copy in a hot near-white tint, behind the body.
 ##           The sun is overhead and fierce, so every foreground figure carries a
 ##           bright edge where it turns away from the camera.
 ##   body    the art itself, tinted.
 ##
-## Motion is deliberately tiny. Two things drive it: a slow breath per figure on
-## its own period, and a parallax shear taken from the live camera's own azimuth
-## (plus a little from the pointer). Tying the foreground to the 3D move is what
-## makes the cut-outs feel like they are standing IN Porto rather than on top of
-## a picture of it — and it costs one float per frame.
+## NOTHING HERE MOVES. It used to: each figure breathed on its own period and
+## sheared against the menu camera's azimuth and the pointer, so the cut-outs
+## would parallax with the live 3D Porto behind them instead of floating over it.
+## The live Porto is gone — the backdrop is a static image now — so the parallax
+## had nothing left to parallax against, and a breathing cut-out on a still poster
+## is a wobble, not life. The whole per-frame path went with it: this control runs
+## no `_process` at all, which is also what makes the composition identical in
+## every capture.
+##
+## The one animation left is `play_entry()`, a one-shot settle that ends. The
+## screen is still by the time anybody has read the title.
+##
+## Hidden entirely when the cinematic key art is present — that image already has
+## the cast in it. See main_menu.gd's `_build()`.
 
 # --- Composition -------------------------------------------------------------
 #
@@ -79,24 +88,8 @@ const SHADOW_OFFSET := Vector2(0.016, 0.010)   # in stage units, down and right
 ## when what backlighting actually does is put the same thin edge on everything.
 const RIM_PIXELS := 0.005                      # of the stage unit
 
-# --- Motion ------------------------------------------------------------------
-
-const BREATH := [4.9, 3.7, 4.3]        # seconds per breath, per figure
-const BREATH_RISE := [0.0035, 0.0060, 0.0055]
-## How much of the camera's swing each figure inherits. Near things move most.
-const PARALLAX_DEPTH := [0.42, 1.0, 0.82]
-const PARALLAX_CAMERA := 0.030
-const PARALLAX_POINTER := 0.012
-const POINTER_LAMBDA := 5.0
-
-## Drives the parallax shear. main_menu.gd feeds this from the live camera's
-## normalised azimuth, so the cut-outs slide against the world as it orbits.
-var camera_sway: float = 0.0
-
 var _figures: Array[Dictionary] = []
 var _unit: float = 720.0
-var _clock: float = 0.0
-var _pointer: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -104,11 +97,11 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# Back to front. Adamastor first so both heroes stand in front of him.
 	_figures.append(_build(UIStyle.Actor.ADAMASTOR, ADAMASTOR_SIZE, ADAMASTOR_X,
-			ADAMASTOR_FEET, ADAMASTOR_TINT, ADAMASTOR_RIM, 0))
+			ADAMASTOR_FEET, ADAMASTOR_TINT, ADAMASTOR_RIM))
 	_figures.append(_build(UIStyle.Actor.SUPERBOXY, SUPERBOXY_SIZE, SUPERBOXY_X,
-			SUPERBOXY_FEET, HERO_TINT, HERO_RIM, 2))
+			SUPERBOXY_FEET, HERO_TINT, HERO_RIM))
 	_figures.append(_build(UIStyle.Actor.HEROSAURO, HEROSAURO_SIZE, HEROSAURO_X,
-			HEROSAURO_FEET, HERO_TINT, HERO_RIM, 1))
+			HEROSAURO_FEET, HERO_TINT, HERO_RIM))
 	resized.connect(relayout)
 	relayout()
 
@@ -116,16 +109,16 @@ func _ready() -> void:
 # --- Construction ------------------------------------------------------------
 
 func _build(actor: int, height: float, from_right: float, feet: float,
-		tint: Color, rim: Color, breath_slot: int) -> Dictionary:
+		tint: Color, rim: Color) -> Dictionary:
 	var holder := Control.new()
 	holder.name = UIStyle.actor_name(actor).replace(" ", "")
 	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(holder)
 
 	# A pocket of deck shadow under each figure. Without it a cut-out over a
-	# sunlit river has nothing to sit in and the silhouette shreds against the
-	# water — and the RUBRIC counts an object floating on ambient as the single
-	# fastest way to read as amateur.
+	# bright ground has nothing to sit in and the silhouette shreds against it —
+	# and the RUBRIC counts an object floating on ambient as the single fastest
+	# way to read as amateur.
 	var pocket := TextureRect.new()
 	pocket.texture = _pocket_texture()
 	pocket.stretch_mode = TextureRect.STRETCH_SCALE
@@ -143,10 +136,6 @@ func _build(actor: int, height: float, from_right: float, feet: float,
 		"shadow": _plate(holder, SHADOW_TINT),
 		"rim": _plate(holder, rim),
 		"body": _plate(holder, tint),
-		"breath": BREATH[breath_slot],
-		"rise": BREATH_RISE[breath_slot],
-		"depth": PARALLAX_DEPTH[breath_slot],
-		"base": Vector2.ZERO,
 		"tex_h": 0,
 	}
 
@@ -191,7 +180,6 @@ func relayout() -> void:
 		return
 	for fig in _figures:
 		_fit(fig)
-	_apply_motion()
 
 
 func _fit(fig: Dictionary) -> void:
@@ -213,11 +201,9 @@ func _fit(fig: Dictionary) -> void:
 
 	var centre_x := size.x - float(fig["from_right"]) * _unit
 	var top := size.y + float(fig["feet"]) * _unit - h
-	var origin := Vector2(centre_x - w * 0.5, top)
-	fig["base"] = origin
 
 	var holder: Control = fig["holder"]
-	holder.position = origin
+	holder.position = Vector2(centre_x - w * 0.5, top)
 	holder.size = Vector2(w, h)
 
 	var body: TextureRect = fig["body"]
@@ -246,34 +232,10 @@ func _fit(fig: Dictionary) -> void:
 	holder.pivot_offset = Vector2(w * 0.5, h)
 
 
-# --- Motion ------------------------------------------------------------------
-
-func _process(delta: float) -> void:
-	_clock += delta
-	var want := Vector2.ZERO
-	if size.x > 1.0 and size.y > 1.0 and DisplayServer.has_feature(DisplayServer.FEATURE_MOUSE):
-		want = (get_local_mouse_position() / size - Vector2(0.5, 0.5)).clamp(
-				Vector2(-0.5, -0.5), Vector2(0.5, 0.5))
-	_pointer = _pointer.lerp(want, 1.0 - exp(-POINTER_LAMBDA * delta))
-	_apply_motion()
-
-
-func _apply_motion() -> void:
-	for fig in _figures:
-		var depth := float(fig["depth"])
-		var breathe := sin(TAU * _clock / float(fig["breath"]))
-		var offset := Vector2(
-			-camera_sway * depth * PARALLAX_CAMERA * _unit
-					+ _pointer.x * depth * PARALLAX_POINTER * _unit * 2.0,
-			breathe * float(fig["rise"]) * _unit
-					+ _pointer.y * depth * PARALLAX_POINTER * _unit)
-		(fig["holder"] as Control).position = (fig["base"] as Vector2) + offset
-
-
 # --- Entry -------------------------------------------------------------------
 
 ## Rise and fade in, back to front, so the giant is already there when the heroes
-## step in front of him.
+## step in front of him. A one-shot: it finishes and the stage is then still.
 func play_entry(delay: float, stagger: float) -> void:
 	var i := 0
 	for fig in _figures:
@@ -282,9 +244,9 @@ func play_entry(delay: float, stagger: float) -> void:
 		var tw := create_tween().set_parallel(true)
 		var wait := delay + stagger * float(i)
 		tw.tween_property(holder, "modulate:a", 1.0, 0.72).set_delay(wait)
-		# Rising is done with scale about the feet, not with position: position is
-		# rewritten every frame by _apply_motion for the breath and the parallax,
-		# and a tween on it would be overwritten before it drew.
+		# Rising is done with scale about the feet rather than with position, so
+		# the settle reads as the figure planting rather than sliding, and so a
+		# resize part-way through the entry cannot fight the tween for the rect.
 		holder.scale = Vector2.ONE
 		tw.tween_property(holder, "scale", Vector2.ONE, 0.9) \
 				.from(Vector2(1.0, 0.955)).set_delay(wait) \

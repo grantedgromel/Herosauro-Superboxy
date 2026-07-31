@@ -255,6 +255,7 @@ const LAMP_IRON_COLOR := Color(0.200, 0.220, 0.260)
 
 
 func _ready() -> void:
+	_apply_web_tier()
 	_build_roadway()
 	_build_tramway()
 	_build_footways()
@@ -265,6 +266,53 @@ func _ready() -> void:
 	IronworkScript.attach(self)
 	_build_lamps()
 	_build_deck_dressing()
+
+
+# --- Web tier ----------------------------------------------------------------
+
+## The two things in this scene that cost the web build the most and that only
+## this file can reach: the river's tessellation and the sun's shadow reach.
+##
+## Both are edited at runtime rather than in the .tscn, and the reason is the
+## review gate. `docs/REVIEW_LOOP.md` scores desktop frames pixel for pixel, and
+## three rounds of material and lighting work sit on top of this scene, so a
+## number changed in the .tscn changes the desktop image. Changed here, behind
+## WorldTier.is_reduced(), the Forward+ path is provably untouched — the capture
+## harness runs Forward+ and comes back IDENTICAL — while the GL Compatibility
+## build gets the cut. Measure it with:
+##
+##     godot --path . tools/budget.tscn --rendering-method gl_compatibility
+##
+## THE SUN'S SHADOW SETTINGS ARE THE .tscn's, and the block over them there
+## explains why 260 m was chosen: it is what reaches the Ribeira terraces so they
+## receive inter-building shading, which round 1 measured as missing. That
+## argument is a desktop argument. On web the terraces are backdrop with no
+## shadow casters left in them at all (WorldTier.SHADOW_RADIUS drops them), so
+## the cascades have nothing out there to resolve and the reach is wasted.
+##
+## Splits go 4 -> 2 for the same reason, and that halves the shadow pass outright:
+## every cascade is a full geometry re-render, so a split that resolves nothing is
+## the most expensive kind of nothing.
+func _apply_web_tier() -> void:
+	if not WorldTier.is_reduced():
+		return
+
+	var river := get_node_or_null("River") as MeshInstance3D
+	var plane: PlaneMesh = river.mesh as PlaneMesh if river != null else null
+	if plane != null:
+		# duplicate() first: the PlaneMesh is a sub-resource of the .tscn, and this
+		# scene can legitimately be instantiated more than once in a process (the
+		# menu world does it), at which point mutating the shared resource would
+		# re-tessellate an arena that has already been built.
+		var lean: PlaneMesh = plane.duplicate()
+		lean.subdivide_width = WorldTier.RIVER_SUBDIVISIONS
+		lean.subdivide_depth = WorldTier.RIVER_SUBDIVISIONS
+		river.mesh = lean
+
+	var sun := get_node_or_null("SunLight") as DirectionalLight3D
+	if sun != null:
+		sun.directional_shadow_max_distance = WorldTier.SHADOW_DISTANCE
+		sun.directional_shadow_mode = WorldTier.SHADOW_SPLITS
 
 
 # --- Roadway -----------------------------------------------------------------

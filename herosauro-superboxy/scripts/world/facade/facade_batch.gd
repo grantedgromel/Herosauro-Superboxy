@@ -80,59 +80,116 @@ static var _linen_thin: Dictionary = {}
 ## the far hillside rows.
 var cast_shadows := true
 
+## --- SPATIAL SPLIT -----------------------------------------------------------
+##
+## Grouping per terrace is what makes the detail affordable, and past a point it
+## is also what makes the scene uncullable. `_build_city()` hands every house on
+## both banks to ONE batch, so `Ribeira_1` came out as 169,936 triangles in a
+## single instance whose world AABB spans (-136, -9, -126) .. (100, 31, 32).
+## Godot culls and shadow-maps an instance against that AABB as a unit, so a
+## surface that size is in every frustum and every shadow cascade for as long as
+## any part of the city is on screen. Probing the shot cameras put 98.6% of all
+## shadow-casting geometry in cascade 0 — the 26 m box around the player.
+##
+## So the registry keys on (material, world cell) rather than on material alone,
+## and `locate()` moves the cell as each building is added. A 32 m grid turns one
+## world-spanning surface into twenty local ones with tight AABBs, which is what
+## every other lever here needs in order to do anything at all.
+##
+## `split_bakes` false restores the old one-surface-per-material behaviour
+## exactly, and that is the desktop path — see WorldTier, which owns both the
+## switch and the ring boundaries the cells are cut on.
+var split_bakes := false
+
+var _cell := Vector2i.ZERO
+## Material -> { cell: MeshBaker }.
 var _bakers: Dictionary = {}
-## Insertion order, so the committed child nodes come out identical run to run.
-## A Dictionary preserves order in GDScript, but leaning on that for scene
-## structure is the kind of assumption that breaks quietly.
-var _order: Array[Material] = []
+## Insertion order as [Material, cell] pairs, so the committed child nodes come
+## out identical run to run. A Dictionary preserves order in GDScript, but leaning
+## on that for scene structure is the kind of assumption that breaks quietly.
+var _order: Array[Array] = []
+
+
+func _init() -> void:
+	split_bakes = WorldTier.split_bakes()
 
 
 # --- Registry ----------------------------------------------------------------
 
-## The baker accumulating geometry for `mat`, created on first ask.
+## Point the registry at the cell `pos` falls in. Everything added after this call
+## lands in that cell's bakers. A no-op when the split is off.
+func locate(pos: Vector3) -> void:
+	if split_bakes:
+		_cell = WorldTier.cell_for(pos)
+
+
+## The baker accumulating geometry for `mat` in the current cell, created on first
+## ask.
 func baker(mat: Material) -> MeshBaker:
-	var b: MeshBaker = _bakers.get(mat)
+	# has()/[] rather than get(): a Dictionary is a built-in Variant type and is
+	# therefore NOT nullable, so `var cells: Dictionary = _bakers.get(mat)` on a
+	# miss does not yield null — it raises "Trying to assign value of type 'Nil'"
+	# and leaves the variable unusable, which silently drops every surface the
+	# batch was about to build.
+	if not _bakers.has(mat):
+		_bakers[mat] = {}
+	var cells: Dictionary = _bakers[mat]
+	var b: MeshBaker = cells.get(_cell)
 	if b == null:
 		b = MeshBaker.new()
-		_bakers[mat] = b
-		_order.append(mat)
+		cells[_cell] = b
+		_order.append([mat, _cell])
 	return b
 
 
 func triangle_count() -> int:
 	var total := 0
-	for mat in _order:
-		total += (_bakers[mat] as MeshBaker).triangle_count()
+	for key in _order:
+		total += _baker_for(key).triangle_count()
 	return total
 
 
-## How many draw calls this batch will cost — one per material that got used.
+## How many draw calls this batch will cost — one per (material, cell) that got
+## used. With the split off that is one per material, as it always was.
 func surface_count() -> int:
 	var used := 0
-	for mat in _order:
-		if (_bakers[mat] as MeshBaker).triangle_count() > 0:
+	for key in _order:
+		if _baker_for(key).triangle_count() > 0:
 			used += 1
 	return used
 
 
-## Weld everything and return a Node3D holding one MeshInstance3D per material.
+func _baker_for(key: Array) -> MeshBaker:
+	return (_bakers[key[0]] as Dictionary)[key[1]] as MeshBaker
+
+
+## Weld everything and return a Node3D holding one MeshInstance3D per material,
+## or per (material, cell) when the spatial split is on.
 ##
 ## The node is left at the origin: geometry is baked at each Spec's own
-## position, so moving the returned node moves the whole row.
+## position, so moving the returned node moves the whole row. That is also what
+## keeps the split free — every chunk keeps the identity transform, so a
+## world-mapped or object-space triplanar material samples exactly the same texel
+## it did before the mesh was cut.
 func commit(node_name: String = "Facades") -> Node3D:
 	var root := Node3D.new()
 	root.name = node_name
 	var index := 0
-	for mat in _order:
-		var b: MeshBaker = _bakers[mat]
+	for key in _order:
+		var b := _baker_for(key)
 		if b.triangle_count() == 0:
 			continue
-		var mi := b.commit(mat, "%s_%d" % [node_name, index])
-		if not cast_shadows:
+		var mi := b.commit(key[0] as Material, "%s_%d" % [node_name, index])
+		# Two independent reasons to leave the shadow pass: the caller's
+		# all-or-nothing switch, and this chunk's own distance ring on the reduced
+		# tier. See WorldTier.cell_casts_shadow for why the ring answers it and an
+		# AABB cannot.
+		if not cast_shadows or not WorldTier.cell_casts_shadow(key[1] as Vector2i):
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mi)
 		index += 1
 	return root
+
 
 
 # --- Materials ---------------------------------------------------------------
