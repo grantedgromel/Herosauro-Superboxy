@@ -44,6 +44,45 @@ The compression change in `19b521d` is still right; it just bought about a
 fifth of what I claimed. `4b20430` handles the real problem with the four
 unreferenced plates: they are excluded from the web pck.
 
+### I had the texture-compression argument backwards
+
+`19b521d` moved all eight UI plates to VRAM Compressed and justified it: *"these
+are painterly plates viewed at or near native size, where the block artifacts
+have nothing crisp to chew on."* That is the reasoning inverted. Block
+compression is *good* at busy detail, which hides its 4-colour-per-block
+quantisation, and *bad* at exactly the two things this art has — smooth
+painterly gradients and crisp high-contrast edges.
+
+So it went through the gate it should have gone through in the first place.
+`13_menu` rendered against a lossless baseline:
+
+| | RMSE | PSNR | >4 levels | >16 levels | max |
+|---|---|---|---|---|---|
+| BC1/BC3 | 11.83 | 26.67 dB | 44.8% | 13.2% | 209 |
+| BC7/ASTC (`high_quality`) | 11.17 | 27.17 dB | 35.4% | 11.7% | 218 |
+
+`harness.py verify` on the same shot returns IDENTICAL, so that is signal and
+not capture noise. A 16× region map put the damage in the right-lower quadrant
+at mean |Δ| 18–24 while the left side sat at 0.5–2, and a 3× crop shows why: the
+error is **edge ringing** — the eye outlines, the mask rim, the glove seams, the
+"SUPER BOXY" lettering — not gradient banding. The conclusion happened to
+survive, but not for the reason given.
+
+BC7 is not the answer: 0.5 dB for double the bytes. The split that is:
+
+* **`key_art.png` back to Lossless.** It is the full-bleed menu backdrop, so it
+  *is* the frame that took the damage, and it is `load()`ed at runtime by
+  `menu_backdrop.gd` rather than preloaded — resident only while the title
+  screen is up, never during the fight, which is when frame rate matters. Six
+  MiB is not worth degrading the title screen, and the user has art-directed
+  that screen twice. `13_menu` now renders IDENTICAL to the lossless baseline.
+* **The three portraits stay compressed.** They are `preload` constants in
+  `ui_style.gd`, so they are resident for the whole process including the fight,
+  and they are drawn at roughly 200 px where the measured artifacts are below
+  the sampling.
+* **The four `art/` plates stay compressed** and are excluded from the web pck
+  entirely, so the setting only affects a desktop download.
+
 ### The figure plates DO have alpha
 
 I recorded that the two 1024×1536 cutouts "have baked gradient backgrounds, not
@@ -134,6 +173,26 @@ sweep    worst 02_deck_eye  226 obj  226 draws    574,730 prims
 of its draw calls.** That is the geometry tier from `32adce7` measured end to
 end rather than inferred from its levers. The full ten-vantage table for both
 tiers is in `docs/PERFORMANCE_BUDGET.md`.
+
+### And the fight itself is 1.5% of the frame
+
+`tools/profile.tscn`, once it could run at all, over 600 frames of the scripted
+route on Forward+:
+
+```
+draw calls   p50   693   p95   721   p99       726   max       730
+primitives   p50 3,305,102   p95 3,311,709   p99 3,312,473   max 3,342,749
+nodes        p50   667   p95   727   p99       735   max       739
+peak static memory 146.6 MiB
+```
+
+**Two heroes, a nine-metre giant and every combat effect add 51,016 primitives
+to a 3,261,457-primitive static world.** Draw calls say it from the other side:
+575 static, 726 live — the actors cost 151 draw calls and essentially no
+geometry.
+
+Whatever makes a frame expensive here, it is not the fight. That is the number
+the last four rounds should have been working from.
 
 ### The finding: primitives do not respond to the camera
 

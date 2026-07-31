@@ -43,6 +43,23 @@ platformer, a battle royale or an elimination party game.
    must `.duplicate()` first, or it recolours every object in the scene.
 8. `tools/harness.py check` must pass after your change. If you break the boot
    or the import, nobody else can work.
+9. **A gate does not exist until you have watched it fail.** Write the check,
+   then reintroduce the fault it was built for and confirm it goes red. This
+   project has shipped four tools that reported a clean result while measuring
+   nothing: a probe that measured a scene it had failed to add to the tree,
+   `tools/budget.gd` reporting zero because its scene had no camera,
+   `tools/profile.gd` which did not parse and so never ran at all, and the
+   parse check written to catch that last one, which passed it on the first
+   try. Three of the four were written by this loop to check this loop. A tool
+   that does not run looks exactly like a tool that runs and finds nothing
+   wrong, so the only proof is a demonstrated failure.
+10. **Do not defend a number you have not measured.** If a change alters what
+    ends up on screen — a texture import mode, an LOD threshold, a shader
+    constant — it goes through `tools/harness.py diff` against a baseline, and
+    the round doc records the numbers. Plausible reasoning is routinely
+    backwards: the argument for compressing the UI art ("painterly plates,
+    nothing crisp for block artifacts to chew on") had the failure mode of
+    block compression exactly inverted, and only a render showed it.
 
 ## Ownership map
 

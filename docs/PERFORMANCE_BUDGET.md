@@ -328,6 +328,30 @@ That is now four instances of the same failure shape in this project: the
 that passed its own motivating bug. **A tool that does not run looks exactly
 like a tool that runs and finds nothing wrong.**
 
+### What a live fight actually costs
+
+The first run the profiler has ever completed. 600 frames of the scripted route
+in `scenes/main.tscn` — closing on the giant, swinging, the ability, taking the
+slam — Forward+, 640×360, llvmpipe:
+
+| | p50 | p95 | p99 | max |
+|---|---|---|---|---|
+| draw calls | 693 | 721 | 726 | 730 |
+| primitives | 3,305,102 | 3,311,709 | 3,312,473 | 3,342,749 |
+| nodes | 667 | 727 | 735 | 739 |
+
+Peak static memory 146.6 MiB. Counts are resolution-independent, so 640×360 was
+chosen purely to make 600 frames finish on a software rasteriser.
+
+**Two heroes, a nine-metre giant and every combat effect add 51,016 primitives
+to a 3,261,457-primitive static world — 1.5%.** Draw calls tell the same story
+from the other side: 575 static to 726 live, so the actors cost 151 draw calls
+and essentially no geometry. Everything else in the frame is the world being
+resubmitted to the shadow cascades.
+
+That is the number that should have driven the last four rounds. Whatever is
+making a frame expensive, it is not the fight.
+
 ### The ceilings are a ratchet
 
 They are set just above what the build measures today, so a regression trips
