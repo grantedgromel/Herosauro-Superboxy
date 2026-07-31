@@ -108,22 +108,62 @@ static var _foliage_two_sided: Dictionary = {}
 ## Distant reaches drop out of the shadow pass; see the header.
 var cast_shadows := true
 
+## --- SPATIAL SPLIT -----------------------------------------------------------
+##
+## Same registry change as the facade batcher's, for the same measured reason and
+## with the same doc comment there rather than repeated here: a bake welded across
+## a whole reach gets one world-spanning AABB, and Godot culls an instance against
+## that AABB as a unit, so nothing in it can ever be culled out of a frustum or a
+## shadow cascade. `TerrainNear_0` was 44,784 triangles spanning
+## (-170, -17, -79) .. (145, 21, 30) — both banks at once.
+##
+## The near/far split at NEAR_Z_FAR that this file's header describes was the
+## first half of the same idea. This is the other axis: terrain_builder calls
+## `locate()` per (bank, terrace level), which is the granularity the hillside is
+## actually built on.
+##
+## `split_bakes` false restores the old one-surface-per-material behaviour
+## exactly, and that is the desktop path. See WorldTier for the ring boundaries.
+var split_bakes := false
+
+var _cell := Vector2i.ZERO
+## Material -> { cell: MeshBaker }.
 var _bakers: Dictionary = {}
-## Insertion order, so committed children come out identical run to run. A
-## Dictionary does preserve order in GDScript, but leaning on that for scene
-## structure is the kind of assumption that breaks quietly.
-var _order: Array[Material] = []
+## Insertion order as [Material, cell] pairs, so committed children come out
+## identical run to run. A Dictionary does preserve order in GDScript, but leaning
+## on that for scene structure is the kind of assumption that breaks quietly.
+var _order: Array[Array] = []
+
+
+func _init() -> void:
+	split_bakes = WorldTier.split_bakes()
 
 
 # --- Registry ----------------------------------------------------------------
 
-## The baker accumulating geometry for `mat`, created on first ask.
+## Point the registry at the cell `pos` falls in. Everything added after this call
+## lands in that cell's bakers. A no-op when the split is off.
+func locate(pos: Vector3) -> void:
+	if split_bakes:
+		_cell = WorldTier.cell_for(pos)
+
+
+## The baker accumulating geometry for `mat` in the current cell, created on first
+## ask.
 func baker(mat: Material) -> MeshBaker:
-	var b: MeshBaker = _bakers.get(mat)
+	# has()/[] rather than get(): a Dictionary is a built-in Variant type and is
+	# therefore NOT nullable, so `var cells: Dictionary = _bakers.get(mat)` on a
+	# miss does not yield null — it raises "Trying to assign value of type 'Nil'"
+	# and leaves the variable unusable, which silently drops every surface the
+	# batch was about to build.
+	if not _bakers.has(mat):
+		_bakers[mat] = {}
+	var cells: Dictionary = _bakers[mat]
+	var b: MeshBaker = cells.get(_cell)
 	if b == null:
 		b = MeshBaker.new()
-		_bakers[mat] = b
-		_order.append(mat)
+		cells[_cell] = b
+		_order.append([mat, _cell])
 	return b
 
 
@@ -182,38 +222,52 @@ func sign_face() -> MeshBaker:
 
 func triangle_count() -> int:
 	var total := 0
-	for mat in _order:
-		total += (_bakers[mat] as MeshBaker).triangle_count()
+	for key in _order:
+		total += _baker_for(key).triangle_count()
 	return total
 
 
-## How many draw calls this batch will cost — one per material that got used.
+## How many draw calls this batch will cost — one per (material, cell) that got
+## used. With the split off that is one per material, as it always was.
 func surface_count() -> int:
 	var used := 0
-	for mat in _order:
-		if (_bakers[mat] as MeshBaker).triangle_count() > 0:
+	for key in _order:
+		if _baker_for(key).triangle_count() > 0:
 			used += 1
 	return used
 
 
-## Weld everything and return a Node3D holding one MeshInstance3D per material.
+func _baker_for(key: Array) -> MeshBaker:
+	return (_bakers[key[0]] as Dictionary)[key[1]] as MeshBaker
+
+
+## Weld everything and return a Node3D holding one MeshInstance3D per material,
+## or per (material, cell) when the spatial split is on.
 ##
 ## The node belongs at the origin: every kit here bakes in world coordinates, so
-## moving the returned node moves the riverbank off the river.
+## moving the returned node moves the riverbank off the river. That is also what
+## keeps the split free — every chunk keeps the identity transform, so a
+## world-mapped or object-space triplanar material samples exactly the same texel
+## it did before the mesh was cut.
 func commit(node_name: String = "Terrain") -> Node3D:
 	var root := Node3D.new()
 	root.name = node_name
 	var index := 0
-	for mat in _order:
-		var b: MeshBaker = _bakers[mat]
+	for key in _order:
+		var b := _baker_for(key)
 		if b.triangle_count() == 0:
 			continue
-		var mi := b.commit(mat, "%s_%d" % [node_name, index])
-		if not cast_shadows:
+		var mi := b.commit(key[0] as Material, "%s_%d" % [node_name, index])
+		# Two independent reasons to leave the shadow pass: the caller's
+		# all-or-nothing switch, and this chunk's own distance ring on the reduced
+		# tier. See WorldTier.cell_casts_shadow for why the ring answers it and an
+		# AABB cannot.
+		if not cast_shadows or not WorldTier.cell_casts_shadow(key[1] as Vector2i):
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		root.add_child(mi)
 		index += 1
 	return root
+
 
 
 # --- Materials ---------------------------------------------------------------
