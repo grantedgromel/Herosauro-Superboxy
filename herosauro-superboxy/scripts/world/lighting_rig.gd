@@ -488,12 +488,41 @@ func _strip_forward_plus(env: Environment) -> void:
 
 
 func _tune_for_compatibility(env: Environment) -> void:
-	env.glow_hdr_threshold = minf(env.glow_hdr_threshold, COMPAT_GLOW_THRESHOLD)
-	# The two widest glow levels are two more full blur passes for spread nobody
-	# resolves at web resolution. set_glow_level() is 0-based against the 1-based
-	# glow_levels/N properties, so these two are glow_levels/5 and /6.
-	env.set_glow_level(4, 0.0)
-	env.set_glow_level(5, 0.0)
+	# GLOW IS OFF ON THE WEB TIER, and the constant above is kept only to explain
+	# why. This is the white-out the owner reported for an entire session, and it
+	# is the second time this threshold has produced it.
+	#
+	# Measured on the shipped build, fraction of the frame whose max(r,g,b)
+	# exceeds COMPAT_GLOW_THRESHOLD and is therefore screen-blended into bloom:
+	#
+	#     01_deck_mid    26.00%      (the comment above claims 1.43%)
+	#     02_deck_eye    14.60%      (the comment above claims 0.42%)
+	#     11_fight_open  12.66%
+	#     12_fight_close 11.83%
+	#
+	# The comment's own verdict on numbers in this range — "five to fourteen per
+	# cent is not a bloom, it is a screen-blend of the sky" — understates it.
+	# Twenty-six per cent of the frame screen-blended over itself is a white
+	# screen, which is exactly what was reported and what the screenshot shows:
+	# white halos bleeding off every railing, lamppost and building edge, black
+	# ironwork rendered white by bloom laid on top of it.
+	#
+	# WHY RE-TUNING IT AGAIN WOULD BE THE WRONG FIX. The comment on the constant
+	# already diagnoses the real defect and even predicts this recurrence: it is a
+	# DISPLAY-SPACE threshold, so it moves whenever exposure, an albedo, a grade
+	# LUT or a material gain moves — in any stream, without anyone touching this
+	# file. It has 0.098 of margin. It was re-solved once, held for one round, and
+	# broke again. A third re-solve buys one more round.
+	#
+	# What it costs to switch off is the sun disk, the water's glint path and the
+	# azulejo highlights blooming on the web tier. That is a real loss and it is
+	# worth roughly nothing against a screen the owner cannot play. Forward+ keeps
+	# its glow untouched — it selects in HDR at 1.00, where the coupling does not
+	# exist, and the desktop image is unaffected.
+	#
+	# If glow comes back here it needs a gate that MEASURES the selected fraction
+	# on a captured web-tier frame, not a constant with a paragraph attached.
+	env.glow_enabled = false
 	env.ambient_light_energy *= COMPAT_AMBIENT_SCALE
 	if env.sky != null:
 		env.sky.radiance_size = mini(env.sky.radiance_size, COMPAT_RADIANCE_SIZE)
