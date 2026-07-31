@@ -598,8 +598,76 @@ func _build_towers(b: MeshBaker, trim: MeshBaker, dark: MeshBaker) -> void:
 		# Corbel course carrying the deck's last few metres onto the tower.
 		trim.add_box(Vector3(8.8, 0.5, 17.4), Transform3D(Basis(), Vector3(cx, -0.15, 0.0)))
 
+		_end_pylons(b, trim, cx)
+
 		if build_road_deck:
 			_road_portal(trim, dark, cx - sx * (stages[1].x * 0.5), sx)
+
+
+## The only masonry that rises ABOVE the walking surface, and the reason it exists
+## is that until now nothing did.
+##
+## TOWER_TOP is 0.20, i.e. the towers stop 1.80 m BELOW DECK_TOP = 2.0. Everything
+## the player could see above the deck was a 1.33 m parapet, eight lamp globes,
+## four tram catenary masts and a stopped tram — a generic 19th-century European
+## tram street, which is exactly what it read as. The arch is underneath and (see
+## ArchCurve.RIB_Z) was invisible from every gameplay pose; the towers, which are
+## the most Dom Luís-shaped objects in the build, never reached the deck.
+##
+## SO THE PYLONS FLANK THE DECK RATHER THAN BLOCKING IT. The tower's top stage is
+## 8.4 x 16.6, wider than the 14 m deck, so carrying that mass straight up would
+## wall the corridor off — and it would do it invisibly, because bridge_arena.gd
+## owns the entire collision contract and this file commits no collision at all
+## (see _commit). A player would have walked through granite. Instead these sit
+## OUTBOARD at |z| = 8.15, clear of DECK_HALF_WIDTH = 7.0, so they need no
+## collision, take no walkable surface, and cannot be reached: the boss is clamped
+## to ARENA_X_MAX = 24.0, which is 24.5 m short of TOWER_X.
+##
+## No lintel over the roadway. A portal beam was the obvious next move and it is
+## the one part of this that was argued down: it is the member that would have had
+## to clear a nine-metre giant, and it buys framing this already gets from a pair.
+## Two verticals at the vanishing point of every fight frame is the composition;
+## the crossbeam was the risk.
+const PYLON_TOP := 14.0
+const PYLON_Z := 8.15
+const PYLON_X_SIZE := 5.2
+const PYLON_Z_SIZE := 3.4
+
+
+func _end_pylons(b: MeshBaker, trim: MeshBaker, cx: float) -> void:
+	# Two stages so it batters like the tower below it rather than reading as an
+	# extruded rectangle: the shaft steps in once, at the height the deck passes.
+	var waist := DECK_TOP + 4.6
+	var shafts := [
+		[TOWER_TOP, waist, PYLON_X_SIZE, PYLON_Z_SIZE],
+		[waist, PYLON_TOP, PYLON_X_SIZE - 0.7, PYLON_Z_SIZE - 0.45],
+	]
+	for zi in 2:
+		var sz := -1.0 if zi == 0 else 1.0
+		var pz: float = sz * PYLON_Z
+		for s in shafts:
+			var y0: float = s[0]
+			var y1: float = s[1]
+			var xs: float = s[2]
+			var zs: float = s[3]
+			b.add_box(Vector3(xs, y1 - y0, zs),
+					Transform3D(Basis(), Vector3(cx, (y0 + y1) * 0.5, pz)))
+			# String course on the step-in, matching the towers' own language.
+			trim.add_box(Vector3(xs + 0.35, 0.40, zs + 0.35),
+					Transform3D(Basis(), Vector3(cx, y1 - 0.05, pz)))
+			# Quoins up the corners, same reason as the tower: a plain granite
+			# box reads as its bounding box however good the material is.
+			for qi in 4:
+				var qx: float = cx + (-1.0 if qi < 2 else 1.0) * (xs * 0.5 - 0.28)
+				var qz: float = pz + (-1.0 if qi % 2 == 0 else 1.0) * (zs * 0.5 + 0.08)
+				trim.add_box(Vector3(1.15, y1 - y0 - 0.6, 0.5),
+						Transform3D(Basis(), Vector3(qx, (y0 + y1) * 0.5, qz)))
+		# Cap: a shallow cornice and a plinth, so the shaft terminates instead of
+		# stopping. At 66 m this is most of what says "masonry" rather than "post".
+		trim.add_box(Vector3(PYLON_X_SIZE + 0.5, 0.55, PYLON_Z_SIZE + 0.5),
+				Transform3D(Basis(), Vector3(cx, PYLON_TOP + 0.28, pz)))
+		trim.add_box(Vector3(PYLON_X_SIZE - 1.5, 0.7, PYLON_Z_SIZE - 1.2),
+				Transform3D(Basis(), Vector3(cx, PYLON_TOP + 0.9, pz)))
 
 
 ## Coursing: a proud band every 1.7 m all the way up. One box each, and it is the

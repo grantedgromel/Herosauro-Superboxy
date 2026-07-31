@@ -62,7 +62,14 @@
       "kind": "world",
       "settle": 24,
       "pos": [0, 12, 20], "look": [0, 10, -60], "fov": 55,
-      "intent": "The Porto facades. The 'is this recognisably Porto' test."
+      "intent": "The Porto facades. Kept unchanged so four rounds of baselines stay comparable — but see 16_arch_identity: THIS SHOT DOES NOT CONTAIN THE PLAYABLE ARCH. Measured, the arena's arch bbox is y 715..1974 on a 720 px frame: zero pixels, its highest point 5 px below the bottom edge, while the photogrammetric bridge behind it renders a legible 375x128 px arch. It was labelled the 'is this recognisably Porto' test and it was answering that question with the backdrop."
+    },
+    {
+      "name": "16_arch_identity",
+      "kind": "world",
+      "settle": 24,
+      "pos": [-26, -3, 34], "look": [4, -4, -2], "fov": 58,
+      "intent": "THE REAL IDENTITY TEST: does the ARENA read as Ponte de Dom Luís I? Across the span and below the deck line, which is the only place the crescent is legible — the arch lives entirely under the walking surface, so every on-deck vantage sees a tram street. Four rounds of review scored 07_ribeira for Porto identity and passed on the backdrop's bridge while the arena contributed no arch pixels at all. This shot is the one that can fail."
     },
     {
       "name": "08_gaia_end",

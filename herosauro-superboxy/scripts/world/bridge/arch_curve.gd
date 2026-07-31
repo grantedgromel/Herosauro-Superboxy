@@ -45,12 +45,39 @@ const CROWN_DEPTH := 6.60
 
 # --- Rib plan -----------------------------------------------------------------
 
-## Half-spacing of the two ribs at the crown. Matches the kerb line the deck's
-## main girders sit over, so load runs straight down.
-const RIB_Z := 5.0
+## Half-spacing of the two ribs at the crown.
+##
+## 5.0 -> 6.6, AND THIS IS THE CHANGE THAT LETS ANYONE SEE THE ARCH. At 5.0 the
+## crown rib's outer face sat at 5.0 + RIB_WIDTH/2 = 5.75, which is 1.25 m INBOARD
+## of DECK_HALF_WIDTH = 7.0. The deck was an opaque lid over its own arch: measured
+## across every gameplay camera pose — solo spawn, co-op spawn, full pull-out,
+## victory, the -58 deg pitch extreme — exactly 0 of 324 arch sample points were
+## unoccluded. Not "hard to see". Zero, in every pose, because the occluder is the
+## deck the fight happens on. The one feature that makes this bridge Ponte de Dom
+## Luís I could not appear in any frame the game has ever shipped.
+##
+## 6.6 puts the outer face at 7.35, which is 0.35 m proud of the deck edge and past
+## the 7.29 an eye at the parapet (z = 6.55, y = 3.15) needs to clear the deck
+## corner. The crescent becomes visible over the edge, which is exactly how you see
+## it walking the real upper deck.
+##
+## The old comment said this "matches the kerb line the deck's main girders sit
+## over, so load runs straight down". That was a tidy structural story and it is
+## not what the real bridge does: Seyrig's arch is wider than the deck it carries,
+## and the deck rides on spandrel columns that rake inward off it. bridge_ironwork
+## already clamps those column heads to SPANDREL_ATTACH_Z, so they take up the rake
+## on their own with no further change.
+const RIB_Z := 6.6
 ## Extra half-spacing at the springings. Quadratic in t, so the ribs stay parallel
 ## through the middle third and open out only where the thrust needs the base.
-const RIB_SPLAY := 2.60
+##
+## 2.60 -> 1.00 alongside RIB_Z 5.0 -> 6.6, which is deliberate and keeps the
+## SPRINGINGS EXACTLY WHERE THEY WERE: rib_z(+-1) was 5.0 + 2.60 = 7.60 and is now
+## 6.6 + 1.00 = 7.60. Only the crown moves. The base bears on the same granite, the
+## springing corbels in bridge_ironwork.gd land on the same points, and the towers
+## do not have to grow to catch a wider arch. The ribs read as near-parallel now,
+## which is also closer to the real thing than a 2.6 m splay over 47 m ever was.
+const RIB_SPLAY := 1.00
 ## Width of each rib as a box girder: two chord planes this far apart in Z.
 const RIB_WIDTH := 1.50
 
