@@ -981,10 +981,16 @@ static func _build_headlands(near: TerrainBatch, seed: int) -> void:
 		for j in rows:
 			var za := lerpf(BANK_Z_NEAR, HEADLAND_Z, float(j) / float(rows))
 			var zb := lerpf(BANK_Z_NEAR, HEADLAND_Z, float(j + 1) / float(rows))
-			# One metre seaward of the waterline, so the sheet passes UNDER the
+			# Two metres seaward of the waterline, so the sheet passes UNDER the
 			# river plane and the shore is an intersection rather than a seam.
-			var sa := absf(headland_shore_x(side, za)) - 1.0
-			var sb := absf(headland_shore_x(side, zb)) - 1.0
+			# 2 m at HEADLAND_SLOPE is 1.1 m of submergence, comfortably past the
+			# swell's 0.35 m crest. The margin eases in from nothing at
+			# BANK_Z_NEAR: at the root the sheet has to meet the quay's own top,
+			# and a metre of overhang there would hang off the coping.
+			var ma := 2.0 * smoothstep(0.0, 0.22, float(j) / float(rows))
+			var mb := 2.0 * smoothstep(0.0, 0.22, float(j + 1) / float(rows))
+			var sa := absf(headland_shore_x(side, za)) - ma
+			var sb := absf(headland_shore_x(side, zb)) - mb
 			var back_a := absf(front_x(side, _levels(side).size(), za)) + HEADLAND_OVERRUN
 			var back_b := absf(front_x(side, _levels(side).size(), zb)) + HEADLAND_OVERRUN
 			if back_a - sa < 0.5 and back_b - sb < 0.5:

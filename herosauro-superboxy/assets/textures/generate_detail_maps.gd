@@ -150,8 +150,9 @@ func _recipes() -> Array[Dictionary]:
 		# whose channels REVERSE against each other decorrelates.
 		#
 		# So value and hue are separate terms now. Value still means weathering — the
-		# stop luminances climb 0.72 -> 0.89 and the normal and mask are registered to
-		# that. Hue no longer rides along, because in real granite it does not:
+		# stop luminances climb 0.72 -> 0.88, monotonically, and the normal and the
+		# mask stay registered to that. Hue no longer rides along, because in real
+		# granite it does not:
 		# brightness says how weathered a patch is, hue says which mineral is showing,
 		# and biotite, hornblende, quartz and feldspar are not ordered by brightness.
 		# Concretely the warm/cool axis flips at EVERY stop (+-0.086 linear) and the
@@ -160,12 +161,17 @@ func _recipes() -> Array[Dictionary]:
 		# in order: iron-stained dark granite, damp blue-grey, pink feldspar, quartz
 		# blue-white, warm bleached, lichen grey-green, hot bleached feldspar.
 		#
-		# The value RANGE came in deliberately, 0.60-1.00 linear down to 0.69-0.89.
-		# That is the trade the brief asks for: this surface already carried sd=19.6 in
-		# the render and still read as cardboard, so a third of its monochrome swing is
-		# spent buying hue swing instead. Nothing is lost — the normal, the mask's
-		# 0.52-1.00 roughness and 0.72-1.00 AO, and the fine layer's 0.70-0.97 all
-		# still deliver value variation, and none of them can deliver colour.
+		# The value RANGE came in deliberately, 0.60-1.00 linear down to 0.69-0.89 —
+		# half the monochrome swing, spent on hue instead. That is the trade Round 3
+		# was briefed to make: this surface already carried sd=19.6 in the render and
+		# still read as cardboard, because monochrome variance is not material
+		# information. Nor is anything actually lost by it. The DELIVERED per-channel
+		# standard deviation went UP, (0.073, 0.062, 0.039) to (0.074, 0.063, 0.071),
+		# because the hue terms add variance to each channel while cancelling between
+		# them — the map varies more than it used to and correlates less. And the
+		# normal, the mask's 0.52-1.00 roughness and 0.72-1.00 AO, and the fine
+		# layer's 0.70-1.00 all still carry value variation, none of which can ever
+		# carry colour.
 		#
 		# STOP OFFSETS ARE THE FIELD'S OWN QUANTILES, not even sixths. A normalised
 		# fBm field is bell-shaped: its deciles run 0.00 .26 .33 .40 .45 .51 .56 .62
