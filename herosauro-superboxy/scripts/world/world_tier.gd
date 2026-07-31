@@ -162,6 +162,38 @@ static func is_reduced() -> bool:
 	return method == COMPATIBILITY or method == MOBILE
 
 
+## Does a world material get ToonFactory's close-range detail layer?
+##
+## OFF on the reduced tier, and this is the most expensive single thing a world
+## material does. A textured surface turns on BOTH `uv1_triplanar` and
+## `uv2_triplanar`; triplanar samples every map three times, once per axis, and
+## blends. The full set is albedo, normal, mask (read three ways) on uv1 and
+## detail albedo + detail normal on uv2 — roughly TWENTY-ONE texture fetches per
+## fragment, over the deck, the quays, every facade and every railing, which on
+## the web tier is most of the frame. Dropping the uv2 layer removes six of them
+## and a whole set of interpolated triplanar coordinates with it.
+##
+## What it gives up is the 0.28 m grain. That is the same trade FACADE_LOW_RANGE
+## and FACADE_RETURN_RANGE already make and it is the easier one: at browser
+## resolution, with the camera ten metres from a nine-metre giant, a 0.28 m tile
+## is a couple of pixels across.
+##
+## THERE IS A SECOND REASON, and it is unconfirmed, so it is written as a
+## suspicion rather than a finding. The owner reports every textured world
+## surface rendering WHITE in the browser while the heroes and Adamastor — which
+## take `Surface.FLAT`, and so skip this whole path — render correctly. A
+## StandardMaterial3D on the dual-triplanar path needs world position, normal,
+## tangent, binormal, two UV sets, two triplanar position sets, two triplanar
+## blend-weight sets and shadow coordinates, and WebGL2 only GUARANTEES fifteen
+## varying vectors. A driver at that minimum fails to link the program, and
+## Godot substitutes its default white material — which is exactly the split
+## reported. It does not reproduce on this container's SwiftShader or ANGLE/GL
+## backends, so it stays a suspicion. The change stands on the fetch count
+## alone; if it also fixes the white-out, that confirms the varying overflow.
+static func fine_detail() -> bool:
+	return not is_reduced()
+
+
 ## Do the batchers cut their bakes on this tier? False is the desktop path, and it
 ## is byte-identical to the code before chunking existed — one surface per
 ## material, exactly as before.

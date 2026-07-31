@@ -548,6 +548,20 @@ static func build(color: Color, surface: Surface = Surface.FLAT,
 		emission: Color = Color.BLACK, emission_energy: float = 0.0,
 		alpha: float = 1.0, specular: float = 0.5,
 		fine_detail: bool = true) -> StandardMaterial3D:
+	# The reduced tier does not get the close-range layer, and this is resolved
+	# HERE — above `albedo`, above the cache key — because both of them read it.
+	# Gating further down would cache a material under a key claiming detail it
+	# does not have, and the albedo pre-multiply below would keep compensating for
+	# a texture that is no longer multiplying anything, brightening every surface
+	# on the web tier by the detail map's mean. See WorldTier.fine_detail().
+	#
+	# On Forward+ WorldTier.fine_detail() returns true, so this expression is the
+	# caller's own value, the cache key is unchanged and the desktop material set
+	# is identical by construction. That is an argument from the code, not a
+	# measurement — the capture diff that would make it a measurement is running
+	# and this comment gets updated with its result either way.
+	fine_detail = fine_detail and WorldTier.fine_detail()
+
 	# Snap and clamp BEFORE the key is built, so two callers asking for 0.30 and 0.45
 	# metallic — which is most of the ironwork — collapse onto one cached material
 	# instead of two identical ones under different names.
