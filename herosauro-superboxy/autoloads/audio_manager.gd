@@ -335,6 +335,13 @@ func play_rock_impact() -> void: _play("rock_impact")
 func play_super_boxy_hit() -> void: _play("super_boxy_hit")
 
 
+## Generic entry point for the storybook streams (docs/story/ADAPTATION.md).
+## Any id may be called before its sound exists: `_play` returns silently on a
+## key it has no stream for, so a level can ship its calls ahead of the audio.
+func play_sfx(id: StringName, at: Vector3 = Vector3.INF) -> void:
+	_play(String(id), 0.0, at)
+
+
 ## Adamastor's phase-two bellow — the biggest single moment in the fight, and
 ## until now a borrowed copy of the sound his foot makes.
 ##

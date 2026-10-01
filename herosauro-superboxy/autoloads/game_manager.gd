@@ -30,6 +30,15 @@ signal timer_updated(seconds: float)
 ## Requests handled by the camera rig / engine for "game feel".
 signal camera_shake_requested(strength: float, duration: float)
 
+# --- Storybook (docs/story/ADAPTATION.md) -----------------------------------
+signal chapter_changed(chapter_id: String)
+## label is {"pt": ..., "en": ...}; done/total are whole steps (cups, houses).
+signal objective_changed(label: Dictionary, done: int, total: int)
+signal objective_progress(done: int, total: int)
+## Ask the HUD to show the StoryData beat with this id, without pausing play.
+signal story_beat(beat_id: String)
+signal settings_changed()
+
 enum State { MENU, PLAYING, PAUSED, VICTORY, DEFEAT }
 enum Difficulty { EASY, NORMAL, HARD }
 
@@ -54,6 +63,29 @@ var difficulty: int = Difficulty.NORMAL
 ## There is no AI ally: a hero that is not a seat at the machine is not spawned.
 var player_count: int = 2
 var human_hero: int = 1       # in 1P: which hero the human drives (1 or 2)
+
+# --- Storybook session and settings -----------------------------------------
+## Which book chapter the next run plays. The default stays the bridge: every
+## probe and the playtest boot straight into a run without choosing one.
+var chapter_id: String = "adamastor"
+var language: String = "pt"
+## "Ajudas". On (the default) a run cannot be lost: heroes bubble back instead
+## of going down for good, and they take less damage.
+var assists: bool = true
+var reduce_motion: bool = false
+var narration: bool = true
+## In solo, the other brother is spawned too and driven by the companion AI.
+var companion: bool = true
+var music_volume_db: float = 0.0
+var sfx_volume_db: float = 0.0
+
+const SETTINGS_PATH := "user://settings.cfg"
+const ASSIST_DAMAGE_SCALE := 0.5
+const REDUCED_SHAKE_SCALE := 0.2
+
+var _objective_label: Dictionary = {}
+var _objective_done: int = 0
+var _objective_total: int = 0
 
 var player_health := {1: MAX_PLAYER_HEALTH, 2: MAX_PLAYER_HEALTH}
 var boss_health: int = MAX_BOSS_HEALTH
@@ -82,6 +114,7 @@ var p2_combo: int:
 func _ready() -> void:
 	# Keep running (and listening for unpause input) even while the tree is paused.
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	_load_settings()
 
 
 func _process(delta: float) -> void:
@@ -102,9 +135,15 @@ func _process(delta: float) -> void:
 ## roster: main.gd spawns exactly these, start_game syncs exactly these, and the
 ## defeat test falls back to exactly these.
 func active_player_ids() -> Array[int]:
-	if player_count <= 1:
+	if player_count <= 1 and not companion:
 		return [clampi(human_hero, 1, 2)] as Array[int]
 	return [1, 2] as Array[int]
+
+
+## True for the brother nobody at the machine is driving: in solo with the
+## companion on, the hero that is not `human_hero`.
+func is_ai(player_id: int) -> bool:
+	return player_count <= 1 and companion and player_id != clampi(human_hero, 1, 2)
 
 
 ## Reset everything and begin a new fight.
@@ -118,6 +157,9 @@ func start_game() -> void:
 	combo = {1: 0, 2: 0}
 	_combo_window = {1: 0.0, 2: 0.0}
 	_last_scorer = active_player_ids()[0]
+	_objective_label = {}
+	_objective_done = 0
+	_objective_total = 0
 	change_state(State.PLAYING)
 	game_started.emit()
 	# Push an initial sync so freshly-shown HUD elements start at the right value.
@@ -181,7 +223,9 @@ func damage_player(player_id: int, amount: int) -> void:
 		return
 	player_health[player_id] = max(0, int(player_health[player_id]) - amount)
 	player_damaged.emit(player_id, amount, player_health[player_id])
-	if _all_heroes_down():
+	# With Ajudas on, a run cannot be lost: PlayerBase bubbles a downed hero back
+	# on its own, so all heroes at zero is a moment, not an ending.
+	if not assists and _all_heroes_down():
 		_end_game(false)
 
 
@@ -281,7 +325,146 @@ func hit_stop(duration: float = 0.1) -> void:
 
 
 func request_shake(strength: float, duration: float = 0.3) -> void:
+	if reduce_motion:
+		strength *= REDUCED_SHAKE_SCALE
 	camera_shake_requested.emit(strength, duration)
+
+
+# --- Storybook: chapters and objectives ---------------------------------------
+
+func set_chapter(id: String) -> void:
+	if not StoryData.CHAPTERS.has(id) and id != "sandbox":
+		push_warning("GameManager.set_chapter: unknown chapter '%s'" % id)
+		return
+	chapter_id = id
+	chapter_changed.emit(id)
+
+
+## Levels call this from begin(). Emits objective_changed so the HUD can draw it.
+func set_objective(label: Dictionary, total: int) -> void:
+	_objective_label = label
+	_objective_total = maxi(0, total)
+	_objective_done = 0
+	objective_changed.emit(_objective_label, _objective_done, _objective_total)
+
+
+func advance_objective(amount: int = 1) -> void:
+	if state != State.PLAYING or _objective_total <= 0:
+		return
+	var before := _objective_done
+	_objective_done = clampi(_objective_done + amount, 0, _objective_total)
+	if _objective_done != before:
+		objective_progress.emit(_objective_done, _objective_total)
+
+
+func objective_done() -> int:
+	return _objective_done
+
+
+func objective_total() -> int:
+	return _objective_total
+
+
+func objective_label() -> Dictionary:
+	return _objective_label
+
+
+## The public way a level wins. The bridge still wins through damage_boss.
+func complete_chapter() -> void:
+	if state != State.PLAYING:
+		return
+	_end_game(true)
+
+
+func request_story_beat(beat_id: String) -> void:
+	story_beat.emit(beat_id)
+
+
+## Multiplier PlayerBase applies to incoming damage.
+func hero_damage_scale() -> float:
+	return ASSIST_DAMAGE_SCALE if assists else 1.0
+
+
+# --- Storybook: settings ---------------------------------------------------------
+
+func set_language(lang: String) -> void:
+	language = lang if lang in StoryData.LANGS else StoryData.DEFAULT_LANG
+	_settings_touched()
+
+
+func set_assists(on: bool) -> void:
+	assists = on
+	_settings_touched()
+
+
+func set_reduce_motion(on: bool) -> void:
+	reduce_motion = on
+	_settings_touched()
+
+
+func set_narration(on: bool) -> void:
+	narration = on
+	_settings_touched()
+
+
+func set_companion(on: bool) -> void:
+	companion = on
+	_settings_touched()
+
+
+func set_music_volume(db: float) -> void:
+	music_volume_db = clampf(db, -60.0, 6.0)
+	_apply_volumes()
+	_settings_touched()
+
+
+func set_sfx_volume(db: float) -> void:
+	sfx_volume_db = clampf(db, -60.0, 6.0)
+	_apply_volumes()
+	_settings_touched()
+
+
+func _settings_touched() -> void:
+	_save_settings()
+	settings_changed.emit()
+
+
+func _apply_volumes() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am == null:
+		return
+	if am.has_method("set_music_volume_db"):
+		am.set_music_volume_db(music_volume_db)
+	if am.has_method("set_sfx_volume_db"):
+		am.set_sfx_volume_db(sfx_volume_db)
+
+
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("settings", "language", language)
+	cfg.set_value("settings", "assists", assists)
+	cfg.set_value("settings", "reduce_motion", reduce_motion)
+	cfg.set_value("settings", "narration", narration)
+	cfg.set_value("settings", "companion", companion)
+	cfg.set_value("settings", "music_volume_db", music_volume_db)
+	cfg.set_value("settings", "sfx_volume_db", sfx_volume_db)
+	cfg.save(SETTINGS_PATH)
+
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(SETTINGS_PATH) != OK:
+		return
+	language = str(cfg.get_value("settings", "language", language))
+	if not language in StoryData.LANGS:
+		language = StoryData.DEFAULT_LANG
+	assists = bool(cfg.get_value("settings", "assists", assists))
+	reduce_motion = bool(cfg.get_value("settings", "reduce_motion", reduce_motion))
+	narration = bool(cfg.get_value("settings", "narration", narration))
+	companion = bool(cfg.get_value("settings", "companion", companion))
+	music_volume_db = float(cfg.get_value("settings", "music_volume_db", music_volume_db))
+	sfx_volume_db = float(cfg.get_value("settings", "sfx_volume_db", sfx_volume_db))
+	_apply_volumes.call_deferred()
 
 
 # --- Internal --------------------------------------------------------------

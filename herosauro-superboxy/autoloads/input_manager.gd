@@ -65,9 +65,70 @@ func _action(player: int, action: StringName) -> StringName:
 ## be holding a pad (slot 2's hardware) while driving hero 1, or sitting at the
 ## keyboard (slot 1's hardware) while driving hero 2.
 func _slots_for(player: int) -> Array:
+	# The companion brother is driven only through the virtual channel below;
+	# letting him read hardware would make the child's keys steer both heroes.
+	if GameManager.is_ai(player):
+		return []
 	if GameManager.player_count <= 1:
 		return [1, 2]
 	return [player]
+
+
+# --- Virtual input (companion AI, touch overlay) ------------------------------
+#
+# A second source of input per hero that merges with the hardware slots. A
+# press lands in `_pending` and becomes visible as "just pressed" for exactly
+# one physics frame, the next one, no matter how many times that frame asks.
+# This node runs its physics step before any hero (negative priority), so the
+# promotion happens before PlayerBase reads.
+
+var _virtual_move := {1: Vector2.ZERO, 2: Vector2.ZERO}
+var _virtual_held := {1: {}, 2: {}}
+var _pending := {1: {}, 2: {}}
+var _active := {1: {}, 2: {}}
+
+
+func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	process_physics_priority = -1000
+
+
+func _physics_process(_delta: float) -> void:
+	for pid in _pending.keys():
+		_active[pid] = _pending[pid]
+		_pending[pid] = {}
+
+
+## Pad space, like get_move_vector: x = strafe right, y = forward.
+func set_virtual_move(player_id: int, v: Vector2) -> void:
+	if _virtual_move.has(player_id):
+		_virtual_move[player_id] = v.limit_length(1.0)
+
+
+## &"jump" | &"attack" | &"ability" (any action name works). Reads as
+## just-pressed on the next physics frame only.
+func press_virtual(player_id: int, action: StringName) -> void:
+	if _pending.has(player_id):
+		_pending[player_id][action] = true
+
+
+func set_virtual_held(player_id: int, action: StringName, held: bool) -> void:
+	if not _virtual_held.has(player_id):
+		return
+	if held:
+		_virtual_held[player_id][action] = true
+	else:
+		_virtual_held[player_id].erase(action)
+
+
+## Drop every virtual input, e.g. when a run ends or the overlay hides.
+func clear_virtual(player_id: int = 0) -> void:
+	for pid in _virtual_move.keys():
+		if player_id == 0 or pid == player_id:
+			_virtual_move[pid] = Vector2.ZERO
+			_virtual_held[pid] = {}
+			_pending[pid] = {}
+			_active[pid] = {}
 
 
 ## The slot a lone human occupies. Callers that genuinely need a single "the
@@ -85,7 +146,7 @@ func solo_slot() -> int:
 ## When two sets are merged (solo) the axes are summed before the deadzone, so a
 ## stick at half deflection is not cancelled by an idle keyboard.
 func get_move_vector(player: int) -> Vector2:
-	var v := Vector2.ZERO
+	var v: Vector2 = _virtual_move.get(player, Vector2.ZERO)
 	for slot in _slots_for(player):
 		v += Vector2(
 			Input.get_axis(_action(slot, &"move_left"), _action(slot, &"move_right")),
@@ -131,6 +192,8 @@ func is_sprinting(player: int) -> bool:
 
 
 func _just_pressed(player: int, action: StringName) -> bool:
+	if _active.has(player) and _active[player].has(action):
+		return true
 	for slot in _slots_for(player):
 		if Input.is_action_just_pressed(_action(slot, action)):
 			return true
@@ -138,6 +201,8 @@ func _just_pressed(player: int, action: StringName) -> bool:
 
 
 func _held(player: int, action: StringName) -> bool:
+	if _virtual_held.has(player) and _virtual_held[player].has(action):
+		return true
 	for slot in _slots_for(player):
 		if Input.is_action_pressed(_action(slot, action)):
 			return true
