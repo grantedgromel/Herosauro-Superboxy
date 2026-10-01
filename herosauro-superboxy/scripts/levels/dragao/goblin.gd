@@ -841,17 +841,23 @@ static func _mesh_head(p_skin: int) -> Mesh:
 			b.sphere(Vector3(sx * 0.1, 0.23, 0.275), Vector3(0.056, 0.064, 0.03), Color(0.1, 0.07, 0.14), Basis(), 12, 8)
 			b.sphere(Vector3(sx * 0.082, 0.26, 0.3), Vector3.ONE * 0.019, WHITE, Basis(), 6, 4)
 			b.sphere(Vector3(sx * 0.17, 0.1, 0.19), Vector3(0.06, 0.04, 0.03), PINK, Basis(), 10, 6)
-			b.box(Vector3(0.12, 0.028, 0.03), Transform3D(Basis(Vector3.BACK, sx * 0.38), Vector3(sx * 0.115, 0.36, 0.235)),
-				sk.darkened(0.45))
+			# Cheeky brows: one cocked up, one down.
+			var brow_y := 0.385 if sx < 0.0 else 0.355
+			b.box(Vector3(0.12, 0.028, 0.03), Transform3D(Basis(Vector3.BACK, sx * (0.12 if sx < 0.0 else 0.4)),
+				Vector3(sx * 0.115, brow_y, 0.232)), sk.darkened(0.45))
 		b.sphere(Vector3(0, 0.15, 0.27), Vector3(0.05, 0.048, 0.1), sk.darkened(0.1),
 			Basis(Vector3.RIGHT, 0.35), 12, 8)
-		# The cheeky grin: a dark smile curving up at the ends, no teeth.
-		for k in 7:
-			var t := -1.0 + 2.0 * float(k) / 6.0
-			var gx := t * 0.11
-			var gy := 0.035 + 0.04 * t * t
-			var gz := 0.235 - 0.04 * t * t
-			b.sphere(Vector3(gx, gy, gz), Vector3(0.026, 0.017, 0.016), Color(0.35, 0.06, 0.1), Basis(), 6, 4)
+		# The cheeky grin: one dark curve, wide and lopsided, curling up at the
+		# ends, with a pink tongue tip peeking out. No teeth, no fangs.
+		var grin := PackedVector3Array()
+		for k in 13:
+			var t := -1.0 + 2.0 * float(k) / 12.0
+			var gx := t * 0.13
+			var gy := 0.03 + 0.05 * t * t + 0.012 * t
+			var inside := 1.0 - pow(gx / 0.2, 2.0) - pow((gy - 0.06) / 0.12, 2.0)
+			grin.append(Vector3(gx, gy, 0.085 + 0.17 * sqrt(maxf(inside, 0.0))))
+		b.tube(grin, 0.02, Color(0.32, 0.05, 0.1), Color(0.32, 0.05, 0.1), 6)
+		b.sphere(Vector3(0.03, 0.02, 0.235), Vector3(0.035, 0.022, 0.02), Color(1.0, 0.45, 0.55), Basis(), 8, 5)
 		# A tuft of hair.
 		for k in 3:
 			var a := -0.35 + 0.35 * float(k)

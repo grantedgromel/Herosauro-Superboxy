@@ -27,7 +27,7 @@ func _ready() -> void:
 
 func reset() -> void:
 	sooty = false
-	_body.material_override = M.skin()
+	_body.material_override = M.gloss()
 	_smoke.emitting = false
 	_rock = 0.0
 	_body.rotation = Vector3.ZERO
@@ -67,27 +67,38 @@ func _build() -> void:
 	var glass := Color(0.16, 0.22, 0.34)
 	var dark := Color(0.12, 0.12, 0.14)
 	var b := VC.new()
-	# Body: a tall box van with a rounded-feeling cab (stacked boxes).
-	b.box(Vector3(wid, hgt - 0.5, len * 0.72), Transform3D(Basis(), Vector3(0, 0.45 + (hgt - 0.5) * 0.5, -len * 0.14)), white)
-	b.box(Vector3(wid, 1.15, len * 0.3), Transform3D(Basis(), Vector3(0, 0.45 + 0.575, len * 0.35)), white)
-	b.box(Vector3(wid - 0.04, 0.8, len * 0.22), Transform3D(Basis(Vector3.RIGHT, -0.5), Vector3(0, 1.65, len * 0.24)), white)
-	# Windscreen and side windows.
-	b.box(Vector3(wid - 0.2, 0.62, 0.06), Transform3D(Basis(Vector3.RIGHT, -0.5), Vector3(0, 1.68, len * 0.33)), glass)
+	var paint := Color(0.86, 0.88, 0.92)
+	# Lower body the whole length, a taller cargo box behind the cab.
+	b.box(Vector3(wid, 1.25, len), Transform3D(Basis(), Vector3(0, 0.45 + 0.625, 0)), paint)
+	b.box(Vector3(wid, 0.95, len * 0.74), Transform3D(Basis(), Vector3(0, 1.7 + 0.475, -len * 0.13)), paint)
+	# A slanted bonnet-to-roof wedge with the windscreen in it.
+	var front_z := len * 0.24
+	var wedge := Basis(Vector3.RIGHT, -0.62)
+	var wedge_c := Vector3(0, 1.98, front_z + 0.05)
+	b.box(Vector3(wid - 0.02, 0.95, 0.9), Transform3D(wedge, wedge_c), paint)
+	b.box(Vector3(wid - 0.26, 0.78, 0.04), Transform3D(wedge, wedge_c + wedge * Vector3(0, 0.02, 0.46)), glass)
+	# Blue roof rack bar and a little orange beacon (cheeky, not a siren).
+	b.box(Vector3(wid - 0.3, 0.08, len * 0.6), Transform3D(Basis(), Vector3(0, 2.7, -len * 0.15)), Color(0.2, 0.25, 0.35))
 	for sx in [-1.0, 1.0]:
-		b.box(Vector3(0.05, 0.5, 0.75), Transform3D(Basis(), Vector3(sx * (wid * 0.5 + 0.01), 1.55, len * 0.2)), glass)
-		# A cheeky blue-and-red stripe down each side (no lettering).
-		b.box(Vector3(0.04, 0.22, len * 0.66), Transform3D(Basis(), Vector3(sx * (wid * 0.5 + 0.015), 1.05, -len * 0.14)),
-			Color(0.1, 0.35, 0.85))
-		b.box(Vector3(0.04, 0.1, len * 0.66), Transform3D(Basis(), Vector3(sx * (wid * 0.5 + 0.015), 0.88, -len * 0.14)),
-			Color(0.88, 0.15, 0.15))
-		# Headlights and tail lights.
-		b.box(Vector3(0.36, 0.2, 0.05), Transform3D(Basis(), Vector3(sx * 0.7, 0.8, len * 0.5 + 0.01)), Color(1.0, 0.95, 0.7))
-		b.box(Vector3(0.18, 0.3, 0.05), Transform3D(Basis(), Vector3(sx * 0.95, 1.0, -len * 0.5 - 0.01)), Color(0.9, 0.1, 0.1))
-	# Back doors, slightly ajar, and the bumpers.
-	b.box(Vector3(0.04, hgt - 0.7, 0.04), Transform3D(Basis(), Vector3(0, 1.3, -len * 0.5 - 0.02)), Color(0.7, 0.72, 0.75))
-	b.box(Vector3(wid + 0.06, 0.2, 0.2), Transform3D(Basis(), Vector3(0, 0.45, len * 0.5)), dark)
-	b.box(Vector3(wid + 0.06, 0.2, 0.2), Transform3D(Basis(), Vector3(0, 0.45, -len * 0.5)), dark)
-	_body = b.commit(M.skin(), "VanBody", true)
+		var side_x: float = sx * (wid * 0.5 + 0.012)
+		b.box(Vector3(0.04, 0.55, 0.85), Transform3D(Basis(), Vector3(side_x, 2.1, len * 0.12)), glass)
+		b.box(Vector3(0.04, 0.5, 0.6), Transform3D(Basis(), Vector3(side_x, 1.35, len * 0.36)), glass)
+		# A blue and a red stripe down each side (no lettering).
+		b.box(Vector3(0.04, 0.2, len * 0.9), Transform3D(Basis(), Vector3(side_x, 1.15, 0)), Color(0.1, 0.35, 0.85))
+		b.box(Vector3(0.04, 0.09, len * 0.9), Transform3D(Basis(), Vector3(side_x, 0.98, 0)), Color(0.88, 0.15, 0.15))
+		# Wheel arches.
+		for sz in [-1.0, 1.0]:
+			b.box(Vector3(0.05, 0.62, 1.05), Transform3D(Basis(), Vector3(side_x, 0.62, sz * len * 0.32)), dark)
+		# Headlights, tail lights, back windows.
+		b.box(Vector3(0.42, 0.24, 0.05), Transform3D(Basis(), Vector3(sx * 0.7, 0.95, len * 0.5 + 0.01)), Color(1.0, 0.95, 0.7))
+		b.box(Vector3(0.22, 0.34, 0.05), Transform3D(Basis(), Vector3(sx * 0.92, 1.2, -len * 0.5 - 0.01)), Color(0.9, 0.12, 0.1))
+		b.box(Vector3(0.75, 0.55, 0.05), Transform3D(Basis(), Vector3(sx * 0.45, 2.15, -len * 0.5 - 0.01)), glass)
+	# Grille, door seam, bumpers.
+	b.box(Vector3(0.9, 0.3, 0.05), Transform3D(Basis(), Vector3(0, 0.95, len * 0.5 + 0.01)), dark)
+	b.box(Vector3(0.04, 2.0, 0.05), Transform3D(Basis(), Vector3(0, 1.6, -len * 0.5 - 0.02)), Color(0.55, 0.57, 0.6))
+	b.box(Vector3(wid + 0.06, 0.22, 0.22), Transform3D(Basis(), Vector3(0, 0.5, len * 0.5)), dark)
+	b.box(Vector3(wid + 0.06, 0.22, 0.22), Transform3D(Basis(), Vector3(0, 0.5, -len * 0.5)), dark)
+	_body = b.commit(M.gloss(), "VanBody", true)
 	add_child(_body)
 
 	var wb := VC.new()
@@ -123,9 +134,8 @@ func _build() -> void:
 	grow.add_point(Vector2(1, 2.6))
 	_smoke.scale_amount_curve = grow
 	var ramp := Gradient.new()
-	ramp.set_color(0, Color(0.35, 0.34, 0.36, 0.0))
-	ramp.add_point(0.15, Color(0.4, 0.4, 0.42, 0.75))
-	ramp.set_color(ramp.get_point_count() - 1, Color(0.6, 0.6, 0.65, 0.0))
+	ramp.offsets = PackedFloat32Array([0.0, 0.15, 1.0])
+	ramp.colors = PackedColorArray([Color(0.35, 0.34, 0.36, 0.0), Color(0.42, 0.42, 0.45, 0.7), Color(0.62, 0.62, 0.68, 0.0)])
 	_smoke.color_ramp = ramp
 	_smoke.use_fixed_seed = true
 	_smoke.seed = 0x5300

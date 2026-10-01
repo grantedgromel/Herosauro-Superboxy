@@ -13,8 +13,8 @@ const M := preload("res://scripts/levels/dragao/dragao_mats.gd")
 
 const IN_TIME := 1.1
 const OUT_TIME := 2.4
-const ENERGY := Color(0.45, 1.0, 0.5)
-const ENERGY_DEEP := Color(0.12, 0.75, 0.3)
+const ENERGY := Color(0.36, 0.95, 0.42)
+const ENERGY_DEEP := Color(0.08, 0.62, 0.24)
 
 static var _body_mesh: Mesh
 static var _wing_mesh: Mesh
@@ -172,8 +172,8 @@ func _build() -> void:
 	var halo := MeshInstance3D.new()
 	halo.name = "Aura"
 	var q := QuadMesh.new()
-	q.size = Vector2(5.5, 5.5)
+	q.size = Vector2(3.6, 3.6)
 	halo.mesh = q
-	halo.material_override = M.halo(Color(0.35, 1.0, 0.45, 0.45))
+	halo.material_override = M.halo(Color(0.35, 1.0, 0.45, 0.22))
 	halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_visual.add_child(halo)

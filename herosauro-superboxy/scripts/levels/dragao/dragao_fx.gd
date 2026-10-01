@@ -27,10 +27,11 @@ var _hidden := Transform3D(Basis().scaled(Vector3.ZERO), Vector3(0, -50, 0))
 func _ready() -> void:
 	var quad := QuadMesh.new()
 	quad.size = Vector2(0.42, 0.42)
+	# Offsets and colours set as whole arrays: add_point() on a default
+	# Gradient leaves its stock black/white end points in play.
 	var ramp := Gradient.new()
-	ramp.set_color(0, Color(1, 1, 1, 1))
-	ramp.add_point(0.35, Color(1.0, 0.92, 0.45, 1))
-	ramp.set_color(ramp.get_point_count() - 1, Color(1.0, 0.6, 0.2, 0))
+	ramp.offsets = PackedFloat32Array([0.0, 0.35, 1.0])
+	ramp.colors = PackedColorArray([Color(1, 1, 1, 1), Color(1.0, 0.92, 0.45, 1), Color(1.0, 0.6, 0.2, 0)])
 	var shrink := Curve.new()
 	shrink.add_point(Vector2(0, 1))
 	shrink.add_point(Vector2(1, 0.15))

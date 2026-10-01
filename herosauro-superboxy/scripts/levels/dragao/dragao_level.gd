@@ -62,8 +62,10 @@ var balls: Array[Football] = []
 var cups: Array[Cup] = []
 var pteros: Array[Ptero] = []
 var stage: int = Stage.ROPES
-## Read by the probe: how many goblins a football has bowled over this run.
+## Read by the probe: goblins a football has bowled over, and goblins the
+## pterodactyls have carried off, this run.
 var ball_knockdowns: int = 0
+var goblins_carried: int = 0
 
 var _heroes: Array[Node3D] = []
 var _tokens: int = POKE_TOKENS
@@ -136,6 +138,7 @@ func _ready() -> void:
 		g.name = "Goblin%d" % i
 		g.setup(self, i % 2, 1000 + i * 7919)
 		add_child(g)
+		g.gone.connect(func(_g: Node3D) -> void: goblins_carried += 1)
 		goblins.append(g)
 
 	for i in PTERO_POOL:
@@ -191,6 +194,7 @@ func begin() -> void:
 		_heroes.append(h as Node3D)
 	stage = Stage.ROPES
 	ball_knockdowns = 0
+	goblins_carried = 0
 	_tokens = POKE_TOKENS
 	_giggle_cd = 0.0
 	_stage2_in = -1.0
@@ -276,6 +280,16 @@ func nearest_carrier(p: Vector3) -> Goblin:
 			best_d = d
 			best = g
 	return best
+
+
+## Flat forward of whatever camera is drawing (the co-op rig in play).
+func view_forward() -> Vector3:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return Vector3.FORWARD
+	var f := -cam.global_basis.z
+	f.y = 0.0
+	return f.normalized() if f.length() > 0.01 else Vector3.FORWARD
 
 
 func dragon_position() -> Vector3:

@@ -161,6 +161,18 @@ func _stage_ropes(level) -> void:
 	var hero := _hero(1)
 	var robot := _hero(2)
 	var robot_start := robot.global_position
+	# One goblin first: two jabs, dizzy, and a pterodactyl carries it away.
+	var gob = level.goblins[0]
+	await _jab_goblin(level, hero, gob)
+	await _settle(int(0.9 * TICK))
+	await _jab_goblin(level, hero, gob)
+	var w := 0
+	while level.goblins_carried == 0 and w < int(8.0 * TICK):
+		await _step()
+		w += 1
+	_ok(gob.hits >= 2 and level.goblins_carried >= 1,
+		"a goblin bowled over twice is carried off by a pterodactyl (%.1f s, hits %d)" % [float(w) / TICK, gob.hits])
+	_ok(not gob.is_active() and not gob.is_hittable(), "...and it has left the pitch and the 'targets' group")
 	var snapped := 0
 	for stake in level.stakes:
 		if stake.is_done():

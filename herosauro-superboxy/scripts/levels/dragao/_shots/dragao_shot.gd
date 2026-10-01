@@ -46,12 +46,25 @@ func _ready() -> void:
 	GameManager.start_game()
 	await _wait(10)
 	var level := LevelBase.current(get_tree())
-	if _stage >= 2 and level != null:
+	if _stage == 4 and level != null:
+		# Two goblins bowled over twice: dizzy, then the pterodactyls come.
+		var n := 0
+		for g in level.goblins:
+			if g.is_active() and n < 2:
+				g.take_hit(10.0, Vector3.RIGHT)
+				n += 1
+		await _wait(60)
+		n = 0
+		for g in level.goblins:
+			if g.is_active() and g.hits == 1 and n < 2:
+				g.take_hit(10.0, Vector3.LEFT)
+				n += 1
+	if _stage >= 2 and _stage < 4 and level != null:
 		for s in level.stakes:
 			for k in 3:
 				s.take_hit(10.0, Vector3.RIGHT)
 		await _wait(int(6.5 * 90))
-	if _stage >= 3 and level != null:
+	if _stage == 3 and level != null:
 		for c in level.cups:
 			var g = level.carrier_of(c)
 			if g != null:
@@ -63,6 +76,13 @@ func _ready() -> void:
 				GameManager.advance_objective(1)
 		await _wait(200)
 	await _wait(_frames)
+	if level != null:
+		for g in level.goblins:
+			if g.is_active() and g.hits >= 2:
+				print("[dragao shot] goblin %s state %d at %s" % [g.name, g.state, str(g.global_position)])
+		for p in level.pteros:
+			if p.busy:
+				print("[dragao shot] ptero at %s" % str(p.global_position))
 	print("[dragao shot] frames done, objective %d/%d" % [GameManager.objective_done(), GameManager.objective_total()])
 	if DisplayServer.get_name() == "headless":
 		get_tree().quit()

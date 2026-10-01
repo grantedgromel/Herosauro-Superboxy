@@ -44,7 +44,7 @@ const VAN_POS := Vector3(27.6, 0.0, -17.6)
 const VAN_YAW := 2.356
 const VAN_LEN := 5.2
 const VAN_WID := 2.3
-const VAN_HGT := 2.5
+const VAN_HGT := 2.7
 
 ## The tied dragon lies in the centre circle; the stakes ring him.
 const DRAGON_POS := Vector3(0.0, 0.0, 0.0)

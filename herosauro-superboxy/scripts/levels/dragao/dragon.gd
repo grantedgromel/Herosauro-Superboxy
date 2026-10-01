@@ -56,6 +56,7 @@ var _fire_target := Vector3.ZERO
 var _fire_spot := Vector3.ZERO
 var _fired: bool = false
 var _look := 0.0
+var _side := 1.0
 var _blob: int = -1
 var _blockers: Array = [[Vector3.ZERO, 1.6], [Vector3.ZERO, 1.6], [Vector3.ZERO, 1.0]]
 
@@ -118,7 +119,7 @@ func free_dragon() -> void:
 func breathe_fire_at(target: Vector3) -> void:
 	_fire_target = target
 	var from_van := Vector3(-target.x, 0, -target.z).normalized()
-	_fire_spot = L.clamp_to_pitch(target + from_van * 8.0, 2.5)
+	_fire_spot = L.clamp_to_pitch(target + from_van * 6.5, 2.5)
 	state = S.TO_VAN
 	_t = 0.0
 
@@ -212,8 +213,8 @@ func _physics_process(delta: float) -> void:
 				_help_cd = HELP_COOLDOWN
 				_no_help_for = 0.0
 		S.TO_VAN:
-			want_speed = _walk_to(_fire_spot, delta, 4.5)
-			if _flat(_fire_spot - position).length() < 0.6 or _t > 9.0:
+			want_speed = _walk_to(_fire_spot, delta, 6.5)
+			if _flat(_fire_spot - position).length() < 1.7 or _t > 6.0:
 				state = S.FIRE
 				_t = 0.0
 		S.FIRE:
@@ -251,15 +252,19 @@ func _pick_follow_goal(hero: Node3D) -> void:
 	if hero == null:
 		_goal = position
 		return
-	# Stand off to one side of the heroes, between them and the middle, so the
-	# dragon is in the shot and never in the way.
+	# Stand beside the heroes as the camera sees them, a little ahead: in the
+	# shot, never between the camera and the children. Keep the same side
+	# unless it runs out of pitch.
 	var h := hero.global_position
-	var to_centre := _flat(-h)
-	if to_centre.length() < 1.0:
-		to_centre = Vector3.FORWARD
-	var side := Vector3(-to_centre.z, 0, to_centre.x).normalized()
-	var g := h + to_centre.normalized() * 5.5 + side * 2.5
-	_goal = L.clamp_to_pitch(g, 3.0)
+	var f: Vector3 = level.view_forward() if level != null else Vector3.FORWARD
+	var right := Vector3(-f.z, 0, f.x)
+	var g := h + right * _side * 6.0 + f * 3.0
+	var c := L.clamp_to_pitch(g, 3.0)
+	if _flat(c - g).length() > 1.5:
+		_side = -_side
+		g = h + right * _side * 6.0 + f * 3.0
+		c = L.clamp_to_pitch(g, 3.0)
+	_goal = c
 
 
 func _walk_to(p: Vector3, delta: float, speed: float = WALK_SPEED) -> float:
@@ -470,7 +475,7 @@ func _build() -> void:
 	_fire.name = "Fire"
 	_fire.emitting = false
 	_fire.amount = 70
-	_fire.lifetime = 0.9
+	_fire.lifetime = 0.8
 	_fire.local_coords = false
 	var q := QuadMesh.new()
 	q.size = Vector2(1.0, 1.0)
@@ -479,10 +484,10 @@ func _build() -> void:
 	_fire.direction = Vector3(0, 0.08, 1)
 	_fire.spread = 11.0
 	_fire.gravity = Vector3(0, 2.5, 0)
-	_fire.initial_velocity_min = 11.0
-	_fire.initial_velocity_max = 15.0
-	_fire.damping_min = 3.0
-	_fire.damping_max = 5.0
+	_fire.initial_velocity_min = 12.0
+	_fire.initial_velocity_max = 15.5
+	_fire.damping_min = 2.0
+	_fire.damping_max = 3.0
 	_fire.scale_amount_min = 0.7
 	_fire.scale_amount_max = 1.3
 	var grow := Curve.new()
@@ -491,10 +496,9 @@ func _build() -> void:
 	grow.add_point(Vector2(1, 2.8))
 	_fire.scale_amount_curve = grow
 	var ramp := Gradient.new()
-	ramp.set_color(0, Color(1.0, 1.0, 0.75, 1.0))
-	ramp.add_point(0.25, Color(1.0, 0.75, 0.15, 1.0))
-	ramp.add_point(0.6, Color(1.0, 0.35, 0.1, 0.85))
-	ramp.set_color(ramp.get_point_count() - 1, Color(0.35, 0.3, 0.32, 0.0))
+	ramp.offsets = PackedFloat32Array([0.0, 0.25, 0.6, 1.0])
+	ramp.colors = PackedColorArray([Color(1.0, 1.0, 0.75, 1.0), Color(1.0, 0.75, 0.15, 1.0),
+		Color(1.0, 0.35, 0.1, 0.85), Color(0.35, 0.3, 0.32, 0.0)])
 	_fire.color_ramp = ramp
 	_fire.use_fixed_seed = true
 	_fire.seed = 0xF1AE
