@@ -318,6 +318,22 @@ func _check_portraits() -> void:
 		var aspect := float(tall.get_width()) / float(tall.get_height())
 		_ok(aspect > 0.25, "%s figure is one pose, not a stacked sheet (aspect %.2f)"
 			% [who, aspect])
+		# A hero figure must be a whole figure. The old 900 px cut-outs were
+		# hard-cropped through Herosauro's arm and Super Boxy's glove, which
+		# shows as opaque paint running into the left or right edge of the
+		# texture: a straight vertical cut down the hero card. A clean cut-out
+		# has a transparent margin all round.
+		if actor != UIStyle.Actor.ADAMASTOR:
+			var fimg := tall.get_image()
+			if fimg.is_compressed():
+				fimg.decompress()
+			var edge_hits := 0
+			for x in [0, 1, fimg.get_width() - 2, fimg.get_width() - 1]:
+				for y in range(0, fimg.get_height(), 2):
+					if fimg.get_pixel(x, y).a > 0.5:
+						edge_hits += 1
+			_ok(edge_hits == 0, "%s figure is not cropped at its sides (%d opaque edge px)"
+				% [who, edge_hits])
 
 
 # --- Widgets ------------------------------------------------------------------
