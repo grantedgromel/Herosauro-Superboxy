@@ -78,6 +78,9 @@ var actor: int = UIStyle.Actor.HEROSAURO
 var accent: Color = UIStyle.HERO_GREEN
 ## True for player two: the whole layout is mirrored about the panel's centre.
 var mirrored: bool = false
+## True for the AI-driven companion brother (GameManager.is_ai).
+var is_ai: bool = false
+var ai_badge: Control
 
 var _plate: Panel
 var _face: PortraitFrame
@@ -155,6 +158,16 @@ func setup(id: int, right_hand: bool) -> void:
 	_tag = UIStyle.pill("P%d" % player_id, accent, UIStyle.BASE, UIStyle.Scale.MICRO)
 	_place(_tag, Vector2(text_x, 12.0), Vector2(34.0, 22.0))
 
+	# The brother nobody is holding a controller for: in solo with the
+	# companion on, he is the AI helper, and his panel wears a robot with a
+	# heart on the corner of his portrait instead of a player number.
+	is_ai = GameManager.is_ai(id)
+	if is_ai:
+		_tag.visible = false
+		ai_badge = _AIBadge.new()
+		ai_badge.name = "AIBadge"
+		_place(ai_badge, Vector2(PAD + AVATAR - 30.0, PANEL.y - 54.0), Vector2(50.0, 50.0))
+
 	_name = UIStyle.text(UIStyle.actor_name(actor), UIStyle.Scale.SUBHEAD,
 		UIStyle.TEXT_PRIMARY, _lead_align())
 	_place(_name, Vector2(text_x + 42.0, 9.0), Vector2(text_w - 42.0, 28.0))
@@ -180,7 +193,7 @@ func setup(id: int, right_hand: bool) -> void:
 	_place(_dial, Vector2(dial_x, 10.0), Vector2(DIAL, DIAL))
 	_dial.setup("E", accent)
 
-	_dial_cap = UIStyle.text("SPECIAL", UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
+	_dial_cap = UIStyle.text(Loc.t("special"), UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
 		HORIZONTAL_ALIGNMENT_CENTER)
 	_place(_dial_cap, Vector2(dial_x - 14.0, 76.0), Vector2(DIAL + 28.0, 16.0))
 
@@ -195,6 +208,12 @@ func setup(id: int, right_hand: bool) -> void:
 	_place(_down_veil, Vector2(3.0, 3.0), Vector2(PANEL.x - 6.0, PANEL.y - 6.0))
 
 	set_process(false)
+
+
+## Language switch mid-run.
+func refresh_text() -> void:
+	if _dial_cap != null:
+		_dial_cap.text = Loc.t("special")
 
 
 ## The combo cluster, hanging off the top of the plate's inboard edge.
@@ -497,3 +516,23 @@ func _process(delta: float) -> void:
 	# so both hold the panel awake alongside the hit glow and the i-frame blink.
 	if _hit <= 0.0 and _status_kind != 1 and _combo_value < COMBO_MIN and _combo_shake <= 0.0:
 		set_process(false)
+
+
+## A round chip with a robot and a little heart: "the computer is playing this
+## brother, and he is on your side".
+class _AIBadge extends Control:
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	func _ready() -> void:
+		var robot := KidIcon.make(KidIcon.Kind.ROBOT, 34.0, Color("bfe3ff"), Color("f2564a"))
+		robot.position = Vector2(6, 6)
+		add_child(robot)
+		var heart := KidIcon.make(KidIcon.Kind.HEART, 22.0, Color("f2564a"))
+		heart.position = Vector2(30, 28)
+		add_child(heart)
+
+	func _draw() -> void:
+		var c := size * 0.5
+		draw_circle(c, c.x, Color(0.016, 0.043, 0.078, 0.96))
+		draw_circle(c, c.x - 3.0, Color("fff6e4"))

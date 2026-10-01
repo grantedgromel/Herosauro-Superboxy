@@ -1,68 +1,55 @@
 extends Control
-## In-game HUD, for two heroes.
+## In-game HUD, for two heroes, kid-first.
 ##
-## Layout is a deliberate grid rather than a scatter of anchored labels:
+##   +------------------------------------------------------------------+
+##   | (II)       +-- ADAMASTOR ------------+        +- * the goal -----+|
+##   |            |# [===== boss bar =====] |        |  * * o o    2/4  ||
+##   |            +-------------------------+        +------------------+|
+##   |            +- (face) a line from the book... -+                   |
+##   |            +----------------------------------+                   |
+##   |                     x5                        x3                  |
+##   |  +-------------------+                    +-------------------+   |
+##   |  |# HEROSAURO    (o) |                    | (o)  SUPER BOXY R#|   |
+##   |  |  [==== 84/100 ===]|                    |[=== 100/100 ====] |   |
+##   |  +-------------------+                    +-------------------+   |
+##   +------------------------------------------------------------------+
 ##
-##   ┌──────────────────────────────────────────────────────────────────┐
-##   │            ┌── ADAMASTOR ──────────────┐         ┌──────────────┐│
-##   │            │▣ [====== boss bar ======] │         │ SCORE  1,240 ││
-##   │            │  THE GIANT…    PHASE 1 ◆◇ │         │ TIME    2:31 ││
-##   │            └───────────────────────────┘         └──────────────┘│
-##   │                                                                  │
-##   │                     ×5                        ×3                 │
-##   │              HIT COMBO ▬▬▬▬              ▬▬▬▬ HIT COMBO          │
-##   │  ┌───────────────────┐                    ┌───────────────────┐  │
-##   │  │▣ P1 HEROSAURO  (◔)│                    │(◔)  SUPER BOXY P2▣│  │
-##   │  │  [==== 84/100 ===]│                    │[=== 100/100 ====] │  │
-##   │  └───────────────────┘                    └───────────────────┘  │
-##   └──────────────────────────────────────────────────────────────────┘
+## Boss top-centre, and only while a "boss" node exists: the stadium and the
+## street have no giant. The chapter's goal top-right (ObjectiveWidget, fed by
+## objective_changed / objective_progress), story beats as toasts under the
+## banner (StoryToast), a big pause button top-left. No score and no clock:
+## for four-year-olds those are noise, and the goal's stars are the number.
 ##
-## Three clusters, three jobs. Boss top-centre because it is the thing you are
-## fighting and your eyes are already there. THE HEROES ARE MIRROR IMAGES IN THE
-## TWO BOTTOM CORNERS — same size, same content, same weight — because this is
-## co-op and a HUD that stacks a big player one over a small player two tells the
-## second player whose game they are in. Each hero's combo hangs off the inboard
-## edge of their own plate; see hero_panel.gd for why it is not one shared splash
-## in the middle. Score and timer top-right, small, because they are a post-match
-## concern.
-##
-## Nothing here dims the world. Every cluster is an opaque keylined plate, which
-## is what makes the chrome readable over a bright, saturated, high-contrast
-## daylight Porto without throwing away the thing that makes it worth looking at.
-## The old full-width top and bottom scrims are gone with the golden hour that
-## motivated them.
+## THE HEROES ARE MIRROR IMAGES IN THE TWO BOTTOM CORNERS: same size, same
+## content, same weight. In solo with the companion on, both panels still show
+## and the AI brother's carries a robot-and-heart badge (HeroPanel).
 ##
 ## CROSS-STREAM INTERFACE. Everything visible here comes from GameManager's
-## signals — `player_damaged(player_id, …)`, `player_respawned`, `boss_damaged`,
-## `score_changed`, `combo_changed(player_id, …)`, `timer_updated`,
-## `boss_phase_changed` — from `active_player_ids()` for the roster, and from
-## `InputManager.action_name()` for the control hints. Plus two group lookups
-## (`players`, `boss`) for the things that are positions and fractions rather
-## than events. No player or boss script is touched.
+## signals, from `active_player_ids()` / `is_ai()` for the roster, from
+## StoryData for beat text, and from the `players` / `boss` groups for the
+## things that are positions and fractions rather than events.
 ##
-## THE ROSTER IS NOT A RANGE. `active_player_ids()` is the single authority, and
-## a solo run driven as hero 2 returns `[2]` — iterating `range(1, count + 1)`
-## builds a panel for a hero who will never spawn and leaves the real one
-## unlabelled. The panels are therefore built on `game_started`, not in `_ready`,
-## because the roster is chosen in the menu after this scene already exists.
+## THE ROSTER IS NOT A RANGE. `active_player_ids()` is the single authority;
+## the panels are built on `game_started`, not in `_ready`, because the roster
+## is chosen in the menu after this scene already exists.
 
 const BOSS_ACTOR := UIStyle.Actor.ADAMASTOR
 
 # --- Grid ---------------------------------------------------------------------
 const M := UIStyle.SCREEN_MARGIN          # screen gutter
-const BOSS_PLATE := Vector2(640.0, 108.0)
+const BOSS_PLATE := Vector2(600.0, 108.0)
 const BOSS_BAR_H := 30.0
 const BOSS_AVATAR := 68.0
-const READOUT_PLATE := Vector2(226.0, 108.0)
+const PAUSE_BUTTON := 88.0
+## Seconds into a run before the chapter's "start" story beat shows.
+const START_BEAT_DELAY := 5.0
+## Boss health fraction under which the "low" beat shows.
+const LOW_BEAT_RATIO := 0.20
 
 ## Fraction of hero health below which the screen edge starts glowing. Read from
 ## the WORST-off living hero, not from player one: in co-op the danger signal
 ## belongs to whoever is about to go down.
 const DANGER_RATIO := 0.30
-## Score rolls up to its new value instead of snapping; this is the rate.
-const SCORE_LAMBDA := 9.0
-## Seconds the score readout stays lit gold after it moves.
-const SCORE_GLOW := 0.45
 
 ## Fixed seed for the damage-number scatter. Explicit because the capture gate
 ## compares frames pixel for pixel and `randf_range()` would put every floating
@@ -78,7 +65,8 @@ var _heroes: Dictionary = {}
 ## would otherwise be appended last, i.e. above every overlay.
 var _hero_layer: Control
 
-# Boss banner
+# Boss banner, all under one layer so it can disappear when there is no boss.
+var _boss_layer: Control
 var _boss_plate: Panel
 var _boss_face: PortraitFrame
 var _boss_name: Label
@@ -88,10 +76,18 @@ var _boss_hp: Label
 var _phase_label: Label
 var _phase_pips: Array[Panel] = []
 
-# Readouts
-var _readout_plate: Panel
-var _score_value: Label
-var _timer_value: Label
+# Storybook
+var _objective: ObjectiveWidget
+var _toast: StoryToast
+var _pause_btn: Button
+var _settings: SettingsPanel
+var _resume_btn: Button
+var _settings_btn: Button
+var _book_btn: Button
+var _pause_title: Label
+var _run_clock := 0.0
+var _beats_shown: Dictionary = {}
+var _objective_seen := false
 
 # Effects + overlays
 var _fx: HitVignette
@@ -101,10 +97,8 @@ var _pause: Control
 ## because the two heroes are driven by two different sets of hardware.
 var _pause_hints: VBoxContainer
 
-var _score_shown: float = 0.0
-var _score_target: float = 0.0
-var _score_glow: float = 0.0
 var _rng := RandomNumberGenerator.new()
+var _building_boss := false
 
 
 func _ready() -> void:
@@ -115,25 +109,32 @@ func _ready() -> void:
 	# the chrome, chrome under the pause sheet. The hero layer is claimed here
 	# and filled in later, so a mid-session roster change cannot reorder the HUD.
 	_build_effects()
+	_boss_layer = Control.new()
+	_boss_layer.name = "BossLayer"
+	_boss_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_boss_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_boss_layer)
 	_build_boss_banner()
 	_hero_layer = Control.new()
 	_hero_layer.name = "HeroLayer"
 	_hero_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_hero_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_hero_layer)
-	_build_readouts()
+	_build_storybook()
 	_build_pause()
 	_sync_roster()
 
 	GameManager.player_damaged.connect(_on_player_damaged)
 	GameManager.player_respawned.connect(_on_player_respawned)
 	GameManager.boss_damaged.connect(_on_boss_damaged)
-	GameManager.score_changed.connect(_on_score_changed)
 	GameManager.combo_changed.connect(_on_combo_changed)
-	GameManager.timer_updated.connect(_on_timer_updated)
 	GameManager.boss_phase_changed.connect(_on_phase_changed)
 	GameManager.state_changed.connect(_on_state_changed)
 	GameManager.game_started.connect(_on_game_started)
+	GameManager.objective_changed.connect(_on_objective_changed)
+	GameManager.objective_progress.connect(_on_objective_progress)
+	GameManager.story_beat.connect(_on_story_beat)
+	GameManager.settings_changed.connect(_refresh_text)
 
 
 # --- Build --------------------------------------------------------------------
@@ -147,6 +148,7 @@ func _build_effects() -> void:
 
 
 func _build_boss_banner() -> void:
+	_building_boss = true
 	var half := BOSS_PLATE.x * 0.5
 
 	# Only a whisper of amber in the fill. The giant's colour is carried by his
@@ -180,12 +182,12 @@ func _build_boss_banner() -> void:
 	# Epithet and phase share the line under the bar. Their boxes are sized to
 	# butt up against each other without overlapping, so a long name can never
 	# draw over the phase readout.
-	_boss_epithet = UIStyle.text(UIStyle.actor_epithet(BOSS_ACTOR), UIStyle.Scale.MICRO,
+	_boss_epithet = UIStyle.text(Loc.t("boss_epithet"), UIStyle.Scale.MICRO,
 		UIStyle.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
 	_place(_boss_epithet, Control.PRESET_CENTER_TOP, Vector2(text_x, 92.0),
 		Vector2(text_w - 138.0, 16))
 
-	_phase_label = UIStyle.text("PHASE 1", UIStyle.Scale.MICRO, UIStyle.GOLD,
+	_phase_label = UIStyle.text(Loc.f("phase", [1]), UIStyle.Scale.MICRO, UIStyle.GOLD,
 		HORIZONTAL_ALIGNMENT_RIGHT)
 	_place(_phase_label, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w - 106.0, 92.0),
 		Vector2(72, 16))
@@ -194,6 +196,9 @@ func _build_boss_banner() -> void:
 		_place(pip, Control.PRESET_CENTER_TOP,
 			Vector2(text_x + text_w - 28.0 + i * 15.0, 95.0), Vector2(11, 11))
 		_phase_pips.append(pip)
+	_building_boss = false
+	# Kids do not read "250 / 500"; the bar is the number.
+	_boss_hp.visible = false
 
 
 ## Bring the hero panels in line with the session's actual roster.
@@ -217,7 +222,9 @@ func _sync_roster() -> void:
 	if _heroes.size() == roster.size():
 		var same := true
 		for pid in roster:
-			if not _heroes.has(pid):
+			# Same ids but a different driver (co-op <-> solo with the AI
+			# brother) is a different roster: his panel wears the robot badge.
+			if not _heroes.has(pid) or (_heroes[pid] as HeroPanel).is_ai != GameManager.is_ai(pid):
 				same = false
 		if same:
 			return
@@ -248,39 +255,40 @@ func _sync_roster() -> void:
 		_heroes[pid] = panel
 
 
-func _build_readouts() -> void:
-	var right := -(M + READOUT_PLATE.x)
+func _build_storybook() -> void:
+	_objective = ObjectiveWidget.new()
+	_objective.name = "Objective"
+	add_child(_objective)
+	_objective.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_objective.offset_left = -(M + ObjectiveWidget.W)
+	_objective.offset_top = 14.0
+	_objective.offset_right = -M
+	_objective.offset_bottom = 14.0 + 120.0
 
-	_readout_plate = UIStyle.plate(UIStyle.GOLD, 0.05, UIStyle.RADIUS_LG, UIStyle.Elev.HIGH)
-	_place(_readout_plate, Control.PRESET_TOP_RIGHT, Vector2(right, 14.0), READOUT_PLATE)
+	_toast = StoryToast.new()
+	_toast.name = "StoryToast"
+	add_child(_toast)
+	_toast.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_toast.offset_left = -StoryToast.W * 0.5
+	_toast.offset_right = StoryToast.W * 0.5
+	_toast.offset_top = 14.0
+	_toast.offset_bottom = 14.0 + StoryToast.H
 
-	var pad := 18.0
-	var inner_w := READOUT_PLATE.x - pad * 2.0
-
-	var score_tag := UIStyle.text("SCORE", UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
-		HORIZONTAL_ALIGNMENT_LEFT)
-	_place(score_tag, Control.PRESET_TOP_RIGHT, Vector2(right + pad, 26.0), Vector2(80, 16))
-
-	_score_value = UIStyle.text("0", UIStyle.Scale.HEADING, UIStyle.GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
-	_place(_score_value, Control.PRESET_TOP_RIGHT, Vector2(right + pad, 22.0),
-		Vector2(inner_w, 34))
-
-	var rule := UIStyle.divider(2, 0.20)
-	_place(rule, Control.PRESET_TOP_RIGHT, Vector2(right + pad, 64.0), Vector2(inner_w, 2))
-
-	var time_tag := UIStyle.text("TIME", UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
-		HORIZONTAL_ALIGNMENT_LEFT)
-	_place(time_tag, Control.PRESET_TOP_RIGHT, Vector2(right + pad, 78.0), Vector2(80, 16))
-
-	_timer_value = UIStyle.text("0:00", UIStyle.Scale.SUBHEAD, UIStyle.TEXT_PRIMARY,
-		HORIZONTAL_ALIGNMENT_RIGHT)
-	_place(_timer_value, Control.PRESET_TOP_RIGHT, Vector2(right + pad, 74.0), Vector2(inner_w, 26))
+	_pause_btn = BookKit.round_button(KidIcon.Kind.PAUSE, BookKit.SKY, PAUSE_BUTTON)
+	_pause_btn.name = "PauseButton"
+	_pause_btn.focus_mode = Control.FOCUS_NONE
+	_pause_btn.pressed.connect(func() -> void:
+		if GameManager.state == GameManager.State.PLAYING:
+			GameManager.toggle_pause())
+	add_child(_pause_btn)
+	_pause_btn.position = Vector2(M, 14.0)
 
 
 func _build_pause() -> void:
 	_pause = Control.new()
+	_pause.name = "Pause"
 	_pause.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_pause.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_pause.mouse_filter = Control.MOUSE_FILTER_STOP
 	_pause.visible = false
 	add_child(_pause)
 
@@ -290,34 +298,62 @@ func _build_pause() -> void:
 	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause.add_child(dim)
 
-	var card := UIStyle.card(UIStyle.Elev.MODAL, UIStyle.RADIUS_LG, UIStyle.SPACE_XL)
+	var card := PanelContainer.new()
+	card.name = "PauseCard"
+	card.add_theme_stylebox_override("panel", BookKit.paper_box(36, 30))
 	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	card.offset_left = -400.0
-	card.offset_right = 400.0
-	card.offset_top = -170.0
-	card.offset_bottom = 170.0
+	card.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	card.grow_vertical = Control.GROW_DIRECTION_BOTH
 	_pause.add_child(card)
 
 	var col := VBoxContainer.new()
 	col.alignment = BoxContainer.ALIGNMENT_CENTER
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	col.add_theme_constant_override("separation", UIStyle.SPACE_MD)
+	col.add_theme_constant_override("separation", UIStyle.SPACE_MD + 4)
 	card.add_child(col)
 
-	col.add_child(UIStyle.title("PAUSED", UIStyle.Scale.TITLE, UIStyle.GOLD))
-	col.add_child(UIStyle.text("The giant is waiting.", UIStyle.Scale.BODY,
-		UIStyle.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_CENTER))
+	_pause_title = BookKit.loud_label(Loc.t("paused"), 64, BookKit.SUN)
+	col.add_child(_pause_title)
+	_resume_btn = BookKit.button(Loc.t("resume"), KidIcon.Kind.PLAY, BookKit.LEAF, Vector2(440, 92))
+	_resume_btn.name = "Resume"
+	_resume_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_resume_btn.pressed.connect(func() -> void:
+		if GameManager.state == GameManager.State.PAUSED:
+			GameManager.toggle_pause())
+	col.add_child(_resume_btn)
+	_settings_btn = BookKit.button(Loc.t("settings"), KidIcon.Kind.GEAR, BookKit.SKY, Vector2(440, 92))
+	_settings_btn.name = "SettingsButton"
+	_settings_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_settings_btn.pressed.connect(func() -> void: _settings.open())
+	col.add_child(_settings_btn)
+	_book_btn = BookKit.button(Loc.t("back_to_book"), KidIcon.Kind.BOOK, BookKit.PLUM, Vector2(440, 92))
+	_book_btn.name = "BackToBook"
+	_book_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_book_btn.pressed.connect(func() -> void: GameManager.go_to_menu())
+	col.add_child(_book_btn)
 	col.add_child(UIStyle.divider(3, 0.20))
 
-	# A pause screen is the one moment the player has time to read the controls,
-	# so this is where the reference lives rather than the menu footer. Filled in
-	# by _rebuild_pause_hints(), because the bindings depend on the roster.
+	# The control reference, for the grown-up reading over the child's
+	# shoulder. Filled in by _rebuild_pause_hints(): the bindings depend on the
+	# roster.
+	var strip := PanelContainer.new()
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.add_theme_stylebox_override("panel", UIStyle.surface(UIStyle.Elev.LOW, UIStyle.RADIUS_MD,
+		UIStyle.SPACE_MD))
+	col.add_child(strip)
 	_pause_hints = VBoxContainer.new()
 	_pause_hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause_hints.add_theme_constant_override("separation", UIStyle.SPACE_SM)
-	col.add_child(_pause_hints)
+	strip.add_child(_pause_hints)
 	_rebuild_pause_hints()
+
+	_settings = SettingsPanel.new()
+	_settings.name = "Settings"
+	add_child(_settings)
+	_settings.closed.connect(func() -> void:
+		if _pause.visible:
+			_resume_btn.grab_focus())
 
 
 ## One hint row per hero on the roster, read live out of the Input Map.
@@ -343,17 +379,20 @@ func _rebuild_pause_hints() -> void:
 		row.add_theme_constant_override("separation", UIStyle.SPACE_MD)
 		# Only label the rows when there is more than one; a solo player does not
 		# need to be told which of the one players they are.
-		if roster.size() > 1:
+		if GameManager.is_ai(pid):
+			row.free()
+			continue
+		if GameManager.player_count > 1:
 			var actor := UIStyle.actor_for_player(pid)
 			row.add_child(UIStyle.pill("P%d" % pid, UIStyle.actor_color(actor), UIStyle.BASE))
 		# One cap per direction for Move, one apiece for the rest: a pause overlay
 		# is a reminder, not the full controls table, and slot two's pad bindings
 		# would otherwise run the row off the card.
-		row.add_child(UIStyle.binding_pair("MOVE",
+		row.add_child(UIStyle.binding_pair(Loc.t("move"),
 			UIStyle.binding_caps(pid, ["move_up", "move_left", "move_down", "move_right"], 1)))
-		row.add_child(UIStyle.binding_pair("JUMP", UIStyle.binding_caps(pid, ["jump"], 1)))
-		row.add_child(UIStyle.binding_pair("HIT", UIStyle.binding_caps(pid, ["attack"], 1)))
-		row.add_child(UIStyle.binding_pair("SPECIAL", UIStyle.binding_caps(pid, ["ability"], 1)))
+		row.add_child(UIStyle.binding_pair(Loc.t("jump"), UIStyle.binding_caps(pid, ["jump"], 1)))
+		row.add_child(UIStyle.binding_pair(Loc.t("hit"), UIStyle.binding_caps(pid, ["attack"], 1)))
+		row.add_child(UIStyle.binding_pair(Loc.t("special"), UIStyle.binding_caps(pid, ["ability"], 1)))
 		_pause_hints.add_child(row)
 
 	# Pause is not a per-slot action — either player's Esc resumes — so it sits on
@@ -362,12 +401,12 @@ func _rebuild_pause_hints() -> void:
 	resume.alignment = BoxContainer.ALIGNMENT_CENTER
 	resume.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	resume.add_theme_constant_override("separation", UIStyle.SPACE_MD)
-	resume.add_child(UIStyle.binding_pair("RESUME", UIStyle.binding_caps(1, ["ui_pause"], 2)))
+	resume.add_child(UIStyle.binding_pair(Loc.t("resume").to_upper(), UIStyle.binding_caps(1, ["ui_pause"], 2)))
 	_pause_hints.add_child(resume)
 
 
 func _place(ctrl: Control, preset: int, pos: Vector2, dims: Vector2) -> Control:
-	add_child(ctrl)
+	(_boss_layer if _boss_layer != null and _building_boss else self).add_child(ctrl)
 	ctrl.set_anchors_preset(preset)
 	ctrl.offset_left = pos.x
 	ctrl.offset_top = pos.y
@@ -381,29 +420,40 @@ func _place(ctrl: Control, preset: int, pos: Vector2, dims: Vector2) -> Control:
 func _process(delta: float) -> void:
 	if not visible:
 		return
-	_tick_score(delta)
 	_tick_heroes()
+	_tick_story(delta)
 
 
-## Roll the score up instead of snapping, and keep it lit while it moves. A
-## number that counts feels earned; a number that jumps is just a variable being
-## printed, and one that counts without changing colour is easy to miss entirely.
-func _tick_score(delta: float) -> void:
-	if _score_glow > 0.0:
-		_score_glow = maxf(0.0, _score_glow - delta / SCORE_GLOW)
-		_score_value.add_theme_color_override("font_color",
-			UIStyle.GOLD.lerp(Color.WHITE, 0.55 * _score_glow))
-
-	if absf(_score_shown - _score_target) < 0.5:
-		# The roll converges asymptotically, so the last fraction of a point never
-		# arrives on its own. Snap AND repaint here, or the readout settles one
-		# short of the real score and stays there.
-		if _score_shown != _score_target:
-			_score_shown = _score_target
-			_score_value.text = UIProgress.format_score(int(round(_score_target)))
+## Story beats on a clock and the boss banner's presence. The banner shows
+## only while a "boss" node exists (a lookup a frame is cheap next to a stale
+## giant's face over the football stadium).
+func _tick_story(delta: float) -> void:
+	_boss_layer.visible = get_tree().get_first_node_in_group("boss") != null
+	# Under the giant's banner when there is one; otherwise in the top row,
+	# centred in the gap between the pause button and the goal.
+	var shift := 0.0
+	if _boss_layer.visible:
+		_toast.offset_top = 14.0 + BOSS_PLATE.y + 14.0
+	else:
+		_toast.offset_top = 14.0
+		var gap_l := M + PAUSE_BUTTON + 12.0
+		var gap_r := size.x - M - ObjectiveWidget.W - 12.0
+		shift = (gap_l + gap_r) * 0.5 - size.x * 0.5
+	_toast.offset_bottom = _toast.offset_top + StoryToast.H
+	_toast.offset_left = -StoryToast.W * 0.5 + shift
+	_toast.offset_right = StoryToast.W * 0.5 + shift
+	if GameManager.state != GameManager.State.PLAYING:
 		return
-	_score_shown = lerpf(_score_shown, _score_target, clampf(1.0 - exp(-SCORE_LAMBDA * delta), 0.0, 1.0))
-	_score_value.text = UIProgress.format_score(int(round(_score_shown)))
+	var was := _run_clock
+	_run_clock += delta
+	if was < START_BEAT_DELAY and _run_clock >= START_BEAT_DELAY:
+		_beat_when("start")
+	# A level that never sets a goal (the bridge) still shows the chapter's.
+	if was < 0.6 and _run_clock >= 0.6 and not _objective_seen:
+		var ch := StoryData.chapter(GameManager.chapter_id)
+		var goal: Dictionary = ch.get("objective", {})
+		if not goal.is_empty():
+			_objective.set_objective(goal, 0, 0)
 
 
 ## Ability cooldowns and i-frames are STATE, not events — there is no signal for
@@ -435,12 +485,11 @@ func _on_game_started() -> void:
 		panel.reset()
 	_boss_bar.reset_to(float(GameManager.MAX_BOSS_HEALTH))
 	_boss_bar.set_fill_color(UIStyle.BOSS_AMBER)
-	_score_shown = 0.0
-	_score_target = 0.0
-	_score_glow = 0.0
-	_score_value.text = "0"
-	_score_value.add_theme_color_override("font_color", UIStyle.GOLD)
-	_timer_value.text = "0:00"
+	_run_clock = 0.0
+	_beats_shown.clear()
+	_objective_seen = false
+	_objective.reset()
+	_toast.clear()
 	_fx.set_danger(0.0)
 	_pops.clear_all()
 	_set_phase(1)
@@ -491,6 +540,8 @@ func _on_boss_damaged(amount: int, new_health: int) -> void:
 	_boss_hp.text = "%d / %d" % [new_health, GameManager.MAX_BOSS_HEALTH]
 	if amount <= 0:
 		return
+	if new_health > 0 and float(new_health) < float(GameManager.MAX_BOSS_HEALTH) * LOW_BEAT_RATIO:
+		_beat_when("low")
 	_boss_face.hit_flash()
 	_spawn_damage_number(amount)
 
@@ -527,11 +578,6 @@ func _spawn_player_damage_number(player_id: int, amount: int) -> void:
 		return
 
 
-func _on_score_changed(new_score: int) -> void:
-	_score_target = float(new_score)
-	_score_glow = 1.0
-
-
 ## Route a chain to the hero who owns it.
 ##
 ## `combo_changed`'s player_id is meaningful now — each hero keeps an independent
@@ -547,13 +593,10 @@ func _on_combo_changed(player_id: int, combo: int) -> void:
 		panel.set_combo(combo)
 
 
-func _on_timer_updated(seconds: float) -> void:
-	_timer_value.text = UIProgress.format_time(seconds)
-
-
 func _on_phase_changed(phase: int) -> void:
 	_set_phase(phase)
 	if phase >= 2:
+		_beat_when("phase2")
 		_boss_bar.enrage(true)
 		_boss_name.add_theme_color_override("font_color", UIStyle.BOSS_RAGE.lightened(0.45))
 		# One hard punch on the whole banner so the phase flip is an event, not a
@@ -567,7 +610,8 @@ func _on_phase_changed(phase: int) -> void:
 
 
 func _set_phase(phase: int) -> void:
-	_phase_label.text = "PHASE %d" % phase
+	_phase_label.text = Loc.f("phase", [phase])
+	_phase_label.set_meta("phase", phase)
 	var hot := UIStyle.BOSS_RAGE if phase >= 2 else UIStyle.GOLD
 	_phase_label.add_theme_color_override("font_color", hot)
 	for i in _phase_pips.size():
@@ -582,4 +626,56 @@ func _set_phase(phase: int) -> void:
 
 
 func _on_state_changed(new_state: int) -> void:
-	_pause.visible = (new_state == GameManager.State.PAUSED)
+	var paused := new_state == GameManager.State.PAUSED
+	_pause.visible = paused
+	if paused:
+		_resume_btn.call_deferred("grab_focus")
+	elif _settings.is_open():
+		_settings.close()
+
+
+# --- Storybook ---------------------------------------------------------------------
+
+func _on_objective_changed(label: Dictionary, done: int, total: int) -> void:
+	_objective_seen = true
+	_objective.set_objective(label, done, total)
+
+
+func _on_objective_progress(done: int, total: int) -> void:
+	_objective.set_progress(done, total)
+
+
+## GameManager.story_beat(id): a level asks for a StoryData beat by id. The
+## `when` tokens are accepted too, so a level can say "stage2" or "half".
+func _on_story_beat(beat_id: String) -> void:
+	for b: Dictionary in StoryData.chapter(GameManager.chapter_id).get("beats", []):
+		if str(b.get("id", "")) == beat_id or str(b.get("when", "")) == beat_id:
+			_show_beat(b)
+			return
+
+
+func _beat_when(trigger: String) -> void:
+	for b: Dictionary in StoryData.chapter(GameManager.chapter_id).get("beats", []):
+		if str(b.get("when", "")) == trigger:
+			_show_beat(b)
+
+
+## Each beat shows once per run.
+func _show_beat(b: Dictionary) -> void:
+	var id := str(b.get("id", ""))
+	if _beats_shown.has(id):
+		return
+	_beats_shown[id] = true
+	_toast.show_beat(b)
+
+
+func _refresh_text() -> void:
+	_boss_epithet.text = Loc.t("boss_epithet")
+	_set_phase(int(_phase_label.get_meta("phase", 1)))
+	_pause_title.text = Loc.t("paused")
+	BookKit.set_caption(_resume_btn, Loc.t("resume"))
+	BookKit.set_caption(_settings_btn, Loc.t("settings"))
+	BookKit.set_caption(_book_btn, Loc.t("back_to_book"))
+	_rebuild_pause_hints()
+	for panel: HeroPanel in _heroes.values():
+		panel.refresh_text()

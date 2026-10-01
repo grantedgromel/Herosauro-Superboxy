@@ -379,7 +379,9 @@ static func plate(tint: Color = SURFACE, tint_amount: float = 0.0,
 	var e := clampi(elev, 0, _ELEV_FILL.size() - 1)
 	var shell := Panel.new()
 	shell.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	shell.clip_contents = true
+	# Not clip_contents: a rect clip cuts the drop shadow off square at the
+	# plate's bounds and leaves its corners filled, which reads as a grey box
+	# behind a rounded plate. Every child here carries its own radius.
 
 	var outer := StyleBoxFlat.new()
 	# Lighter than the face. The shell is almost entirely covered by its own

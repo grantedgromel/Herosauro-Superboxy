@@ -14,8 +14,12 @@ extends Node
 ## locking down, because the way it regresses is somebody adding "just a little"
 ## 3D behind the type and paying the whole arena build again.
 ##
-## So this boots main.tscn for real, walks MENU -> PLAYING -> MENU -> PLAYING,
-## and every single frame counts both, split by state. It also prints what the
+## So this boots main.tscn for real and walks the storybook flow the way a
+## child does: a key press on Toca para comecar, the bookshelf, the settings
+## sheet and its credits, a book, "2 jogadores", Skip on the intro pages, the
+## fight; back to the book (which must land on the shelf, not the title); then
+## a solo run with the companion. Every single frame counts both, split by
+## state. It also prints what the
 ## title screen costs to stand up next to what the fight costs, which is the
 ## comparison the change was made for.
 ##
@@ -66,6 +70,8 @@ var _main: Node
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# The walk picks a book and a roster; keep that out of the real save.
+	UIProgress.use_memory_only()
 
 
 func _process(_delta: float) -> void:
@@ -91,11 +97,11 @@ func _process(_delta: float) -> void:
 				_boot()
 				_advance("boot")
 		1:
-			# Was 1.6 s, because the menu used to spend most of a second and a half
-			# building an arena and then hold a title card over it. There is
-			# nothing to wait for now beyond the entry tween.
+			# The title holds still; there is nothing to wait for beyond the
+			# logo's entry tween.
 			if _clock > 0.6:
 				_note("menu settled")
+				_ok(_frame().screen == "title", "a fresh session opens on Toca para comecar")
 				_advance("resize sweep")
 		2:
 			# One window size per pass, with a settling gap, so the stretch
@@ -110,45 +116,67 @@ func _process(_delta: float) -> void:
 					get_tree().root.size = SWEEP[_sweep_at]
 				else:
 					get_tree().root.size = SWEEP[0]
-					_press(&"controls")
-					_advance("controls open")
+					_tap_key()
+					_advance("any key on the title")
 		3:
-			# Both panels get opened and closed for real, so the modal's tween,
-			# its focus hand-off and the InputMap-derived binding list are all
-			# exercised inside a live tree rather than only as static builders.
 			if _clock > 0.4:
-				_note("controls open")
-				_close_modal()
-				_press(&"credits")
-				_advance("credits open")
+				_note("on the shelf")
+				_ok(_frame().screen == "shelf", "any key leaves the title for the bookshelf")
+				_frame().shelf._gear.pressed.emit()
+				_advance("settings open")
 		4:
 			if _clock > 0.4:
-				_note("credits open")
-				_close_modal()
-				_advance("panels closed")
+				var settings: SettingsPanel = _frame().settings
+				_ok(settings.is_open(), "the gear opens Settings")
+				settings._open_credits()
+				_advance("credits open")
 		5:
 			if _clock > 0.4:
-				_note("back on the menu")
-				_fight_ms = Time.get_ticks_msec()
-				_press(&"start")
-				_advance("start pressed")
+				var settings: SettingsPanel = _frame().settings
+				var credits: Node = settings._credits_modal
+				_ok(credits.call("is_open"), "Credits are reachable from Settings")
+				credits.call("close")
+				settings.close()
+				_advance("panels closed")
 		6:
+			if _clock > 0.4:
+				_note("back on the shelf")
+				var frame := _frame()
+				frame.shelf.covers[0].pressed.emit()
+				_ok(frame.screen == "who", "a book asks who is playing")
+				frame.who._cards[1].pressed.emit()
+				_ok(frame.screen == "reader" and frame.reader.is_open(),
+					"2 jogadores opens the intro pages")
+				_ok(GameManager.player_count == 2, "and sets a two-player roster")
+				_fight_ms = Time.get_ticks_msec()
+				frame.reader.skip()
+				_advance("intro skipped")
+		7:
 			if _clock > 1.4:
 				# Wall time, minus the 1.4 s this step deliberately waits and the
 				# curtain fade inside it. What is left is main.gd's blocking arena
-				# build — the cost the title screen used to pay a second copy of.
+				# build.
 				_fight_ms = Time.get_ticks_msec() - _fight_ms - 1400.0
 				_note("fight running")
+				_ok(GameManager.state == GameManager.State.PLAYING
+					and GameManager.chapter_id == "adamastor", "Skip starts chapter 1")
 				GameManager.go_to_menu()
-				_advance("back to menu")
-		7:
+				_advance("back to the book")
+		8:
 			if _clock > 0.8:
 				_note("menu rebuilt")
-				_press(&"start")
-				_advance("start pressed again")
-		8:
+				_ok(_frame().screen == "shelf", "back to the book lands on the shelf, not the title")
+				var frame := _frame()
+				frame.choose_chapter("adamastor")
+				frame.choose_players(1, 1)
+				frame.reader.skip()
+				_advance("solo with the companion")
+		9:
 			if _clock > 1.4:
 				_note("second fight running")
+				_ok(GameManager.state == GameManager.State.PLAYING, "the solo run starts")
+				_ok(GameManager.active_player_ids().size() == 2 and GameManager.is_ai(2),
+					"solo brings Super Boxy along as the AI companion")
 				_report()
 				get_tree().quit(0 if _fails == 0 else 1)
 
@@ -213,48 +241,42 @@ func _menu_3d_nodes() -> int:
 
 
 ## The composition, as actually laid out. There is no GPU here, so the only way
-## to know the logo is not sitting on Adamastor's head is to read the rects back
-## and test them. Anything reported as OVERLAP is a bug.
+## to know the logo is not sitting on the tap prompt, or a book is not hanging
+## off the screen, is to read the rects back and test them.
 func _layout_report() -> void:
-	var menu := _menu() as Control
-	if menu == null:
+	var frame := _frame()
+	if frame == null:
 		return
-	_log.append("  layout at %d x %d:" % [int(menu.size.x), int(menu.size.y)])
+	var view := Rect2(Vector2.ZERO, frame.size)
+	_log.append("  layout at %d x %d:" % [int(frame.size.x), int(frame.size.y)])
+	var logo := frame.title.find_child("TitleLogo", true, false) as Control
+	var tap := frame.title.find_child("TapToStart", true, false) as Control
+	var lr := Rect2(logo.global_position, logo.size)
+	var tr := Rect2(tap.global_position, tap.size)
+	_log.append("    TitleLogo    x %4d..%4d   y %4d..%4d" % [lr.position.x, lr.end.x, lr.position.y, lr.end.y])
+	_log.append("    TapToStart   x %4d..%4d   y %4d..%4d" % [tr.position.x, tr.end.x, tr.position.y, tr.end.y])
+	_ok(not lr.intersects(tr), "logo and tap prompt do not overlap at %s" % str(frame.size))
+	_ok(view.encloses(tr) and tr.size.y >= 76.0, "tap prompt is in frame and big at %s" % str(frame.size))
+	for c: BookCover in frame.shelf.covers:
+		var r := Rect2(c.position + c.get_parent().position, c.size)
+		_ok(view.encloses(r) and r.size.y >= 76.0,
+			"book %s fits the shelf at %s %s" % [c.chapter_id, str(frame.size), str(r)])
 
-	var ui: Array[Array] = []
-	for id in ["TitleLogo", "MenuList"]:
-		var c := menu.find_child(id, true, false) as Control
-		if c != null:
-			ui.append([id, Rect2(c.global_position, c.size)])
 
-	# The cast is only staged as cut-outs when there is no key art; the cinematic
-	# already has all three in it. Said out loud rather than left as an empty
-	# section, because "no OVERLAP reported" means nothing if there was nothing to
-	# overlap and the reader cannot tell which case they are in.
-	var art: Array[Array] = []
-	var stage := menu.find_child("HeroStage", true, false)
-	if stage == null:
-		_log.append("    (key art is in — no cut-outs staged, nothing to collide)")
-	else:
-		for fig in stage.get_children():
-			var c := fig as Control
-			if c != null:
-				art.append([c.name, Rect2(c.global_position, c.size)])
+## A real key press, through the input pipeline, the way a child taps a key.
+func _tap_key() -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_SPACE
+	ev.physical_keycode = KEY_SPACE
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	var up := ev.duplicate() as InputEventKey
+	up.pressed = false
+	Input.parse_input_event(up)
 
-	for entry in ui + art:
-		var r: Rect2 = entry[1]
-		_log.append("    %-12s x %4d..%4d   y %4d..%4d"
-				% [entry[0], int(r.position.x), int(r.end.x),
-				int(r.position.y), int(r.end.y)])
 
-	for u in ui:
-		for a in art:
-			var ur: Rect2 = u[1]
-			var ar: Rect2 = a[1]
-			if ur.intersects(ar):
-				var cut := ur.intersection(ar)
-				_log.append("    OVERLAP %s / %s  (%d x %d px)"
-						% [u[0], a[0], int(cut.size.x), int(cut.size.y)])
+func _frame() -> Control:
+	return _menu() as Control
 
 
 func _live_environment(node: Node) -> Environment:
@@ -266,24 +288,6 @@ func _live_environment(node: Node) -> Environment:
 		if found != null:
 			return found
 	return null
-
-
-## Reaches into the screen's own handler rather than calling GameManager
-## directly, so the fade-out and the hand-off to main.gd get exercised exactly as
-## a player would drive them.
-func _press(id: StringName) -> void:
-	var menu := _menu()
-	if menu != null and menu.has_method("_on_activated"):
-		menu.call("_on_activated", id)
-	else:
-		_log.append("  !! could not reach MainMenu._on_activated")
-
-
-func _close_modal() -> void:
-	var menu := _menu()
-	var modal := menu.find_child("Modal", false, false) if menu != null else null
-	if modal != null:
-		modal.call("close")
 
 
 func _count(node: Node, type_name: String) -> int:
@@ -305,7 +309,7 @@ func _count_current_cameras(node: Node) -> int:
 
 func _report() -> void:
 	_log.append("")
-	_log.append("  title screen up in %.0f ms; START then stalls ~%.0f ms in main.gd's"
+	_log.append("  title screen up in %.0f ms; Skip then stalls ~%.0f ms in main.gd's"
 			% [_boot_ms, maxf(_fight_ms, 0.0)])
 	_log.append("  own arena build, which is the stall the menu used to pay TWICE.")
 	# The title screen is a picture. Not "one environment, carefully isolated" —
