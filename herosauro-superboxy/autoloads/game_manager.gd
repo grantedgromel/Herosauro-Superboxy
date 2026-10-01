@@ -244,6 +244,19 @@ func revive_player(player_id: int, health: int = REVIVE_HEALTH) -> void:
 	player_respawned.emit(player_id)
 
 
+## Kid-mode regeneration (PlayerBase, Ajudas on). Re-uses `player_damaged` with
+## amount 0, like revive_player, so bars refill without a new signal; it never
+## revives a hero at zero (that is the bubble's job) and never overfills.
+func heal_player(player_id: int, amount: int) -> void:
+	if state != State.PLAYING or not player_health.has(player_id) or amount <= 0:
+		return
+	var hp := int(player_health[player_id])
+	if hp <= 0 or hp >= MAX_PLAYER_HEALTH:
+		return
+	player_health[player_id] = mini(MAX_PLAYER_HEALTH, hp + amount)
+	player_damaged.emit(player_id, 0, player_health[player_id])
+
+
 ## True once every hero actually in the world is at zero health.
 ##
 ## This used to test `player_health[1] and player_health[2]` directly, which

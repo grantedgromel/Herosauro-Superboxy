@@ -6,8 +6,16 @@ extends Node3D
 ##
 ## TWO-PLAYER LOCAL CO-OP. Herosauro is player 1 and Super Boxy is player 2, and
 ## the roster comes from `GameManager.active_player_ids()` — the one place that
-## turns `player_count` / `human_hero` into a list of heroes. A solo run spawns
-## exactly the hero the menu chose and nothing else; there is no AI ally.
+## turns `player_count` / `human_hero` into a list of heroes. In solo with the
+## companion on, the roster is still [1, 2] and the hero nobody is driving
+## (`GameManager.is_ai`) gets a CompanionAI node that steers it through
+## InputManager's virtual channel.
+##
+## CHAPTERS (docs/story/ADAPTATION.md, "Levels"). Chapter "adamastor" is the
+## bridge, built exactly as it always was. Any other chapter load()s
+## res://scenes/levels/<id>/<id>_level.tscn (never preload: the web build must
+## not load every level at boot), a LevelBase that places the heroes and owns
+## its own world; no Adamastor and no bridge PropSpawner are spawned for it.
 
 const HeroScenes := {
 	1: preload("res://scenes/players/herosauro.tscn"),
@@ -28,12 +36,18 @@ const PropSpawnerScene: PackedScene = preload("res://scenes/props/prop_spawner.t
 const MainMenuScene: PackedScene = preload("res://scenes/ui/main_menu.tscn")
 const HUDScene: PackedScene = preload("res://scenes/ui/hud.tscn")
 const GameOverScene: PackedScene = preload("res://scenes/ui/game_over.tscn")
+const CompanionAIScript: GDScript = preload("res://scripts/players/companion_ai.gd")
+
+## The chapter that is the bridge fight. Every other id is a LevelBase scene.
+const BRIDGE_CHAPTER := "adamastor"
 
 var _menu: Control
 var _hud: CanvasItem
 var _game_over: CanvasItem
 var _world_root: Node3D    # holds bridge + camera + heroes + boss; freed on return to menu
 var _spawn_root: Node3D
+var _level: LevelBase = null   # null on the bridge
+var _world_chapter: String = ""
 
 
 func _ready() -> void:
@@ -64,10 +78,12 @@ func _ready() -> void:
 ##
 ## The roster test is the co-op half of that: a world built for one hero is not
 ## reusable for a session the menu has since switched to two, and returning early
-## on "a world exists" would have left the second player without a body.
+## on "a world exists" would have left the second player without a body. The
+## chapter is the other half: PLAY AGAIN after switching chapter must not reuse
+## the previous chapter's arena.
 func _build_world() -> void:
 	if _world_root and is_instance_valid(_world_root):
-		if _roster_matches():
+		if _roster_matches() and _world_chapter == GameManager.chapter_id:
 			return
 		_teardown_world()
 
@@ -75,7 +91,12 @@ func _build_world() -> void:
 	_world_root.name = "World"
 	add_child(_world_root)
 
-	_world_root.add_child(WorldScene.instantiate())
+	_world_chapter = GameManager.chapter_id
+	_level = _load_level(_world_chapter)
+	if _level != null:
+		_world_root.add_child(_level)
+	else:
+		_world_root.add_child(WorldScene.instantiate())
 
 	_spawn_root = Node3D.new()
 	_spawn_root.name = "Spawned"
@@ -85,18 +106,19 @@ func _build_world() -> void:
 	var first: PlayerBase = null
 	for id in GameManager.active_player_ids():
 		var hero := _spawn_player(id)
-		if first == null:
+		if first == null and not GameManager.is_ai(id):
 			first = hero
 
-	# Knockable barrels, crates and rubble along the deck. It keeps clear of the
-	# hero and boss spawns itself, so it goes in before they matter.
-	var props := PropSpawnerScene.instantiate()
-	props.name = "Props"
-	_world_root.add_child(props)
+	if _level == null:
+		# Knockable barrels, crates and rubble along the deck. It keeps clear of
+		# the hero and boss spawns itself, so it goes in before they matter.
+		var props := PropSpawnerScene.instantiate()
+		props.name = "Props"
+		_world_root.add_child(props)
 
-	var boss := AdamastorScene.instantiate()
-	_world_root.add_child(boss)
-	boss.global_position = BOSS_SPAWN
+		var boss := AdamastorScene.instantiate()
+		_world_root.add_child(boss)
+		boss.global_position = BOSS_SPAWN
 
 	# Last, so the rig's opening frame already knows where the heroes and the
 	# giant are. `target` only matters in solo, where the rig orbits one hero;
@@ -105,6 +127,35 @@ func _build_world() -> void:
 	rig.name = "CameraRig"
 	rig.target = first
 	_world_root.add_child(rig)
+
+	# The robot brother. A plain Node beside the heroes, freed with the world.
+	for id in GameManager.active_player_ids():
+		if GameManager.is_ai(id):
+			var ai: Node = CompanionAIScript.new()
+			ai.name = "CompanionAI%d" % id
+			ai.set("player_id", id)
+			_world_root.add_child(ai)
+
+
+## The LevelBase scene for `chapter`, or null for the bridge. A chapter whose
+## scene is missing or broken falls back to the bridge with an error rather than
+## leaving a child in front of an empty world.
+func _load_level(chapter: String) -> LevelBase:
+	if chapter == BRIDGE_CHAPTER:
+		return null
+	var path := "res://scenes/levels/%s/%s_level.tscn" % [chapter, chapter]
+	var scene: PackedScene = null
+	if ResourceLoader.exists(path):
+		scene = load(path) as PackedScene
+	if scene == null:
+		push_error("main.gd: no level scene at %s; falling back to the bridge" % path)
+		return null
+	var node := scene.instantiate()
+	if not node is LevelBase:
+		push_error("main.gd: %s does not extend LevelBase; falling back to the bridge" % path)
+		node.free()
+		return null
+	return node as LevelBase
 
 
 func _teardown_world() -> void:
@@ -117,11 +168,16 @@ func _teardown_world() -> void:
 		_world_root.queue_free()
 	_world_root = null
 	_spawn_root = null
+	_level = null
+	_world_chapter = ""
+	InputManager.clear_virtual()
 
 
 func _spawn_player(id: int) -> PlayerBase:
 	var scene: PackedScene = HeroScenes[id]
 	var spawn := P1_SPAWN if id == 1 else P2_SPAWN
+	if _level != null:
+		spawn = _level.spawn_point(id)
 	var p: PlayerBase = scene.instantiate()
 	p.player_id = id
 	p.spawn_position = spawn
@@ -168,6 +224,13 @@ func _on_game_started() -> void:
 	if is_instance_valid(_spawn_root):
 		for c in _spawn_root.get_children():
 			c.queue_free()
+	InputManager.clear_virtual()
+
+	# Last, so the level sees live heroes and an empty spawn root. The bridge
+	# keeps AudioManager's own battle_phase1 start; a level names its track.
+	if _level != null and is_instance_valid(_level):
+		AudioManager.play_music(_level.music_track())
+		_level.begin()
 
 
 ## Do the heroes in the tree match the roster this session is about to play?

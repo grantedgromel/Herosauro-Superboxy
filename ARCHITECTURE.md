@@ -75,6 +75,13 @@ platformer, a battle royale or an elimination party game.
 | `ui` | `scripts/ui/`, `scenes/ui/`, `assets/fonts/`, `assets/ui/` | anything else |
 | `audio` | `autoloads/audio_manager.gd`, `assets/audio/`, `default_bus_layout.tres` | anything else |
 | `camera` | `scripts/camera_rig.gd` | anything else |
+| `spine` (storybook build, lead's delegate) | every lead-owned file, `scripts/story/`, `scripts/levels/level_base.gd`, `scripts/levels/sandbox/`, `scenes/levels/sandbox/`, `scripts/levels/_chapter_probe.*`, `tools/`; for this build also `scripts/players/`, `scripts/abilities/`, `scripts/props/hitbox.gd`, `hurtbox.gd`, `physics_layers.gd`, `scripts/camera_rig.gd`, `scripts/boss/` (kid tuning only) | anything else |
+| `level_dragao` | `scripts/levels/dragao/`, `scenes/levels/dragao/` | anything else |
+| `level_pandas` | `scripts/levels/pandas/`, `scenes/levels/pandas/` | anything else |
+| `touch` | `scripts/ui/touch/`, `scenes/ui/touch/` (carved out of `ui`) | anything else |
+
+For the storybook build `ui` also owns `assets/story/`. `docs/story/ADAPTATION.md`
+is the contract for that build and wins over this file for the new work.
 
 Shared, owned by the lead — **do not edit**: `autoloads/game_manager.gd`,
 `autoloads/input_manager.gd`, `scripts/main.gd`, `scripts/props/physics_layers.gd`,
@@ -100,12 +107,22 @@ camera **react to the signals**. Nothing else is a legitimate cross-stream path.
 | `combo_changed` | `(player_id, combo: int)` | combo counter moves or times out |
 | `timer_updated` | `(seconds: float)` | every frame while PLAYING |
 | `camera_shake_requested` | `(strength: float, duration: float)` | any system wants a shake |
+| `chapter_changed` | `(chapter_id: String)` | `set_chapter` |
+| `objective_changed` | `(label: Dictionary, done: int, total: int)` | a level calls `set_objective` (label is `{"pt", "en"}`) |
+| `objective_progress` | `(done: int, total: int)` | `advance_objective` moved the count |
+| `story_beat` | `(beat_id: String)` | `request_story_beat`; the HUD shows that StoryData beat |
+| `settings_changed` | — | any settings setter (language, Ajudas, reduced motion, narration, companion, volumes) |
 
 Mutators: `start_game()`, `change_state()`, `go_to_menu()`, `toggle_pause()`,
 `damage_player()`, `damage_boss()`, `add_score()`, `hit_stop()`, `request_shake()`,
-`notify_player_respawned()`, `revive_player()`, `difficulty_scalar()`.
+`notify_player_respawned()`, `revive_player()`, `difficulty_scalar()`,
+`heal_player()` (kid-mode regeneration; emits `player_damaged` with amount 0),
+`set_chapter()`, `set_objective()`, `advance_objective()`, `complete_chapter()`
+(the public win), `request_story_beat()`, and the settings setters.
 
-Readers: `active_player_ids()` — **the single roster authority.** Never assume
+Readers: `is_ai(id)` (the companion brother in solo), `hero_damage_scale()`,
+`objective_done()` / `objective_total()`, and `active_player_ids()` — **the
+single roster authority.** With the companion on, solo's roster is `[1, 2]`. Never assume
 the roster is `[1, 2]` or `range(1, player_count + 1)`; a solo run driven as
 hero 2 has a roster of `[2]`, and iterating a range spawns a panel, a camera
 target or a controller for a hero who does not exist. `combo_for(id)` gives the
@@ -123,7 +140,13 @@ say so in your report — the lead adds it to `game_manager.gd`.
 
 `PhysicsLayers` is the single source of truth. Never write a raw bitmask.
 
-`WORLD` `PLAYERS` `BOSS` `PLAYER_PROJECTILES` `HAZARDS` `PROPS`
+`WORLD` `PLAYERS` `BOSS` `PLAYER_PROJECTILES` `HAZARDS` `PROPS` `TARGETS`
+
+`TARGETS` (64) is everything hittable that is neither the boss nor a
+`PropBody`: a `Hurtbox` on that layer whose target implements
+`take_hit(amount: float, knockback: Vector3) -> void` and whose root joins group
+`targets`. The hero jab, Dino Energy and Boxy Dash all reach it; make the
+Hurtbox larger than any solid collider on the same object.
 
 Two rules that are easy to get wrong: Godot collides when **either** side's mask
 names the other's layer, and **the boss deliberately masks `WORLD` only** — a
@@ -150,7 +173,19 @@ Runtime lookup contract. Adding a node to a group is a public API.
 | `players` | every `PlayerBase` | boss, camera, ui, props, main |
 | `boss` | Adamastor | players, camera, ui, main |
 | `camera_rig` | the active `CameraRig` | players (for camera-relative movement) |
-| `spawn_root` | the node transient spawns are parented to | fx, boss, props |
+| `spawn_root` | the node transient spawns are parented to | fx, boss, props, levels |
+| `level` | the `LevelBase` root of a storybook level (absent on the bridge) | players, camera, main |
+| `targets` | the root of every TARGETS-layer hittable | players (auto-aim, dash), companion AI |
+
+## Levels
+
+Chapter `adamastor` is the bridge, built by `main.gd` exactly as before. Any
+other chapter is `res://scenes/levels/<id>/<id>_level.tscn`, `load()`ed (never
+preloaded), whose root extends `LevelBase` (`scripts/levels/level_base.gd`):
+`spawn_point(id)`, `camera_focus()`, `kill_y()`, `ground_surface()`,
+`music_track()`, `begin()`, `hint_target()`. With no boss, hero and camera code
+falls back to the level for recovery direction, landing FX surface, fall line
+and co-op camera yaw. `scripts/levels/sandbox/` is the worked example.
 
 ---
 

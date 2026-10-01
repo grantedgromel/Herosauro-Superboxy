@@ -91,14 +91,12 @@ func _custom_locomotion(delta: float) -> bool:
 			_spawn_ghost()
 
 		if not _hit_boss:
-			var boss := get_tree().get_first_node_in_group("boss")
-			if boss:
-				var here := global_position
-				var there: Vector3 = boss.global_position
-				var dx := here.x - there.x
-				var dz := here.z - there.z
-				if sqrt(dx * dx + dz * dz) < DASH_HIT_RANGE:
-					_land_dash(boss)
+			var struck := _dash_victim()
+			if struck != null:
+				if struck.is_in_group("boss"):
+					_land_dash(struck)
+				else:
+					_land_dash_on_target(struck)
 
 		if _dash_time <= 0.0:
 			# Follow-through on the way out of the lunge: the body springs back
@@ -136,6 +134,38 @@ func _land_dash(boss: Node) -> void:
 	# he is literally a stone giant — so the gloves throw stone chips.
 	ImpactFX.spark(self, global_position + _dash_dir * DASH_FX_REACH + Vector3.UP,
 		_dash_dir, ImpactFX.surface_of(boss), DASH_FX_POWER)
+	AudioManager.play_super_boxy_hit()
+	GameManager.hit_stop(0.06)
+	GameManager.request_shake(DASH_SHAKE, DASH_SHAKE_TIME)
+	_hit_boss = true
+
+
+## The nearest "boss" or "targets" node inside DASH_HIT_RANGE (flat distance to
+## its origin), or null. On the bridge there are no targets, so this is the
+## giant-only test it always was.
+func _dash_victim() -> Node3D:
+	var best: Node3D = null
+	var best_d := DASH_HIT_RANGE
+	for group in [&"boss", &"targets"]:
+		for n in get_tree().get_nodes_in_group(group):
+			var node := n as Node3D
+			if node == null or not is_instance_valid(node):
+				continue
+			var dx := global_position.x - node.global_position.x
+			var dz := global_position.z - node.global_position.z
+			var d := sqrt(dx * dx + dz * dz)
+			if d < best_d:
+				best = node
+				best_d = d
+	return best
+
+
+## The dash connecting with a level's target: the same five legs as on the
+## giant, with the damage going through the target's Hurtbox.
+func _land_dash_on_target(target: Node3D) -> void:
+	Hurtbox.strike(target, DASH_DAMAGE, _dash_dir * 10.0 + Vector3.UP * 3.0, player_id)
+	ImpactFX.spark(self, global_position + _dash_dir * DASH_FX_REACH + Vector3.UP,
+		_dash_dir, ImpactFX.surface_of(target), DASH_FX_POWER)
 	AudioManager.play_super_boxy_hit()
 	GameManager.hit_stop(0.06)
 	GameManager.request_shake(DASH_SHAKE, DASH_SHAKE_TIME)

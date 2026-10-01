@@ -23,3 +23,9 @@ const BOSS := 1 << 2
 const PLAYER_PROJECTILES := 1 << 3
 const HAZARDS := 1 << 4
 const PROPS := 1 << 5
+## Anything hittable that is neither the boss nor a PropBody: a level's goblins,
+## dummies, cages. Each one is a `Hurtbox` (Area3D) on this layer whose target
+## implements `take_hit(amount: float, knockback: Vector3)` and whose root joins
+## group "targets". The hero jab, Dino Energy and Boxy Dash all reach it
+## (docs/story/ADAPTATION.md, "Things heroes can hit").
+const TARGETS := 1 << 6

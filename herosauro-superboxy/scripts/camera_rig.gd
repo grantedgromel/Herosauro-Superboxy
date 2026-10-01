@@ -226,11 +226,13 @@ func _update_group(heroes: Array[Node3D], delta: float) -> void:
 	_pitch_node.position = Vector3(0.0, group_eye_height, 0.0)
 
 	# Yaw: look down the line from the pair to the giant, so he is centred and
-	# "forward" means "toward the fight" for both players. With no giant (he is
-	# dead, or the world is still assembling) hold whatever yaw we had.
-	var boss := get_tree().get_first_node_in_group("boss") as Node3D
-	if boss and is_instance_valid(boss):
-		var to := boss.global_position - centre
+	# "forward" means "toward the fight" for both players. With no giant, a
+	# storybook level names its own point of interest (LevelBase.camera_focus);
+	# with neither (he is dead, or the world is still assembling) hold whatever
+	# yaw we had.
+	var aim_at := _aim_point()
+	if aim_at.is_finite():
+		var to := aim_at - centre
 		to.y = 0.0
 		if to.length() > 1.0:
 			# atan2(-x, -z): the rig looks along its own -Z, so this is the yaw that
@@ -303,8 +305,8 @@ func _centroid(heroes: Array[Node3D]) -> Vector3:
 ## framing everywhere it is safe and degrades to a centred shot exactly where it
 ## is not.
 func _usable_shoulder(subject: Node3D) -> float:
-	if subject == null:
-		return shoulder_offset
+	if subject == null or LevelBase.current(get_tree()) != null:
+		return shoulder_offset   # the parapet rule is the bridge's; a level has its own walls
 	var margin := SAFE_HALF_WIDTH - absf(subject.global_position.z)
 	if margin >= shoulder_offset + 0.35:
 		return shoulder_offset
@@ -385,6 +387,18 @@ func _resolve_target(heroes: Array[Node3D]) -> Node3D:
 	return target
 
 
+## What the co-op shot looks toward: the giant, else the level's camera_focus(),
+## else Vector3.INF (hold the current yaw).
+func _aim_point() -> Vector3:
+	var boss := get_tree().get_first_node_in_group("boss") as Node3D
+	if boss and is_instance_valid(boss):
+		return boss.global_position
+	var level := LevelBase.current(get_tree())
+	if level != null:
+		return level.camera_focus()
+	return Vector3.INF
+
+
 ## Jump straight to the framing we want at the start of a fight: sat behind the
 ## subject, looking down the line towards the giant.
 func _snap_to_subject() -> void:
@@ -398,9 +412,9 @@ func _snap_to_subject() -> void:
 	_focus = centre
 
 	var aim := Vector3(1.0, 0.0, 0.0)   # the bridge runs along X; the giant waits at +X
-	var boss := get_tree().get_first_node_in_group("boss")
-	if not heroes.is_empty() and boss and is_instance_valid(boss):
-		var to: Vector3 = (boss as Node3D).global_position - centre
+	var aim_at := _aim_point()
+	if not heroes.is_empty() and aim_at.is_finite():
+		var to: Vector3 = aim_at - centre
 		to.y = 0.0
 		if to.length() > 0.5:
 			aim = to.normalized()
