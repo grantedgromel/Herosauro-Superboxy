@@ -42,8 +42,7 @@ func _ready() -> void:
 	add_child(_face)
 	_text = BookKit.print_label("", 26, true, BookKit.PRINT, HORIZONTAL_ALIGNMENT_LEFT)
 	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_text.position = Vector2(146, 12)
-	_text.size = Vector2(W - 166, H - 24)
+	BookKit.place(_text, Vector2(146, 12), Vector2(W - 166, H - 24))
 	add_child(_text)
 	_voice = Narrator.new()
 	add_child(_voice)

@@ -222,7 +222,9 @@ func _sync_roster() -> void:
 	if _heroes.size() == roster.size():
 		var same := true
 		for pid in roster:
-			if not _heroes.has(pid):
+			# Same ids but a different driver (co-op <-> solo with the AI
+			# brother) is a different roster: his panel wears the robot badge.
+			if not _heroes.has(pid) or (_heroes[pid] as HeroPanel).is_ai != GameManager.is_ai(pid):
 				same = false
 		if same:
 			return
@@ -335,10 +337,15 @@ func _build_pause() -> void:
 	# The control reference, for the grown-up reading over the child's
 	# shoulder. Filled in by _rebuild_pause_hints(): the bindings depend on the
 	# roster.
+	var strip := PanelContainer.new()
+	strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	strip.add_theme_stylebox_override("panel", UIStyle.surface(UIStyle.Elev.LOW, UIStyle.RADIUS_MD,
+		UIStyle.SPACE_MD))
+	col.add_child(strip)
 	_pause_hints = VBoxContainer.new()
 	_pause_hints.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pause_hints.add_theme_constant_override("separation", UIStyle.SPACE_SM)
-	col.add_child(_pause_hints)
+	strip.add_child(_pause_hints)
 	_rebuild_pause_hints()
 
 	_settings = SettingsPanel.new()
@@ -372,9 +379,10 @@ func _rebuild_pause_hints() -> void:
 		row.add_theme_constant_override("separation", UIStyle.SPACE_MD)
 		# Only label the rows when there is more than one; a solo player does not
 		# need to be told which of the one players they are.
-		if roster.size() > 1:
-			if GameManager.is_ai(pid):
-				continue
+		if GameManager.is_ai(pid):
+			row.free()
+			continue
+		if GameManager.player_count > 1:
 			var actor := UIStyle.actor_for_player(pid)
 			row.add_child(UIStyle.pill("P%d" % pid, UIStyle.actor_color(actor), UIStyle.BASE))
 		# One cap per direction for Move, one apiece for the rest: a pause overlay
@@ -658,3 +666,5 @@ func _refresh_text() -> void:
 	BookKit.set_caption(_settings_btn, Loc.t("settings"))
 	BookKit.set_caption(_book_btn, Loc.t("back_to_book"))
 	_rebuild_pause_hints()
+	for panel: HeroPanel in _heroes.values():
+		panel.refresh_text()

@@ -150,7 +150,7 @@ func choose_chapter(id: String) -> void:
 func choose_players(players: int, hero: int) -> void:
 	GameManager.set_player_count(players)
 	GameManager.set_human_hero(hero)
-	if players <= 1:
+	if players <= 1 and not GameManager.companion:
 		GameManager.set_companion(true)
 	UIProgress.set_pref("players", players)
 	UIProgress.set_pref("hero", hero)

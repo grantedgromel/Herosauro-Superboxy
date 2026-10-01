@@ -315,11 +315,16 @@ func _turtle(w: float) -> void:
 
 
 func _retry(w: float) -> void:
-	var c := Vector2(50, 52)
-	draw_arc(c, 30, -PI * 0.35, PI * 1.45, 28, INK, 14.0 + w * 2.0, true)
-	draw_arc(c, 30, -PI * 0.33, PI * 1.43, 28, fill, 14.0, true)
-	var tip := c + Vector2(cos(-PI * 0.35), sin(-PI * 0.35)) * 30.0
-	_poly([tip + Vector2(-16, -14), tip + Vector2(14, -6), tip + Vector2(-4, 20)], fill, w)
+	var c := Vector2(50, 54)
+	var a0 := -PI * 0.25
+	var a1 := PI * 1.25
+	draw_arc(c, 30, a0, a1, 28, INK, 13.0 + w * 2.0, true)
+	draw_arc(c, 30, a0 + 0.04, a1 - 0.04, 28, fill, 13.0, true)
+	# Arrowhead at the start of the arc, pointing back along it.
+	var p := c + Vector2(cos(a0), sin(a0)) * 30.0
+	var t := Vector2(sin(a0), -cos(a0))
+	var n := Vector2(cos(a0), sin(a0))
+	_poly([p + t * 20.0, p - t * 6.0 + n * 17.0, p - t * 6.0 - n * 17.0], fill, w)
 
 
 func _person(c: Vector2, k: float, col: Color, w: float) -> void:

@@ -224,6 +224,23 @@ static func _pop_on_hover(b: Button) -> void:
 	b.pressed.connect(func() -> void: BookKit.sfx(&"ui_tap"))
 
 
+## Put a (possibly word-wrapped) label at `pos` in a box of `box`. The width
+## goes in as a minimum first: a wrapped label sized before it knows its
+## width measures itself one character per line, grows hundreds of pixels
+## tall and then draws its vertically-centred text far below the box.
+static func place(l: Control, pos: Vector2, box: Vector2) -> void:
+	l.custom_minimum_size = Vector2(box.x, 0)
+	l.position = pos
+	# The first call sets the width, but the minimum height it clamps against
+	# was shaped at the old width. Asking for the line count reshapes the text
+	# at the new width, and the second call then clamps against the height the
+	# text really needs.
+	l.size = box
+	if l is Label:
+		(l as Label).get_line_count()
+	l.size = box
+
+
 # --- Small helpers ----------------------------------------------------------------
 
 ## AudioManager.play_sfx, guarded so a widget built outside the game (a

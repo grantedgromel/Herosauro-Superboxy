@@ -62,6 +62,35 @@ func _build() -> void:
 			r.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 			_root.add_child(r)
 			r.open(parts[1], parts[2], int(parts[3]) if parts.size() > 3 else 0)
+		"hud", "pause", "hud_nb":
+			var cam := Camera3D.new()
+			add_child(cam)
+			cam.current = true
+			if parts[0] != "hud_nb":
+				var boss := Node3D.new()
+				boss.add_to_group("boss")
+				add_child(boss)
+			var hud: Control = load("res://scenes/ui/hud.tscn").instantiate()
+			_root.add_child(hud)
+			GameManager.player_count = 1
+			GameManager.human_hero = 1
+			GameManager.companion = true
+			GameManager.chapter_id = "adamastor" if parts[0] != "hud_nb" else "dragao"
+			GameManager.start_game()
+			GameManager.set_objective(StoryData.chapter(GameManager.chapter_id)["objective"], 4)
+			GameManager.advance_objective(2)
+			GameManager.request_story_beat("a09" if parts[0] != "hud_nb" else "d10")
+			GameManager.damage_player(1, 30)
+			if parts[0] == "pause":
+				GameManager.change_state(GameManager.State.PAUSED)
+		"victory", "tryagain":
+			var over: Control = load("res://scenes/ui/game_over.tscn").instantiate()
+			_root.add_child(over)
+			over.chapter_id = parts[1] if parts.size() > 1 else "adamastor"
+			if parts[0] == "victory":
+				over.call("_show_sticker")
+			else:
+				over.call("_show_retry")
 		_:
 			var menu: Control = load("res://scenes/ui/main_menu.tscn").instantiate()
 			_root.add_child(menu)

@@ -194,8 +194,8 @@ func _layout() -> void:
 			var head := _window.get_node("Head%d" % i) as TextureRect
 			head.size = Vector2(hs, hs)
 			head.position = Vector2(_window.size.x * (0.06 + i * 0.46), _window.size.y - hs * 0.92)
-	_title.position = Vector2(pad, face.size.y - pad - title_h)
-	_title.size = Vector2(face.size.x - pad * 2.0, title_h)
+	BookKit.place(_title, Vector2(pad, face.size.y - pad - title_h),
+		Vector2(face.size.x - pad * 2.0, title_h))
 	_title.add_theme_font_size_override("font_size", int(clampf(face.size.x * 0.13, 26.0, 40.0)))
 	_badge.position = Vector2(pad - 22, pad - 22)
 	_sticker.size = Vector2(96, 96)

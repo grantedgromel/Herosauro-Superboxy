@@ -193,7 +193,7 @@ func setup(id: int, right_hand: bool) -> void:
 	_place(_dial, Vector2(dial_x, 10.0), Vector2(DIAL, DIAL))
 	_dial.setup("E", accent)
 
-	_dial_cap = UIStyle.text("SPECIAL", UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
+	_dial_cap = UIStyle.text(Loc.t("special"), UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
 		HORIZONTAL_ALIGNMENT_CENTER)
 	_place(_dial_cap, Vector2(dial_x - 14.0, 76.0), Vector2(DIAL + 28.0, 16.0))
 
@@ -208,6 +208,12 @@ func setup(id: int, right_hand: bool) -> void:
 	_place(_down_veil, Vector2(3.0, 3.0), Vector2(PANEL.x - 6.0, PANEL.y - 6.0))
 
 	set_process(false)
+
+
+## Language switch mid-run.
+func refresh_text() -> void:
+	if _dial_cap != null:
+		_dial_cap.text = Loc.t("special")
 
 
 ## The combo cluster, hanging off the top of the plate's inboard edge.

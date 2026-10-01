@@ -270,10 +270,8 @@ func _layout() -> void:
 		_cover.size = Vector2(cover_w, cover_h)
 	var rx := 48.0 + cover_w + 48.0
 	var rw := cw - rx - 40.0
-	_well_done.position = Vector2(rx, 44)
-	_well_done.size = Vector2(rw, 90)
-	_sticker_line.position = Vector2(rx, 140)
-	_sticker_line.size = Vector2(rw, 90)
+	BookKit.place(_well_done, Vector2(rx, 44), Vector2(rw, 90))
+	BookKit.place(_sticker_line, Vector2(rx, 140), Vector2(rw, 90))
 	for i in _stars.size():
 		_stars[i].position = Vector2(rx + rw * 0.5 - 132.0 + i * 96.0, 238 - (16 if i == 1 else 0))
 	_continue.reset_size()
@@ -287,10 +285,8 @@ func _layout() -> void:
 	var heads := _retry_card.get_node("Heads") as Control
 	heads.reset_size()
 	heads.position = Vector2((tw - heads.size.x) * 0.5, 34)
-	_retry_title.position = Vector2(30, 186)
-	_retry_title.size = Vector2(tw - 60, 80)
-	_retry_body.position = Vector2(40, 270)
-	_retry_body.size = Vector2(tw - 80, 70)
+	BookKit.place(_retry_title, Vector2(30, 186), Vector2(tw - 60, 80))
+	BookKit.place(_retry_body, Vector2(40, 270), Vector2(tw - 80, 70))
 	_again.reset_size()
 	_to_book.reset_size()
 	var bw := _again.size.x + _to_book.size.x + 36.0

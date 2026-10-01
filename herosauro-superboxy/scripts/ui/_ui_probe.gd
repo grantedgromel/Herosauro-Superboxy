@@ -19,6 +19,12 @@ extends Node
 ##   contrast ratios, because the world behind this UI is bright and saturated
 ##   and every one of those numbers is what keeps text on top of it readable.
 ##
+##   THE STORYBOOK (_check_storybook, _check_objective, _check_game_over). The
+##   shelf shows the three chapters; the reader pages through every chapter in
+##   both languages composing each missing page instead of erroring; the goal
+##   widget follows objective_progress; a win reads the outro and lands the
+##   sticker; a loss with Ajudas off never says "defeat".
+##
 ##   THE SPRING (_check_stat_bar). That the health bar OVERSHOOTS rather than
 ##   easing. A lerp and a spring look identical in a static screenshot and in a
 ##   diff; the only thing that can tell them apart is sampling the value over
@@ -36,6 +42,7 @@ extends Node
 
 const HUDScene: PackedScene = preload("res://scenes/ui/hud.tscn")
 const GameOverScene: PackedScene = preload("res://scenes/ui/game_over.tscn")
+const MainMenuScene: PackedScene = preload("res://scenes/ui/main_menu.tscn")
 
 const VIEW := Vector2(1280, 720)
 
@@ -57,8 +64,17 @@ func _ready() -> void:
 	_stage.render_target_update_mode = SubViewport.UPDATE_DISABLED
 	add_child(_stage)
 
+	# Never touch the real save: progress lives in memory for the whole run, and
+	# settings are set as fields (the setters would write user://settings.cfg).
+	UIProgress.use_memory_only()
+	GameManager.language = "pt"
+	GameManager.assists = true
+	GameManager.companion = true
+
 	print("=== type scale ===")
 	_check_type_scale()
+	print("=== glyph coverage ===")
+	_check_glyphs()
 	print("=== palette + elevation ===")
 	_check_surfaces()
 	print("=== portrait pipeline ===")
@@ -69,7 +85,11 @@ func _ready() -> void:
 	await _check_dial()
 	print("=== live HUD fight ===")
 	await _check_hud()
-	print("=== results card ===")
+	print("=== storybook frame ===")
+	await _check_storybook()
+	print("=== page reader, every chapter, both languages ===")
+	await _check_reader()
+	print("=== end of chapter ===")
 	await _check_game_over()
 
 	print("")
@@ -152,6 +172,48 @@ func _check_type_scale() -> void:
 			if not UIStyle.UI_BOLD.has_char(s3.unicode_at(i)):
 				gone += s3[i]
 		_ok(gone.is_empty(), "UI face covers \"%s\" %s" % [s3, gone])
+
+
+## Every character the storybook can put on screen must be in the face that
+## renders it. The web build has no system fonts, so a missing one is a tofu
+## box in the middle of a child's book. Body text (pages, beats, goals, every
+## Loc string) is Fredoka regular and bold; titles and loud words are Bangers.
+func _check_glyphs() -> void:
+	var body := ""
+	var display := ""
+	for id: String in StoryData.ORDER:
+		var ch := StoryData.chapter(id)
+		for lang in StoryData.LANGS:
+			display += Loc.pick(ch["title"], lang)
+			body += Loc.pick(ch["title"], lang) + Loc.pick(ch["tagline"], lang) \
+				+ Loc.pick(ch["objective"], lang)
+			for part in ["intro", "beats", "outro"]:
+				for entry: Dictionary in ch.get(part, []):
+					body += Loc.pick(entry, lang)
+	for key: String in Loc.S:
+		for lang in StoryData.LANGS:
+			body += Loc.t(key, lang)
+			display += Loc.t(key, lang)
+	for w: String in PageArt.WORDS:
+		display += w + "!"
+	var seen := {}
+	for pair in [["Fredoka", UIStyle.UI_FONT, body], ["Fredoka-Bold", UIStyle.UI_BOLD, body],
+			["Bangers", UIStyle.TITLE_FONT, display]]:
+		var font: Font = pair[1]
+		var text: String = pair[2]
+		var missing := ""
+		for i in text.length():
+			var c := text.unicode_at(i)
+			if c <= 32 or seen.has("%s%d" % [pair[0], c]):
+				continue
+			seen["%s%d" % [pair[0], c]] = true
+			if not font.has_char(c):
+				missing += String.chr(c)
+		_ok(missing.is_empty(), "%s renders every glyph the book uses %s" % [pair[0], missing])
+	for key: String in Loc.S:
+		var e: Dictionary = Loc.S[key]
+		if str(e.get("pt", "")).is_empty() or str(e.get("en", "")).is_empty():
+			_ok(false, "Loc '%s' has both languages" % key)
 
 
 func _check_surfaces() -> void:
@@ -356,9 +418,12 @@ func _check_hud() -> void:
 	GameManager.start_game()
 	await get_tree().process_frame
 	await get_tree().process_frame
+	GameManager.set_objective({"pt": "Recupera as taças!", "en": "Win back the cups!"}, 4)
+	await get_tree().process_frame
 
 	_check_two_player(hud)
 	_check_bounds(hud)
+	await _check_objective(hud)
 
 	var p1: HeroPanel = hud._heroes[1]
 	var p2: HeroPanel = hud._heroes[2]
@@ -423,20 +488,15 @@ func _check_hud() -> void:
 		GameManager.damage_boss(25, 1)
 	await get_tree().process_frame
 	_ok(GameManager.boss_phase == 2, "boss reached phase two")
-	_ok(hud._phase_label.text == "PHASE 2", "phase label updated")
+	_ok(hud._phase_label.text == Loc.f("phase", [2]), "phase label updated (%s)" % hud._phase_label.text)
 	_ok(hud._boss_bar._rage_target > 0.5, "boss bar is cross-fading to rage")
 	_ok(hud._boss_hp.text == "%d / %d" % [GameManager.boss_health, GameManager.MAX_BOSS_HEALTH],
 		"boss readout tracks health")
 
-	# Score rolls up rather than snapping, and lands exactly.
-	var target := float(GameManager.score)
-	_ok(hud._score_shown < target, "score is still rolling up")
-	# Wait for the exact landing, not for "close enough" — the roll is asymptotic
-	# and the final snap is the part that used to be missing.
-	await _wait_until(func() -> bool: return hud._score_shown == target, 6000)
-	_near(hud._score_shown, target, 0.001, "score lands exactly on its target")
-	_ok(hud._score_value.text == UIProgress.format_score(GameManager.score),
-		"score renders grouped: '%s'" % hud._score_value.text)
+	# The kid HUD carries no score and no clock: the goal's stars are the number.
+	_ok(not ("_score_value" in hud) and not ("_timer_value" in hud),
+		"no score or timer readout on the kid HUD")
+	_ok(UIProgress.format_score(1234567) == "1,234,567", "score grouping still formats")
 
 	# Each hero's combo window expires on its own — GameManager runs one timer per
 	# chain, and both counters have to clear off the back of their own.
@@ -483,7 +543,7 @@ func _check_hud() -> void:
 	_near(p2._bar.value, 100.0, 0.01, "restart resets P2's bar")
 	_ok(not p1._down_veil.visible, "restart clears the downed state")
 	_near(hud._boss_bar.value, float(GameManager.MAX_BOSS_HEALTH), 0.01, "restart resets boss bar")
-	_ok(hud._phase_label.text == "PHASE 1", "restart resets the phase label")
+	_ok(hud._phase_label.text == Loc.f("phase", [1]), "restart resets the phase label")
 	_ok(hud._fx._sustain_level == 0.0, "restart clears the danger vignette")
 	_ok(hud._pops.get_child_count() == 0, "restart clears floating numbers")
 
@@ -513,6 +573,9 @@ func _check_solo() -> void:
 	await get_tree().process_frame
 	_ok(solo._heroes.size() == 2, "the HUD boots on the default co-op roster")
 
+	# The roster-is-not-a-range checks are about a lone hero, i.e. the
+	# companion switched off. The companion case is checked after.
+	GameManager.companion = false
 	for hero in [1, 2]:
 		GameManager.player_count = 1
 		GameManager.human_hero = hero
@@ -542,6 +605,23 @@ func _check_solo() -> void:
 		await get_tree().process_frame
 		_ok(solo._heroes.size() == 1, "signals for an absent hero are ignored cleanly")
 
+	# Solo with the companion on (the default): both brothers have panels, and
+	# the one nobody is holding a controller for wears the robot badge.
+	GameManager.companion = true
+	for hero in [1, 2]:
+		GameManager.player_count = 1
+		GameManager.human_hero = hero
+		GameManager.start_game()
+		await get_tree().process_frame
+		var ai := 2 if hero == 1 else 1
+		_ok(solo._heroes.size() == 2, "solo as hero %d with the companion shows both panels" % hero)
+		if solo._heroes.size() == 2:
+			var human: HeroPanel = solo._heroes[hero]
+			var bot: HeroPanel = solo._heroes[ai]
+			_ok(bot.is_ai and bot.ai_badge != null and bot.ai_badge.visible,
+				"hero %d (the AI brother) wears the robot badge" % ai)
+			_ok(not human.is_ai and human.ai_badge == null, "hero %d (the child) does not" % hero)
+
 	# ...and back to co-op, which must restore both panels rather than leaving the
 	# solo one in place.
 	GameManager.player_count = was_count
@@ -549,6 +629,10 @@ func _check_solo() -> void:
 	GameManager.start_game()
 	await get_tree().process_frame
 	_ok(solo._heroes.size() == 2, "returning to co-op rebuilds both panels")
+	var any_ai := false
+	for pnl: HeroPanel in solo._heroes.values():
+		any_ai = any_ai or pnl.is_ai
+	_ok(not any_ai, "in co-op neither panel is marked as the AI")
 
 	solo.queue_free()
 	await get_tree().process_frame
@@ -622,9 +706,13 @@ func _check_bounds(hud: Control) -> void:
 	_ok(offenders.is_empty(), "all HUD widgets sit inside 1280x720 %s" % str(offenders))
 
 	var boss := Rect2(hud._boss_plate.position, hud._boss_plate.size)
-	var read := Rect2(hud._readout_plate.position, hud._readout_plate.size)
-	_ok(not read.intersects(boss), "score plate clears the boss banner %s / %s" % [read, boss])
-	_ok(read.end.x <= VIEW.x - UIStyle.SCREEN_MARGIN + 1.0, "readouts respect the right gutter")
+	var read := Rect2(hud._objective.position, hud._objective.size)
+	_ok(not read.intersects(boss), "goal widget clears the boss banner %s / %s" % [read, boss])
+	_ok(read.end.x <= VIEW.x - UIStyle.SCREEN_MARGIN + 1.0, "goal widget respects the right gutter")
+	var pause := Rect2(hud._pause_btn.position, hud._pause_btn.size)
+	_ok(not pause.intersects(boss), "pause button clears the boss banner")
+	_ok(pause.size.y >= 76.0, "pause button is a kid-sized target (%.0f px)" % pause.size.y)
+	var toast := Rect2(hud._toast.position, hud._toast.size)
 
 	for pid: int in hud._heroes:
 		var panel: HeroPanel = hud._heroes[pid]
@@ -633,7 +721,8 @@ func _check_bounds(hud: Control) -> void:
 		# toward the boss banner.
 		var reach := hero.merge(panel.combo_rect())
 		_ok(not reach.intersects(boss), "P%d's cluster clears the boss banner" % pid)
-		_ok(not reach.intersects(read), "P%d's cluster clears the score plate" % pid)
+		_ok(not reach.intersects(read), "P%d's cluster clears the goal widget" % pid)
+		_ok(not reach.intersects(toast), "P%d's cluster clears the story toast" % pid)
 		_ok(hero.position.x >= UIStyle.SCREEN_MARGIN - 1.0,
 			"P%d respects the left gutter" % pid)
 		_ok(hero.end.x <= VIEW.x - UIStyle.SCREEN_MARGIN + 1.0,
@@ -660,53 +749,227 @@ func _check_game_over() -> void:
 	_stage.add_child(over)
 	await get_tree().process_frame
 
+	# A win: the pose, then the outro pages, then the sticker.
+	GameManager.chapter_id = "adamastor"
 	GameManager.start_game()
-	GameManager.score = 1234
-	GameManager.fight_time = 92.0
 	GameManager._end_game(true)
-	# The card deliberately waits out the death pose before it appears.
-	await _wait_until(func() -> bool: return over.visible and over._interactive, 12000)
+	_ok(UIProgress.is_complete("adamastor"), "winning records the chapter at once")
+	_ok(UIProgress.stickers("adamastor") >= 1, "and awards its sticker")
+	_ok(UIProgress.next_unfinished() == "dragao", "the next story is now chapter 2")
+	await _wait_until(func() -> bool: return over.phase == "outro", 6000)
+	var reader: PageReader = over._reader
+	_ok(over.phase == "outro" and reader.is_open(), "the outro pages open after the pose")
+	_ok(reader.part == "outro" and reader.page_count()
+		== StoryData.chapter("adamastor")["outro"].size(), "it is chapter 1's outro")
+	_ok(str(reader.current_page().get("id", "")) == "a14", "starting on its first page")
+	reader._grace = 0.0
+	reader.next_page()
+	_ok(reader.index == 1, "the outro turns its pages")
+	reader._grace = 0.0
+	reader.next_page()
+	await get_tree().process_frame
+	_ok(over.phase == "sticker", "after the last page the sticker card shows")
+	_ok(over._cover != null and over._cover.has_sticker(), "with the sticker on the cover")
+	_ok(over._continue.size.y >= 76.0, "Continue is a kid-sized target")
+	_ok(Rect2(Vector2.ZERO, VIEW).encloses(Rect2(over._sticker_card.position,
+		over._sticker_card.size)), "the sticker card fits the frame")
 
-	_ok(over.visible, "results card appeared")
-	_ok(over._title.text == "VICTORY!", "victory verdict")
-	_ok(over._art.texture != null, "victory shows the hero portrait")
-	_ok(over._rows.get_child_count() >= 3, "stat rows present (%d)" % over._rows.get_child_count())
-	_ok(over._interactive, "card becomes interactive after the reveal")
-	_near(over._card.scale.x, 1.0, 0.02, "card settles at 1:1")
-	_near(over._stage.position.y, 0.0, 0.5, "card settles on its baseline")
-	_near(over._stage.modulate.a, 1.0, 0.02, "card finishes fading in")
-
-	var card := Rect2(over._card.position, over._card.size)
-	_ok(Rect2(Vector2.ZERO, VIEW).encloses(card), "card fits the frame %s" % str(card))
-	# The card must not outgrow its own panel, or the buttons fall off the bottom.
-	var content := over._card.get_child(0) as Control
-	_ok(content.size.y <= over._card.size.y - 2.0 * UIStyle.SPACE_XL + 1.0,
-		"card content fits its padding (%.0f in %.0f)" % [content.size.y, over._card.size.y])
-
-	_ok(UIProgress.best_score() >= 1234, "best score persisted")
-	_ok(UIProgress.format_score(1234567) == "1,234,567", "score grouping")
-	_ok(UIProgress.format_time(92.0) == "1:32", "time formatting")
-
-	# Second run, this time a loss. Same card, different character — and the stat
-	# rows must be rebuilt, not appended to.
-	var victory_rows: int = over._rows.get_child_count()
-	var hero_art: Texture2D = over._art.texture
+	# A loss can only happen with Ajudas off, and it never says so.
 	over._hide_now()
+	GameManager.assists = false
 	GameManager.start_game()
-	GameManager.score = 40
-	GameManager.fight_time = 31.0
 	GameManager._end_game(false)
-	await _wait_until(func() -> bool: return over.visible and over._interactive, 12000)
-	_ok(over._title.text == "DEFEAT", "defeat verdict")
-	_ok(over._art.texture != hero_art, "defeat swaps in the Adamastor portrait")
-	_ok(over._rows.get_child_count() <= victory_rows,
-		"stat rows rebuilt, not appended (%d)" % over._rows.get_child_count())
-	_ok(not over._badge.visible, "no personal-best badge on a worse run")
-	var lose_card := Rect2(over._card.position, over._card.size)
-	_ok(Rect2(Vector2.ZERO, VIEW).encloses(lose_card), "defeat card fits the frame %s" % str(lose_card))
+	await _wait_until(func() -> bool: return over.phase == "retry", 6000)
+	_ok(over.phase == "retry", "a loss shows the try-again card")
+	_ok(over._retry_title.text == Loc.t("try_again_title"), "\"%s\"" % over._retry_title.text)
+	var words := " ".join(_texts(over)).to_lower()
+	var bad := ""
+	for w in ["defeat", "derrota", "lose", "lost", "perdeste", "game over", "fim do jogo"]:
+		if words.contains(w):
+			bad += w + " "
+	_ok(bad.is_empty(), "no loss language anywhere on the card %s" % bad)
+	_ok(over._again.size.y >= 76.0 and over._to_book.size.y >= 76.0,
+		"Try again and Back to the book are kid-sized")
+	GameManager.assists = true
+	over._hide_now()
 
+	_ok(UIProgress.best_score() >= 0 and UIProgress.format_time(92.0) == "1:32",
+		"the old run records still read")
 	over.queue_free()
 	await get_tree().process_frame
+
+
+## The goal widget follows objective_changed / objective_progress, pip by pip,
+## in the current language, and a story beat shows as a toast once.
+func _check_objective(hud: Control) -> void:
+	var w: ObjectiveWidget = hud._objective
+	_ok(w.visible, "the goal widget shows when the level sets a goal")
+	_ok(w.pip_count() == 4 and w.lit_count() == 0, "four empty pips for a goal of four (%d/%d)"
+		% [w.lit_count(), w.pip_count()])
+	_ok(w.label_text() == "Recupera as taças!", "the goal reads in Portuguese")
+	GameManager.advance_objective(1)
+	await get_tree().process_frame
+	_ok(w.lit_count() == 1, "objective_progress lights the first pip (%d)" % w.lit_count())
+	GameManager.advance_objective(2)
+	await get_tree().process_frame
+	_ok(w.lit_count() == 3 and w.done == 3, "two more steps light three (%d)" % w.lit_count())
+	GameManager.advance_objective(9)
+	await get_tree().process_frame
+	_ok(w.lit_count() == 4 and w.done == 4, "progress clamps at the total (%d)" % w.lit_count())
+	GameManager.language = "en"
+	GameManager.settings_changed.emit()
+	_ok(w.label_text() == "Win back the cups!", "the goal switches language live")
+	GameManager.language = "pt"
+	GameManager.settings_changed.emit()
+
+	# Story beats: by id from the level, and on the clock for "start".
+	var toast: StoryToast = hud._toast
+	GameManager.request_story_beat("a11")
+	await get_tree().process_frame
+	_ok(toast.is_showing() and toast.beat_id == "a11", "story_beat shows that beat as a toast")
+	_ok(toast.text() == Loc.pick(StoryData.chapter("adamastor")["beats"][1]),
+		"with the book's line")
+	_ok(toast.mouse_filter == Control.MOUSE_FILTER_IGNORE, "the toast never blocks play")
+	GameManager.request_story_beat("a11")
+	_ok(toast.queue.is_empty(), "a beat shows once per run")
+	hud._run_clock = hud.START_BEAT_DELAY - 0.01
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_ok(toast.queue.size() == 1 and str(toast.queue[0].get("id")) == "a09",
+		"the chapter's start beat queues after %.0f s" % hud.START_BEAT_DELAY)
+
+	# The giant's banner is there only while a giant is.
+	_ok(hud._boss_layer.visible, "boss banner shows while a boss exists")
+	_fake_boss.remove_from_group("boss")
+	await get_tree().process_frame
+	_ok(not hud._boss_layer.visible, "and hides when there is none (stadium, street)")
+	_fake_boss.add_to_group("boss")
+	await get_tree().process_frame
+	toast.clear()
+
+
+## The frame around the game: shelf, who's playing, and the hand-off.
+func _check_storybook() -> void:
+	UIProgress.use_memory_only()
+	var menu: Control = MainMenuScene.instantiate()
+	_stage.add_child(menu)
+	await get_tree().process_frame
+	_ok(menu.screen == "title", "a fresh session starts on Toca para começar")
+	menu.debug_show("shelf")
+	await get_tree().process_frame
+	var shelf: Bookshelf = menu.shelf
+	var ids: Array = []
+	for c in shelf.covers:
+		ids.append(c.chapter_id)
+	_ok(shelf.covers.size() == 3, "the bookshelf shows three books (%d)" % shelf.covers.size())
+	_ok(ids == StoryData.ORDER, "in book order %s" % str(ids))
+	var frame := Rect2(Vector2.ZERO, VIEW)
+	for c in shelf.covers:
+		var r := Rect2(c.global_position, c.size)
+		_ok(r.size.y >= 76.0 and frame.encloses(r), "book %s is a big target inside the frame %s"
+			% [c.chapter_id, str(r)])
+		_ok(not c.has_sticker(), "book %s has no sticker before it is played" % c.chapter_id)
+	_ok(shelf.covers[0].suggested and not shelf.covers[1].suggested,
+		"the first story is the highlighted one on a new shelf")
+	_ok(shelf._gear.size.y >= 76.0, "the settings gear is a kid-sized target")
+
+	UIProgress.complete_chapter("adamastor")
+	shelf.enter()
+	_ok(shelf.covers[0].has_sticker(), "a finished story wears its sticker")
+	_ok(shelf.covers[1].suggested and not shelf.covers[0].suggested,
+		"and the next one is highlighted")
+	_ok(UIProgress.fresh_sticker.is_empty(), "the new sticker lands once")
+
+	# Who's playing: one child, then a brother; the other joins as the AI.
+	menu.choose_chapter("dragao")
+	await get_tree().process_frame
+	_ok(menu.screen == "who", "picking a book asks who is playing")
+	var who: WhoPlays = menu.who
+	for card in who._cards:
+		_ok(card.size.y >= 76.0, "%s is a kid-sized target" % card.name)
+	who.pick_players(1)
+	_ok(who.step == 1, "one player goes on to pick a hero")
+	who.pick_hero(2)
+	await get_tree().process_frame
+	_ok(GameManager.player_count == 1 and GameManager.human_hero == 2 and GameManager.companion,
+		"solo as Super Boxy, with Herosauro along as the companion")
+	_ok(int(UIProgress.get_pref("players", 0)) == 1 and int(UIProgress.get_pref("hero", 0)) == 2,
+		"the choice is remembered")
+	_ok(menu.screen == "reader" and menu.reader.is_open() and menu.reader.chapter_id == "dragao"
+		and menu.reader.part == "intro", "then the chapter's intro pages open")
+	menu.reader.close()
+	menu.go("shelf", true)
+	GameManager.player_count = 2
+	GameManager.human_hero = 1
+	menu.queue_free()
+	await get_tree().process_frame
+
+
+## Every page of every chapter, intro and outro, in both languages: the words
+## are the book's, the picture is the painted page or a composed one (never a
+## missing-file error), and the reader walks off the last page.
+func _check_reader() -> void:
+	var r := PageReader.new()
+	r.size = VIEW
+	_stage.add_child(r)
+	await get_tree().process_frame
+	var pages_read := 0
+	var bad: Array[String] = []
+	for lang in StoryData.LANGS:
+		GameManager.language = lang
+		for id: String in StoryData.ORDER:
+			for part in ["intro", "outro"]:
+				var done := [false]
+				var on_done := func(_skipped: bool) -> void: done[0] = true
+				r.finished.connect(on_done)
+				r.open(id, part)
+				var expect: Array = StoryData.chapter(id)[part]
+				for i in expect.size():
+					var pg: Dictionary = expect[i]
+					var art: PageArt = r._art
+					var painted := ResourceLoader.exists(str(pg.get("art", "")))
+					if r.current_text() != StoryData.text(pg, lang) or r.current_text().is_empty():
+						bad.append("%s/%s text" % [pg["id"], lang])
+					if art == null or art.has_painted_art != painted:
+						bad.append("%s art" % pg["id"])
+					elif not painted and art.find_child("ComposedPage", false, false) == null:
+						bad.append("%s not composed" % pg["id"])
+					pages_read += 1
+					r._grace = 0.0
+					r.next_page()
+				if not done[0]:
+					bad.append("%s/%s/%s never finished" % [id, part, lang])
+				r.finished.disconnect(on_done)
+	GameManager.language = "pt"
+	var total := 0
+	for id: String in StoryData.ORDER:
+		total += StoryData.chapter(id)["intro"].size() + StoryData.chapter(id)["outro"].size()
+	_ok(pages_read == total * 2, "read %d pages across both languages (expected %d)"
+		% [pages_read, total * 2])
+	_ok(bad.is_empty(), "every page has its words and a picture %s" % str(bad))
+	# The composition knows the cast of its pages.
+	r.open("adamastor", "intro", 0)
+	r._show_page(0)
+	r.index = 3
+	r._show_page(1)
+	var cast: Array[String] = r._art.cast_names()
+	_ok(cast.has("adamastor") and cast.has("herosauro"), "page a04 shows the giant and the heroes %s"
+		% str(cast))
+	_ok(r._art.word == "CRASH!", "and its sound-word (%s)" % r._art.word)
+	_ok(r._next.size.y >= 76.0 and r._back.size.y >= 76.0 and r._skip.size.y >= 76.0,
+		"Next, Back and Skip are kid-sized targets")
+	r.close()
+	r.queue_free()
+	await get_tree().process_frame
+
+
+func _texts(node: Node) -> Array[String]:
+	var out: Array[String] = []
+	if node is Label and (node as Label).is_visible_in_tree():
+		out.append((node as Label).text)
+	for c in node.get_children():
+		out.append_array(_texts(c))
+	return out
 
 
 # --- Helpers ------------------------------------------------------------------

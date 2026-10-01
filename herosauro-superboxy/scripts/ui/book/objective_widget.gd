@@ -38,8 +38,7 @@ func _ready() -> void:
 	_text = UIStyle.text("", UIStyle.Scale.SUBHEAD, UIStyle.TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_LEFT)
 	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_text.add_theme_font_size_override("font_size", 22)
-	_text.position = Vector2(76, 10)
-	_text.size = Vector2(W - 90, 60)
+	BookKit.place(_text, Vector2(76, 10), Vector2(W - 90, 60))
 	add_child(_text)
 	_pips = HBoxContainer.new()
 	_pips.mouse_filter = Control.MOUSE_FILTER_IGNORE
