@@ -336,7 +336,10 @@ func _track_stuck(h: PlayerBase) -> void:
 			_stuck_idle += 1
 		var spot := "%.1f@(%.1f,%.1f,%.1f)%s" % [_frame / FPS / 60.0, pos.x, pos.y, pos.z, "" if not idle else "!"]
 		_stuck_spots.append(spot)
-		print("kidbot: STUCK t=%s obj=%s" % [_mmss(_frame), _progress()])
+		var g := _goal(pos)
+		print("kidbot: STUCK t=%s obj=%s at=%s goal=%s (%.1f m flat, %.1f m up)" % [_mmss(_frame), _progress(),
+			str(pos.snapped(Vector3.ONE * 0.1)), str(g.snapped(Vector3.ONE * 0.1)),
+			_flat(g - pos).length(), g.y - pos.y])
 		_anchor = pos
 		_anchor_frame = _frame
 
