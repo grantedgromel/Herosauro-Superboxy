@@ -23,9 +23,12 @@ extends Control
 enum Device { KEYS, PAD, TOUCH }
 
 ## The design size; scaled down to fit the gap between the hero panels.
-const BASE := Vector2(352.0, 122.0)
-const CELL := 84.0
-const PAD_X := 8.0
+## The same height as the hero panels either side, so the bottom row reads as
+## one band; exactly the gap between them at 1280 wide.
+const BASE := Vector2(340.0, 122.0)
+## Cell widths: Move holds a four-cap cluster, Jump a wide space bar.
+const CELLS := [98.0, 88.0, 72.0, 72.0]
+const PAD_X := 5.0
 ## Never wider than this share of the screen.
 const MAX_SHARE := 0.35
 const LIFETIME := 12.0
@@ -255,27 +258,30 @@ func _draw() -> void:
 	draw_style_box(_panel_box, Rect2(Vector2.ZERO, BASE))
 	var pad := _current_device() == Device.PAD
 	var words := ["move", "jump", "hit", "special"]
+	var x := PAD_X
 	for i in 4:
-		var c := Vector2(PAD_X + CELL * (i + 0.5) + (BASE.x - 2.0 * PAD_X - CELL * 4.0) * 0.5, 50.0)
+		var cw: float = CELLS[i]
+		var c := Vector2(x + cw * 0.5, 50.0)
+		x += cw
 		if pad:
 			_draw_pad(i, c)
 		else:
 			_draw_keys(i, c)
 		var col := UIStyle.SUCCESS if done[i] else UIStyle.TEXT_SECONDARY
-		draw_string(_font_word, Vector2(c.x - CELL * 0.5, 108.0), Loc.t(words[i]),
-			HORIZONTAL_ALIGNMENT_CENTER, CELL, UIStyle.size_of(UIStyle.Scale.LABEL), col)
+		draw_string(_font_word, Vector2(c.x - cw * 0.5, 108.0), Loc.t(words[i]),
+			HORIZONTAL_ALIGNMENT_CENTER, cw, UIStyle.size_of(UIStyle.Scale.LABEL), col)
 		if done[i]:
-			_draw_tick(c + Vector2(28.0, -30.0))
+			_draw_tick(c + Vector2(cw * 0.5 - 12.0, -32.0))
 	draw_set_transform(Vector2.ZERO)
 
 
 func _draw_keys(i: int, c: Vector2) -> void:
 	match i:
 		Act.MOVE:
-			var s := 25.0
+			var s := 29.0
 			var g := 2.0
 			for at: Vector2 in [Vector2(0, -1), Vector2(-1, 0), Vector2(0, 0), Vector2(1, 0)]:
-				var o := c + Vector2(at.x * (s + g), at.y * (s + g) + 14.0)
+				var o := c + Vector2(at.x * (s + g), at.y * (s + g) + 15.0)
 				draw_style_box(_cap_box, Rect2(o - Vector2(s, s) * 0.5, Vector2(s, s)))
 				var rot := 0.0
 				if at == Vector2(-1, 0):
@@ -284,7 +290,7 @@ func _draw_keys(i: int, c: Vector2) -> void:
 					rot = PI * 0.5
 				elif at == Vector2(0, 0):
 					rot = PI
-				_draw_tri(o + Vector2(0, -1), rot, 1.0, INK)
+				_draw_tri(o + Vector2(0, -1.5), rot, 1.15, INK)
 		Act.JUMP:
 			var rr := Rect2(c + Vector2(-38, -14), Vector2(76, 38))
 			draw_style_box(_cap_tints[TouchControls.JUMP_TINT], rr)
@@ -363,33 +369,69 @@ func _base_xf() -> Transform2D:
 	return Transform2D(0.0, Vector2(k, k), 0.0, r.position)
 
 
-## Touch: no card, the real buttons get a pulsing ring each until tried.
+## Touch: no card. The real buttons get a ring each until tried, spotlit one
+## at a time in the order the line says them (move, jump, hit, power), so
+## neighbouring rings never pile up into a muddle.
+const SPOT_BEAT := 1.3
+
+
+func _spot_rect(act: int) -> Rect2:
+	match act:
+		Act.MOVE:
+			return touch.stick_hint_rect()
+		Act.JUMP:
+			return touch.button_global_rect(TouchControls.Role.JUMP)
+		Act.HIT:
+			return touch.button_global_rect(TouchControls.Role.ATTACK)
+	return touch.button_global_rect(TouchControls.Role.ABILITY)
+
+
+static func _spot_tint(act: int) -> Color:
+	match act:
+		Act.MOVE:
+			return UIStyle.TEXT_PRIMARY
+		Act.JUMP:
+			return TouchControls.JUMP_TINT
+		Act.HIT:
+			return TouchControls.ATTACK_TINT
+	return TouchControls.POWER_TINT
+
+
 func _draw_rings() -> void:
 	if touch == null:
 		return
+	var pending := 0
+	for act in 4:
+		if not done[act]:
+			pending += 1
+	if pending == 0:
+		return
 	var inv := get_global_transform().affine_inverse()
-	var t := _clock if _open else 0.0
 	var calm := GameManager.reduce_motion
-	var spots := [
-		[Act.MOVE, touch.stick_hint_rect(), UIStyle.TEXT_PRIMARY],
-		[Act.JUMP, touch.button_global_rect(TouchControls.Role.JUMP), TouchControls.JUMP_TINT],
-		[Act.HIT, touch.button_global_rect(TouchControls.Role.ATTACK), TouchControls.ATTACK_TINT],
-		[Act.POWER, touch.button_global_rect(TouchControls.Role.ABILITY), TouchControls.POWER_TINT],
-	]
-	for s: Array in spots:
-		var act := int(s[0])
-		var rr: Rect2 = s[1]
-		if done[act] or rr.size.x <= 0.0:
+	var t := _clock if _open else 0.0
+	var lit := int(t / SPOT_BEAT) % pending
+	var n := 0
+	for act in 4:
+		if done[act]:
+			continue
+		var here := n == lit
+		n += 1
+		var rr := _spot_rect(act)
+		if rr.size.x <= 0.0:
 			continue
 		var centre := inv * rr.get_center()
-		var base_r := rr.size.x * 0.5 + 10.0
-		var col: Color = s[2]
+		var base_r := rr.size.x * 0.5 + 4.0
+		var col := _spot_tint(act)
 		if calm:
-			draw_arc(centre, base_r + 4.0, 0.0, TAU, 48, col, 6.0, true)
+			# Menos movimento: every pending button gets a steady ring.
+			draw_arc(centre, base_r, 0.0, TAU, 48, col, 5.0, true)
+			continue
+		if not here:
 			continue
 		# Two rings walking outwards, half a beat apart: reads as "here!".
+		draw_arc(centre, base_r, 0.0, TAU, 48, col, 5.0, true)
 		for h in 2:
-			var ph := fmod(t * 0.9 + h * 0.5 + act * 0.13, 1.0)
+			var ph := fmod(t / SPOT_BEAT * 2.0 + h * 0.5, 1.0)
 			var c2 := col
 			c2.a = (1.0 - ph) * 0.95
-			draw_arc(centre, base_r + ph * 26.0, 0.0, TAU, 48, c2, 6.0 - ph * 3.0, true)
+			draw_arc(centre, base_r + ph * 22.0, 0.0, TAU, 48, c2, 6.0 - ph * 3.0, true)

@@ -32,6 +32,8 @@ const BOSS_LIFT := Vector3(0.0, 5.5, 0.0)
 ## the hero panels underneath.
 const INSET := Vector2(96.0, 176.0)
 const HOP := 16.0
+## The arrow's resting size: big enough to read from the sofa.
+const SIZE := 1.2
 const HOP_HZ := 1.6
 
 ## Wired by the HUD.
@@ -48,6 +50,10 @@ var _showing := false
 var _on_screen := false
 var _t := 0.0
 var _moved := false
+## The ground spot under an on-screen level goal, for the pulsing ring there.
+var _ground := Vector2.ZERO
+var _ring := false
+var _lift := Vector3.ZERO
 var _arrow: HintArrow
 var _pop: Tween
 var _voice: Narrator
@@ -112,6 +118,8 @@ func _hide() -> void:
 	if not _showing:
 		return
 	_showing = false
+	_ring = false
+	queue_redraw()
 	_arrow.visible = false
 	if _pop != null:
 		_pop.kill()
@@ -179,9 +187,11 @@ func _goal() -> Vector3:
 	if lv != null and lv.has_method("hint_target"):
 		var t: Vector3 = lv.hint_target()
 		if t.is_finite():
+			_lift = LEVEL_LIFT
 			return t + LEVEL_LIFT
 	var boss := get_tree().get_first_node_in_group("boss") as Node3D
 	if boss != null and boss.is_inside_tree():
+		_lift = Vector3.ZERO   # the giant is the ring; no ground spot
 		return boss.global_position + BOSS_LIFT
 	return Vector3.INF
 
@@ -193,7 +203,7 @@ func _show() -> void:
 	if _pop != null:
 		_pop.kill()
 	if GameManager.reduce_motion:
-		_arrow.scale = Vector2.ONE
+		_arrow.scale = Vector2(SIZE, SIZE)
 		_arrow.modulate.a = 0.0
 		_pop = create_tween()
 		_pop.tween_property(_arrow, "modulate:a", 1.0, 0.25)
@@ -201,7 +211,7 @@ func _show() -> void:
 		_arrow.modulate.a = 1.0
 		_arrow.scale = Vector2(0.2, 0.2)
 		_pop = create_tween()
-		_pop.tween_property(_arrow, "scale", Vector2.ONE, 0.45) \
+		_pop.tween_property(_arrow, "scale", Vector2(SIZE, SIZE), 0.45) \
 			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
@@ -221,6 +231,12 @@ func _place(goal: Vector3) -> void:
 	var box := Rect2(INSET, view - INSET * 2.0)
 	var hop := 0.0 if GameManager.reduce_motion else absf(sin(_t * PI * HOP_HZ)) * HOP
 	_on_screen = not behind and box.grow(40.0).has_point(p)
+	var ring := _on_screen and _lift != Vector3.ZERO
+	if ring:
+		_ground = cam.unproject_position(goal - _lift)
+	if ring or _ring:
+		queue_redraw()
+	_ring = ring
 	if _on_screen:
 		_arrow.rotation = PI * 0.5
 		_arrow.position = p - Vector2(0.0, 8.0 + hop)
@@ -246,6 +262,19 @@ func _speak() -> void:
 	spoken_text = line
 	if GameManager.narration:
 		_voice.speak(line, Loc.lang())
+
+
+## A flat gold ring on the ground under an on-screen goal: the arrow says
+## "this one", the ring says "here". One arc, squashed into perspective.
+func _draw() -> void:
+	if not _ring:
+		return
+	var calm := GameManager.reduce_motion
+	var k := 1.0 if calm else 1.0 + 0.12 * sin(_t * TAU * 0.8)
+	draw_set_transform(_ground, 0.0, Vector2(1.0, 0.38))
+	draw_arc(Vector2.ZERO, 46.0 * k, 0.0, TAU, 40, Color(0.012, 0.031, 0.055, 0.35), 12.0, true)
+	draw_arc(Vector2.ZERO, 46.0 * k, 0.0, TAU, 40, UIStyle.GOLD, 7.0, true)
+	draw_set_transform(Vector2.ZERO)
 
 
 ## A fat, friendly arrow with its tip at the origin, pointing +x. Drawn once.
