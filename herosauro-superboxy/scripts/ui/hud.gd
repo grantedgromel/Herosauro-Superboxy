@@ -55,10 +55,8 @@ const START_BEAT_DELAY := 5.0
 ## Boss health fraction under which the "low" beat shows.
 const LOW_BEAT_RATIO := 0.20
 
-## Fraction of hero health below which the screen edge starts glowing. Read from
-## the WORST-off living hero, not from player one: in co-op the danger signal
-## belongs to whoever is about to go down.
-const DANGER_RATIO := 0.30
+## The frame-edge bloom on a hero hit: warm, not alarm-red (see _on_player_damaged).
+const HIT_TINT := Color("ffb37a")
 
 ## Fixed seed for the damage-number scatter. Explicit because the capture gate
 ## compares frames pixel for pixel and `randf_range()` would put every floating
@@ -631,38 +629,25 @@ func _on_player_damaged(player_id: int, amount: int, new_health: int) -> void:
 		return
 	panel.set_health(new_health, amount > 0)
 
-	# The edge glow belongs to the party, not to player one: it tracks whichever
-	# hero is closest to going down, so in co-op it is still telling you
-	# something the moment either of you is in trouble.
-	_fx.set_danger(_party_danger())
+	# KID TUNING. No sustained low-health throb: a crimson heartbeat round the
+	# frame is the "someone is about to die" signal, and in this game nobody
+	# can (a hero at zero floats in a bubble and pops back). No red "-20" over
+	# the hero either: progress only ever goes up, and a loss in red numerals
+	# is exactly the feedback the kid rules forbid. The hit is still
+	# acknowledged, softly: the panel recoils and the frame edge blooms once
+	# in warm peach, never with Menos movimento on.
+	_fx.set_danger(0.0)
 
 	if amount > 0:
 		panel.take_hit(amount)
-		# Bigger hits bloom harder. A 6 dmg graze and an 18 dmg slam should not
-		# look the same.
-		_fx.flash(clampf(0.35 + float(amount) / 28.0, 0.35, 1.0))
-		_spawn_player_damage_number(player_id, amount)
+		if not BookKit.reduce_motion():
+			_fx.flash(clampf(0.2 + float(amount) / 60.0, 0.2, 0.5), HIT_TINT)
 
 
 func _on_player_respawned(player_id: int) -> void:
 	var panel: HeroPanel = _heroes.get(player_id)
 	if panel != null:
 		panel.revive()
-
-
-## Worst living hero, as a 0..1 danger level. A hero already at zero is out of
-## the fight and stops driving the glow — otherwise the screen would sit at full
-## red for the whole of the survivor's comeback.
-func _party_danger() -> float:
-	var worst := 0.0
-	for pid: int in _heroes:
-		var hp := float(GameManager.player_health.get(pid, GameManager.MAX_PLAYER_HEALTH))
-		if hp <= 0.0:
-			continue
-		var ratio := hp / float(GameManager.MAX_PLAYER_HEALTH)
-		if ratio <= DANGER_RATIO:
-			worst = maxf(worst, 1.0 - ratio / DANGER_RATIO)
-	return worst
 
 
 func _on_boss_damaged(amount: int, new_health: int) -> void:
@@ -688,26 +673,6 @@ func _spawn_damage_number(amount: int) -> void:
 		_rng.randf_range(-1.0, 1.0))
 	var tint := UIStyle.GOLD if crit else UIStyle.TEXT_PRIMARY
 	_pops.pop_at_world(str(amount), head, tint, crit)
-
-
-## Damage TAKEN also gets a number, in the hero's danger colour and prefixed so it
-## can never be mistaken for damage dealt. The impact contract asks for a UI
-## acknowledgement on every hit, and until now a hit on a hero produced only a
-## bar move in the corner of the screen — which is precisely the feedback the
-## contract says is not enough on its own.
-func _spawn_player_damage_number(player_id: int, amount: int) -> void:
-	if not is_inside_tree():
-		return
-	for p in get_tree().get_nodes_in_group("players"):
-		if not (p is Node3D):
-			continue
-		var pid := int(p.player_id) if "player_id" in p else 1
-		if pid != player_id:
-			continue
-		var at: Vector3 = (p as Node3D).global_position + Vector3(
-			_rng.randf_range(-0.5, 0.5), 2.4, _rng.randf_range(-0.4, 0.4))
-		_pops.pop_at_world("-%d" % amount, at, UIStyle.DANGER, false)
-		return
 
 
 ## Route a chain to the hero who owns it.
