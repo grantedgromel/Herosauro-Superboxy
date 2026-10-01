@@ -38,6 +38,8 @@ var _hide_list: Array[String] = ["BridgeArena", "SkyBackground", "Clouds", "Rive
 	"Ribeira", "PortoLandmarks", "Ironwork", "DeckDressing", "Lamps", "Rabelos", "RiverLife"]
 var _skip_mats := false
 var _far_test := false
+var _levers := false
+var _sky_variants := false
 ## Shot ids from tools/shots.json (prefix match, e.g. "06,07"): each is rendered
 ## from a fixed camera with the tree paused, timed, and saved next to --out.
 var _views: Array[String] = []
@@ -57,6 +59,10 @@ func _ready() -> void:
 			_hide_list.assign(a.substr(7).split(","))
 		elif a.begins_with("--views="):
 			_views.assign(a.substr(8).split(","))
+		elif a == "--sky-variants":
+			_sky_variants = true
+		elif a == "--levers":
+			_levers = true
 		elif a == "--far-test":
 			_far_test = true
 		elif a == "--skip-mats":
@@ -110,6 +116,8 @@ func _ready() -> void:
 		await _run_views()
 	if _experiments:
 		await _run_experiments()
+	if _levers:
+		await _run_levers()
 	if _census:
 		_print_census()
 	print("[perf] === END ===")
@@ -293,7 +301,53 @@ func _run_experiments() -> void:
 		await _wait(1)
 		_print_row("X sun orthogonal", await _sample(n), base)
 		sun.directional_shadow_mode = mode
+	if _sky_variants:
+		var sky := _find("SkyBackground")
+		for variant in ["far", "far+no_recv_shadow", "far+no_specular", "far+no_rim", "far+no_ambient", "unshaded"]:
+			var orig := {}
+			for node in _all(sky):
+				var gi := node as GeometryInstance3D
+				if gi == null or not (gi.material_override is BaseMaterial3D):
+					continue
+				orig[gi] = gi.material_override
+				var m: BaseMaterial3D = (load("res://scripts/world/world_tier.gd") as Script).call(
+						"far_material", gi.material_override).duplicate()
+				match variant:
+					"far+no_recv_shadow":
+						m.disable_receive_shadows = true
+					"far+no_specular":
+						m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+						m.metallic_specular = 0.0
+					"far+no_rim":
+						m.rim_enabled = false
+					"far+no_ambient":
+						m.disable_ambient_light = true
+					"unshaded":
+						m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				gi.material_override = m
+			await _wait(1)
+			_print_row("S sky %s (%d)" % [variant, orig.size()], await _sample(n), base)
+			for gi in orig:
+				gi.material_override = orig[gi]
 	if _far_test:
+		var all_far := _swap_far_except([])
+		await _wait(1)
+		_print_row("X far_material on everything (%d)" % all_far.size(), await _sample(n), base)
+		for mi in all_far:
+			mi.material_override = all_far[mi]
+		var flat := StandardMaterial3D.new()
+		flat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		flat.albedo_color = Color(0.6, 0.6, 0.6)
+		var unshaded := {}
+		for node in _all(_find("BridgeArena")):
+			var gi := node as GeometryInstance3D
+			if gi != null and gi.material_override is BaseMaterial3D:
+				unshaded[gi] = gi.material_override
+				gi.material_override = flat
+		await _wait(1)
+		_print_row("X arena unshaded grey (%d)" % unshaded.size(), await _sample(n), base)
+		for gi in unshaded:
+			gi.material_override = unshaded[gi]
 		var swapped := _swap_far_except(["Roadway", "Footways", "Tramway", "Bridge", "DeckDressing",
 			"Lamps", "ParapetIron", "Fascia", "Abutments"])
 		await _wait(1)
@@ -464,5 +518,56 @@ func _swap_far_except(keep: Array) -> Dictionary:
 		if skip:
 			continue
 		out[mi] = mi.material_override
-		mi.material_override = WorldTier.far_material(mi.material_override)
+		# Called dynamically so this tool still parses against a WorldTier that
+		# predates far_material (the before/after renders check out the old one).
+		mi.material_override = (load("res://scripts/world/world_tier.gd") as Script).call(
+				"far_material", mi.material_override)
 	return out
+
+
+# --- Renderer-wide levers -----------------------------------------------------
+## Settings this directory does not own (project.godot, the lighting rig), measured
+## here so whoever does own them has numbers rather than a suggestion. Each is
+## applied, sampled and reverted; "combined" stacks the three that are tier-local.
+
+func _run_levers() -> void:
+	get_tree().paused = true
+	var n := _abl_frames
+	var vp := get_viewport()
+	var env: Environment = null
+	for node in _all(get_tree().root):
+		if node is WorldEnvironment:
+			env = (node as WorldEnvironment).environment
+	var q0: int = ProjectSettings.get_setting(
+		"rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality")
+	await _wait(1)
+	var base := await _sample(n)
+	_print_row("L baseline (paused)", base)
+	for sc in [0.75, 0.67]:
+		vp.scaling_3d_scale = sc
+		await _wait(1)
+		_print_row("L scaling_3d_scale %.2f" % sc, await _sample(n), base)
+	vp.scaling_3d_scale = 1.0
+	for q in [1, 0]:
+		RenderingServer.directional_soft_shadow_filter_set_quality(q)
+		await _wait(1)
+		_print_row("L soft shadow quality %d (from %d)" % [q, q0], await _sample(n), base)
+	RenderingServer.directional_soft_shadow_filter_set_quality(q0)
+	var had_ssao := env != null and env.ssao_enabled
+	var had_glow := env != null and env.glow_enabled
+	if env != null:
+		env.ssao_enabled = false
+		env.glow_enabled = false
+		await _wait(1)
+		_print_row("L ssao + glow off", await _sample(n), base)
+	vp.scaling_3d_scale = 0.75
+	RenderingServer.directional_soft_shadow_filter_set_quality(1)
+	await _wait(1)
+	_print_row("L combined: 0.75 + q1 + no ssao/glow", await _sample(n), base)
+	vp.scaling_3d_scale = 1.0
+	RenderingServer.directional_soft_shadow_filter_set_quality(q0)
+	if env != null:
+		env.ssao_enabled = had_ssao
+		env.glow_enabled = had_glow
+	_print_row("L baseline again", await _sample(n), base)
+	get_tree().paused = false

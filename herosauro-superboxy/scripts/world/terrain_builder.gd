@@ -488,8 +488,9 @@ static func _wall_run(near: TerrainBatch, far: TerrainBatch, side: float, level:
 		# On the reduced tier a wall run outside SHADOW_RADIUS is laid in bands, not
 		# blocks: it is drawn per-vertex with no normal map there (WorldTier's
 		# far_material), so a 3.5 cm joint and a 2 cm proud stone are lit exactly
-		# like the band they sit in, and this is 44k of the hillside's 136k
-		# triangles. banded_wall() is the kit's own far-reach form for this.
+		# like the band they sit in. Measured on the reduced tier: the hillside goes
+		# from 135,575 triangles to 108,695. banded_wall() is the kit's own
+		# far-reach form for exactly this.
 		# Asked at the level's own front at z = 0, the same point build() locates
 		# the level's cell at, so "coarse" and "far material" are one decision.
 		if is_near and not WorldTier.coarse_at(Vector3(front_x(side, level, 0.0), 0.0, 0.0)):

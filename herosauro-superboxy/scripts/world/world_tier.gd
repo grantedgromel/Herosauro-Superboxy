@@ -122,18 +122,22 @@ const FACADE_RETURN_RANGE := 90.0
 ## bridge_arena.tscn, which reaches the Ribeira stack.
 ##
 ## 96 -> 60, together with the single map below. 96 was chosen when the cost model
-## was vertices; on a software rasteriser the shadow pass measured ~420 ms of a
-## ~1,850 ms frame (sun shadows off, `_bridge_perf.tscn -- --experiments`), and it
-## is paid once per cascade because every ring-0 chunk's AABB reaches into every
-## cascade. 60 m still covers the whole deck ahead of the chase camera, which looks
-## down the deck from ~10 m behind the hero; what falls out is the far abutment's
-## contact shadow seen from the other end of the bridge.
+## was vertices. On a software rasteriser, switching the sun's shadows off saved
+## ~420 ms of a ~1,850 ms frame (`_bridge_perf.tscn -- --experiments`), part of it
+## the caster pass, which is paid once per cascade because every ring-0 chunk's
+## AABB reaches into every cascade. After this change shadows-off still saves
+## ~250-440 ms, so most of what is left is the per-pixel PCF on the RECEIVING side,
+## which is the project's soft_shadow_filter_quality and not this file's. 60 m still
+## covers the deck ahead of the chase camera, which looks down it from ~10 m behind
+## the hero; what falls out is the far abutment's contact shadow.
 const SHADOW_DISTANCE := 60.0
 ## ONE map on the reduced tier, not two. PARALLEL_2_SPLITS with split_1 = 0.06 spent
 ## a whole geometry pass on a 5.8 m cascade around the camera, and every caster in
-## ring 0 is submitted to both. A single 2048 map over 60 m is ~3 cm a texel at the
-## near end, which is still sharper than the 0.53-degree penumbra the sun is
-## authored with resolves at the hero's feet.
+## ring 0 is submitted to both. Measured together with SHADOW_DISTANCE above and the
+## arch leaving the pass (bridge_ironwork.gd WEB_SHADOWLESS): shadow-pass primitives
+## 204k -> 92k from the gameplay camera. The hero's and the giant's shadows on the
+## deck were checked by eye in the web-tier gameplay frame and still read as
+## contact shadows; the sharpness lost was not measured as a number.
 const SHADOW_SPLITS := DirectionalLight3D.SHADOW_ORTHOGONAL
 
 ## River plane subdivisions on the reduced tier, against the .tscn's 178.
@@ -232,7 +236,8 @@ static func plan_distance(pos: Vector3) -> float:
 ##   ... and per-vertex shading                       1,609
 ##
 ## against 400 ms for the whole Dragao stadium on the same machine. No subtree of
-## the scene, hidden outright, was worth half of that first line.
+## the scene, hidden outright, was worth half of that first line. (Single samples
+## of 4 frames; repeat runs of the same configuration agree to about +-150 ms.)
 ##
 ## So the reduced tier gets two derived copies of each material, cached by source
 ## material so the whole city still shares one of each:
