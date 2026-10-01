@@ -200,3 +200,143 @@ static func cell_casts_shadow(cell: Vector2i) -> bool:
 ## metres up is not forty metres further away.
 static func plan_distance(pos: Vector3) -> float:
 	return Vector2(pos.x, pos.z).length()
+
+
+# --- Reduced-tier materials ---------------------------------------------------
+##
+## --- THE MEASUREMENT THAT MOVED THE COST OFF GEOMETRY ------------------------
+##
+## Everything above this line is about vertices, and on a real GPU that was right.
+## The browser this game is first offered in is often not a real GPU: headless
+## Chromium and plenty of school laptops rasterise WebGL on the CPU (SwiftShader),
+## and so does llvmpipe, which is how scripts/world/_perf/_bridge_perf.tscn measures
+## it here. On a CPU rasteriser the bill is per FRAGMENT, paid in texture taps.
+##
+## Every ToonFactory surface material is triplanar (three taps per map) with an
+## albedo, a normal and a roughness/AO mask on uv1, plus the close-range detail
+## layer on its own triplanar uv2 (six more), all sampled ANISOTROPICALLY. A
+## software rasteriser implements anisotropy as many trilinear taps along the
+## footprint, so one deck fragment cost on the order of a hundred texel fetches.
+## Measured from the gameplay camera, GL Compatibility, 960x540, one llvmpipe
+## thread, tree paused (`_bridge_perf.tscn -- --experiments`), per frame:
+##
+##   baseline                                         5,070 ms
+##   every arena material: detail off, aniso off      2,346
+##   ... and no normal/roughness/AO maps              1,977
+##   ... and per-vertex shading                       1,609
+##
+## against 400 ms for the whole Dragao stadium on the same machine. No subtree of
+## the scene, hidden outright, was worth half of that first line.
+##
+## So the reduced tier gets two derived copies of each material, cached by source
+## material so the whole city still shares one of each:
+##
+##   lean_material  what the deck and everything near it is drawn with: the same
+##                  maps and the same look, minus the detail layer (a 0.28 m tile
+##                  whose job is a 1:1 close-up the chase camera never takes) and
+##                  minus anisotropy (trilinear instead).
+##   far_material   for chunks outside SHADOW_RADIUS, i.e. backdrop at 66 m and
+##                  beyond: lean, plus no normal/roughness/metal/AO maps and
+##                  per-vertex lighting. The bakes are flat-shaded (MeshBaker writes
+##                  one normal per triangle), so per-vertex diffuse is the same
+##                  number per face that per-pixel was; what goes is normal-mapped
+##                  grain and a specular lobe on walls 70-300 m away. The albedo map
+##                  STAYS, because ToonFactory pitches albedo_color against that
+##                  map's mean, and dropping it would shift every wall's colour.
+##
+## Desktop never asks for either: every caller is behind is_reduced() or
+## split_bakes(), and on Forward+ both are false.
+
+static var _lean: Dictionary = {}
+static var _far: Dictionary = {}
+
+
+## The reduced-tier copy of `mat` with the two software-rasteriser killers removed.
+## Anything that is not a BaseMaterial3D (the river, the clouds, the sky) comes back
+## untouched; those are shaders with their own budget.
+static func lean_material(mat: Material) -> Material:
+	var base := mat as BaseMaterial3D
+	if base == null:
+		return mat
+	var cached: Material = _lean.get(base)
+	if cached != null:
+		return cached
+	var m: BaseMaterial3D = base.duplicate()
+	m.detail_enabled = false
+	m.texture_filter = _no_aniso(m.texture_filter)
+	_lean[base] = m
+	_lean[m] = m      # a lean copy is already lean; never duplicate it again
+	return m
+
+
+## The reduced-tier copy of `mat` for backdrop chunks. See the header above.
+static func far_material(mat: Material) -> Material:
+	var base := mat as BaseMaterial3D
+	if base == null:
+		return mat
+	var cached: Material = _far.get(base)
+	if cached != null:
+		return cached
+	var m: BaseMaterial3D = base.duplicate()
+	m.detail_enabled = false
+	m.texture_filter = _no_aniso(m.texture_filter)
+	m.normal_enabled = false
+	m.normal_texture = null
+	m.roughness_texture = null
+	m.metallic_texture = null
+	m.ao_enabled = false
+	m.ao_texture = null
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
+	_far[base] = m
+	_lean[m] = m      # the arena-wide lean pass must leave it alone
+	return m
+
+
+## The material a batch chunk in `cell` commits with. On the desktop path the
+## bakes are not split, every cell is Vector2i.ZERO, and this returns `mat` itself,
+## the identical object, so nothing downstream can tell it was asked.
+static func chunk_material(mat: Material, cell: Vector2i) -> Material:
+	if split_bakes() and not cell_casts_shadow(cell):
+		return far_material(mat)
+	return mat
+
+
+## Swap every BaseMaterial3D under `root` for its lean copy and return how many
+## slots changed. Called once, on the reduced tier only, after the arena is built.
+static func lean_tree(root: Node) -> int:
+	var swapped := 0
+	var stack: Array[Node] = [root]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		stack.append_array(n.get_children())
+		var gi := n as GeometryInstance3D
+		if gi == null:
+			continue
+		if gi.material_override != null:
+			var lean := lean_material(gi.material_override)
+			if lean != gi.material_override:
+				gi.material_override = lean
+				swapped += 1
+			continue
+		var mi := n as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			var src := mi.get_surface_override_material(i)
+			if src == null:
+				src = mi.mesh.surface_get_material(i)
+			if src == null:
+				continue
+			var lean_s := lean_material(src)
+			if lean_s != src:
+				mi.set_surface_override_material(i, lean_s)
+				swapped += 1
+	return swapped
+
+
+static func _no_aniso(f: BaseMaterial3D.TextureFilter) -> BaseMaterial3D.TextureFilter:
+	if f == BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC:
+		return BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	if f == BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS_ANISOTROPIC:
+		return BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
+	return f

@@ -266,6 +266,10 @@ func _ready() -> void:
 	IronworkScript.attach(self)
 	_build_lamps()
 	_build_deck_dressing()
+	if WorldTier.is_reduced():
+		# Deferred so it also catches what the children finish building in their own
+		# deferred calls. See WorldTier.lean_material for the measurement.
+		_lean_web_materials.call_deferred()
 
 
 # --- Web tier ----------------------------------------------------------------
@@ -313,6 +317,13 @@ func _apply_web_tier() -> void:
 	if sun != null:
 		sun.directional_shadow_max_distance = WorldTier.SHADOW_DISTANCE
 		sun.directional_shadow_mode = WorldTier.SHADOW_SPLITS
+
+
+## Every surface material in the arena, swapped for its reduced-tier copy: no
+## detail layer, no anisotropic filtering. Measured as the largest single cost of
+## this scene on a software rasteriser — see WorldTier's material header.
+func _lean_web_materials() -> void:
+	WorldTier.lean_tree(self)
 
 
 # --- Roadway -----------------------------------------------------------------

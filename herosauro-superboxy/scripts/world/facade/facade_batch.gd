@@ -180,7 +180,8 @@ func commit(node_name: String = "Facades") -> Node3D:
 		var b := _baker_for(key)
 		if b.triangle_count() == 0:
 			continue
-		var mi := b.commit(key[0] as Material, "%s_%d" % [node_name, index])
+		var mi := b.commit(WorldTier.chunk_material(key[0] as Material, key[1] as Vector2i),
+				"%s_%d" % [node_name, index])
 		# Two independent reasons to leave the shadow pass: the caller's
 		# all-or-nothing switch, and this chunk's own distance ring on the reduced
 		# tier. See WorldTier.cell_casts_shadow for why the ring answers it and an
