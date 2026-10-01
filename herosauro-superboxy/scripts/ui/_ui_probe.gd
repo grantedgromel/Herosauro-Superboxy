@@ -323,6 +323,23 @@ func _check_portraits() -> void:
 		# shows as opaque paint running into the left or right edge of the
 		# texture: a straight vertical cut down the hero card. A clean cut-out
 		# has a transparent margin all round.
+		if actor == UIStyle.Actor.ADAMASTOR:
+			# The story pages are for four-year-olds: the giant on them must not
+			# have the sheet's flaming brows and glowing orange eyes. Glow is
+			# bright, saturated warm paint in the top fifth of the figure (his
+			# bronze cuffs are far below it).
+			var aimg := tall.get_image()
+			if aimg.is_compressed():
+				aimg.decompress()
+			var glow := 0
+			for y in range(0, int(aimg.get_height() * 0.2)):
+				for x in range(0, aimg.get_width()):
+					var px := aimg.get_pixel(x, y)
+					if px.a > 0.5 and px.r > 0.55 and px.r > px.b + 0.3 and px.g > px.b + 0.12 \
+							and px.s > 0.4:
+						glow += 1
+			_ok(glow < 40, "%s on the pages has no glowing eyes or fire brows (%d glow px)"
+				% [who, glow])
 		if actor != UIStyle.Actor.ADAMASTOR:
 			var fimg := tall.get_image()
 			if fimg.is_compressed():
