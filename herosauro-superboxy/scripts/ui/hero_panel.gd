@@ -139,6 +139,12 @@ func setup(id: int, right_hand: bool) -> void:
 	actor = UIStyle.actor_for_player(id)
 	accent = UIStyle.actor_color(actor)
 	size = PANEL
+	# Squash, recoil and pop all scale about the panel's own centre, and the
+	# pivot is set ONCE, here: the HUD lays a scaled (compact) panel out by
+	# where it is drawn, which depends on the pivot. A pivot that jumped to the
+	# centre on the first hit moved a compact panel's drawn box by
+	# PANEL * 0.5 * (1 - scale) into its neighbours.
+	pivot_offset = PANEL * 0.5
 
 	# DRAW ORDER IS BATCHING. Everything from the plate to the dial is drawn
 	# from the IconAtlas (plate, spine, portrait, P1 pill, AI badge, bar, dial),
@@ -347,9 +353,8 @@ func take_hit(amount: int) -> void:
 	position.x = _rest_x
 
 	# Recoil away from the centre of the screen: the panel is being shoved by the
-	# blow, and it squashes on the way. Pivot is the panel's own centre so the
-	# squash never drags a corner across the screen gutter.
-	pivot_offset = size * 0.5
+	# blow, and it squashes on the way. Pivot is the panel's own centre (set in
+	# setup) so the squash never drags a corner across the screen gutter.
 	var shove := 10.0 * (1.0 if mirrored else -1.0)
 	var k := base_scale
 	_recoil = create_tween()
@@ -371,7 +376,6 @@ func revive() -> void:
 	set_health(int(GameManager.player_health.get(player_id, GameManager.MAX_PLAYER_HEALTH)), false)
 	_hit = 1.0
 	set_process(true)
-	pivot_offset = size * 0.5
 	var t := create_tween()
 	t.tween_property(self, "scale", Vector2(1.07, 1.07) * base_scale, 0.12) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)

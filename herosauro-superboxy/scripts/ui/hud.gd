@@ -290,11 +290,14 @@ func _place_panels() -> void:
 			panel.base_scale = COMPACT
 			panel.scale = Vector2.ONE * COMPACT
 			panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+			# Laid out by where it is DRAWN: the panel scales about its centre
+			# pivot, so its box sits PANEL * 0.5 * (1 - COMPACT) inside its rect.
 			var top := _compact_top() + i * (HeroPanel.PANEL.y * COMPACT + COMPACT_GAP)
-			panel.offset_left = M
-			panel.offset_top = top
-			panel.offset_right = M + HeroPanel.PANEL.x
-			panel.offset_bottom = top + HeroPanel.PANEL.y
+			var inset := HeroPanel.PANEL * 0.5 * (1.0 - COMPACT)
+			panel.offset_left = M - inset.x
+			panel.offset_top = top - inset.y
+			panel.offset_right = panel.offset_left + HeroPanel.PANEL.x
+			panel.offset_bottom = panel.offset_top + HeroPanel.PANEL.y
 			continue
 		var right := i == 1
 		panel.base_scale = 1.0
@@ -670,6 +673,8 @@ func _spawn_damage_number(amount: int) -> void:
 ## bar move in the corner of the screen — which is precisely the feedback the
 ## contract says is not enough on its own.
 func _spawn_player_damage_number(player_id: int, amount: int) -> void:
+	if not is_inside_tree():
+		return
 	for p in get_tree().get_nodes_in_group("players"):
 		if not (p is Node3D):
 			continue
