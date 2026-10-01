@@ -1,5 +1,5 @@
 // Full-moon night over Porto: deep blue zenith, a city-glow horizon, hashed
-// stars that twinkle, and a big friendly cartoon moon with a halo.
+// stars, and a big friendly cartoon moon with a halo.
 shader_type sky;
 
 uniform vec3 zenith : source_color = vec3(0.03, 0.06, 0.2);
@@ -25,7 +25,9 @@ void sky() {
 	float r = h3(cell);
 	float star = step(0.982, r) * (1.0 - smoothstep(0.0, 0.33, length(f)));
 	star *= smoothstep(0.02, 0.2, d.y);
-	star *= 0.65 + 0.35 * sin(TIME * (1.5 + r * 3.0) + r * 60.0);
+	// A fixed per-star brightness, no TIME: a sky shader that reads TIME has
+	// its radiance re-rendered every frame, which the web build cannot afford.
+	star *= 0.55 + 0.45 * fract(r * 913.0);
 	col += vec3(0.95, 0.97, 1.0) * star * 1.4;
 
 	vec3 md = normalize(moon_dir);

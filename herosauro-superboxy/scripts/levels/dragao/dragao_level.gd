@@ -466,7 +466,7 @@ func _bowl_with_balls() -> void:
 				Hurtbox.strike(g, 10, Vector3(v.x, 0, v.z).normalized() * 6.0 + Vector3.UP * 3.0, 1)
 				b.rebound(d)
 				ball_knockdowns += 1
-				_show_pumba(g.global_position + Vector3.UP * 2.2)
+				_show_pumba(g.global_position + Vector3.UP * 1.8)
 				GameManager.hit_stop(0.04)
 				GameManager.request_shake(0.2, 0.16)
 				break

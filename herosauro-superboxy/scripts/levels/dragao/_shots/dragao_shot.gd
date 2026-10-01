@@ -59,7 +59,7 @@ func _ready() -> void:
 			if g.is_active() and g.hits == 1 and n < 2:
 				g.take_hit(10.0, Vector3.LEFT)
 				n += 1
-	if _stage >= 2 and _stage < 4 and level != null:
+	if (_stage == 2 or _stage == 3 or _stage == 5) and level != null:
 		for s in level.stakes:
 			for k in 3:
 				s.take_hit(10.0, Vector3.RIGHT)
@@ -75,6 +75,35 @@ func _ready() -> void:
 				c.collect(level.cabinet.slot_global(c.slot))
 				GameManager.advance_objective(1)
 		await _wait(200)
+	var kick_at := Vector3.INF
+	if _stage == 5 and level != null:
+		# A football kicked into a carrier: PUMBA.
+		await _wait(150)
+		var hero: Node3D = null
+		for p in get_tree().get_nodes_in_group("players"):
+			if int(p.player_id) == 1:
+				hero = p
+		var g = level.nearest_carrier(hero.global_position)
+		var gp: Vector3 = g.global_position
+		var dir := Vector3(gp.x, 0, gp.z).normalized()
+		var ball = level.balls[0]
+		ball.reset_ball()
+		ball.global_position = gp - dir * 1.4 + Vector3.UP * 0.3
+		level.place_hero_near(hero, gp - dir * 1.4, 1.1, -dir)
+		hero.face_toward(gp)
+		InputManager.press_virtual(1, &"attack")
+		kick_at = gp
+		await _wait(26)
+		var cam5 := Camera3D.new()
+		cam5.fov = 55.0
+		add_child(cam5)
+		var side := Vector3(-dir.z, 0, dir.x)
+		cam5.global_position = gp + side * 6.5 + Vector3.UP * 2.5 - dir * 1.5
+		cam5.look_at(gp + Vector3.UP * 0.8)
+		cam5.make_current()
+		await _wait(1)
+		await _save(_out.replace(".png", "_pumba.png"))
+		cam5.queue_free()
 	await _wait(_frames)
 	if level != null:
 		for g in level.goblins:
