@@ -208,7 +208,7 @@ func _play_houses() -> void:
 		_ok(not h.star.is_in_group("targets"), "...and its star leaves group 'targets'")
 		if fixed == 4:
 			await _settle(2)
-			_ok(_beats.has("p08"), "at 4/8 the level asks for story beat p08 (beats %s)" % str(_beats))
+			_ok(_beats.has("p11h"), "at 4/8 the level asks for story beat p11h (beats %s)" % str(_beats))
 		await _settle(20)
 	_ok(GameManager.objective_done() == 8, "all eight houses fixed: %d/8" % GameManager.objective_done())
 	var mood: float = _level.get("_mood_target")

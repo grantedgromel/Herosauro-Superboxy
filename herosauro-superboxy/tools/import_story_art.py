@@ -45,15 +45,18 @@ QUALITY = 85
 
 # chapter id -> {page id or "cover": Drive file name}
 MAPPING = {
+    # Page ids follow the final book: letter = story, number = page within the
+    # story. Drive file numbers mostly match; the guesses are marked.
     "adamastor": {
         # Chapter 1's cover on the shelf is the game's key art, so #0.png is
-        # not needed. Beats a09/a11 have pictures (#9b, #11a) but beats are
-        # spoken toasts during play, not pages. a14 and a15 have no picture yet.
+        # not needed. a09-a12 are spoken beats during play, not pages, and
+        # a13-a15 have no picture in Drive yet.
         "a01": "#1c.png",
         "a02": "#2c.png",
         "a03": "#3c.png",
         "a04": "#4a.png",
         "a05": "#5h.png",       # alternates: #5e.png, #5ee.png
+        "a06": "#6c.png",
         "a07": "#7a.png",       # alternate: #7.1d.png
         "a08": "#8d.png",       # alternate: #8.1c.png
     },
@@ -73,6 +76,8 @@ MAPPING = {
         "d14": "#14.png",
     },
     "pandas": {
+        # 14 book pages, 14 Drive pictures; #8.1 and #12a/#12b are read as
+        # the extra pages. p11 is a spoken beat, so #10 is unused.
         "cover": "#0 Cover (Panda).png",
         "p01": "#1.png",
         "p02": "#2.png",
@@ -80,9 +85,13 @@ MAPPING = {
         "p04": "#4.png",
         "p05": "#5.png",
         "p06": "#6.png",
-        "p09": "#10.png",       # guess; #7, #8, #8.1 and #9 are the street changing
-        "p10": "#11.png",
-        "p11": "#12a.png",      # alternate: #12b.png
+        "p07": "#7.png",
+        "p08": "#8.png",
+        "p09": "#8.1.png",      # guess
+        "p10": "#9.png",        # guess
+        "p12": "#11.png",
+        "p13": "#12a.png",
+        "p14": "#12b.png",
     },
 }
 

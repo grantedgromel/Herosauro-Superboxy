@@ -796,12 +796,14 @@ func _check_game_over() -> void:
 	_ok(over.phase == "outro" and reader.is_open(), "the outro pages open after the pose")
 	_ok(reader.part == "outro" and reader.page_count()
 		== StoryData.chapter("adamastor")["outro"].size(), "it is chapter 1's outro")
-	_ok(str(reader.current_page().get("id", "")) == "a14", "starting on its first page")
+	_ok(str(reader.current_page().get("id", "")) == "a13", "starting on its first page")
 	reader._grace = 0.0
 	reader.next_page()
 	_ok(reader.index == 1, "the outro turns its pages")
-	reader._grace = 0.0
-	reader.next_page()
+	# Page through whatever is left: the book decides how long an outro is.
+	for _i in reader.page_count() - 1:
+		reader._grace = 0.0
+		reader.next_page()
 	await get_tree().process_frame
 	_ok(over.phase == "sticker", "after the last page the sticker card shows")
 	_ok(over._cover != null and over._cover.has_sticker(), "with the sticker on the cover")

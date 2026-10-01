@@ -215,7 +215,7 @@ func _on_house_repaired(house: Node3D) -> void:
 	AudioManager.play_sfx(&"panda_cheer", house.global_position)
 	if _houses_done * 2 >= houses.size() and not _beat_half:
 		_beat_half = true
-		GameManager.request_story_beat("p08")
+		GameManager.request_story_beat("p11h")
 	if _houses_done >= houses.size():
 		_stage2_timer = STAGE2_DELAY
 

@@ -5,6 +5,11 @@ This is the canon the game adapts. It comes from the owner's Google Drive folder
 here unchanged; the game's English text is a translation of it, never a
 replacement. Do not invent story beats that contradict this file.
 
+Source of the text below: the owner's final edition, "As Aventuras de
+Herosauro & Super Boxy (Reformatted)" (Canva PDF, 43 pages), copied exactly as
+written, typos included. An earlier Drive script for story 2 differs from it;
+the book wins.
+
 The book's page illustrations live in Drive only. They are 5–10 MB PNGs and are
 **not** in this repository yet. Every place the game would show a page
 illustration must work without it (see `docs/story/ADAPTATION.md`).
@@ -44,73 +49,71 @@ illustration must work without it (see `docs/story/ADAPTATION.md`).
 
 Illustrated so far: stories 1, 2 and 5.
 
-## Story 1: Adamastor (text from the "Lookbook" deck)
+## Story 1: Adamastor
 
-1. Na colorida cidade do Porto, viviam dois irmãos, Rui e Kiko.
-   Para o mundo, eram apenas dois meninos comuns….mas entre eles…tinham um segredo poderoso.
-2. Quando o perigo chamava, eles transformavam-se nos super-heróis mais corajosos da cidade.
-   Rui o poderoso Herosauro e Kiko o mais valente SuperBoxy — os heróis do Porto!
-3. Um dia, ouviu-se um barulho enorme vindo do rio Douro.
-   Era o terrível Adamastor, o gigante dos mares!
-   Ele saiu da água, com os olhos muito zangados, pronto para destruir a cidade!
-4. CRASH! O Adamastor começou a atacar as pontes do rio Douro!
-   — Isto é um trabalho para o Herosauro e o SuperBoxy! Vamos, Kiko! A cidade precisa de nós! — gritou Rui.
-5. Direita! - gritou Kiko, lançando o primeiro murro!
-6. Esquerda! - exclamou, movendo rápido como o vento!
-7. Kiko, embora mais novo, não teve medo. "Boxy boxy!", gritou ele, pronto para a ação.
-8. Os dois irmãos voaram a velocidade luz até à Ponte de D. Luís.
-   O Adamastor estava a abanar a ponte com as suas mãos gigantes expressando a sua destruição - Esta cidade e minha!
-9. — Não vais destruir a nossa ponte! — gritou Rui, confiante.
-   Rui ergueu as mãos e, num brilho verde, apareceu um enorme dinossauro.
-   Um Tiranossauro Rex de energia pura surgiu e rugiu: RROOAAARRR!
-   O Adamastor recuou assustado!
-10. Rui juntou toda a sua força no punho…
-    e avançou com coragem… POW!!!
-    Um super golpe fez o Adamastor estremecer!
-11. Em seguida, o T-Rex, guiado por Rui, avançou e mordeu o braço do Adamastor.
-    Enquanto o gigante estava ocupado com o dinossauro, Kiko voou à volta da sua cabeça, distraindo-o com os seus rápidos movimentos de "boxy boxy".
-12. Agora, Kiko! - gritou Rui.
-    E com rapidez, Kiko deu um soco "boxy boxy" superpoderoso no queixo do gigante!
-13. Juntos, os dois irmãos, deram o golpe final.
-14. O soco foi tão forte que o Adamastor perdeu o equilíbrio e caiu de volta no rio Douro com um "SPLASH" monumental!
-15. Os céus da cidade do Porto voltaram a brilhar.
-    Herosauro e SuperBoxy sorriram — tinham salvado o dia, juntos, mais uma vez!
+a01. (book p.1) Na colorida cidade do Porto, viviam dois irmãos, Rui e Kiko. Para o mundo, eram apenas dois meninos comuns….mas entre eles… tinham um segredo poderoso.
+a02. (book p.2) Quando o perigo chamava, eles transformavam-se nos super-heróis mais corajosos da cidade. Rui o poderoso Herosauro e Kiko o mais valente Super Boxy — os heróis do Porto!
+a03. (book p.3) Um dia, ouviu-se um barulho enorme vindo do rio Douro. Era o terrível Adamastor, o gigante dos mares! Ele saiu da água, com os olhos muito zangados, pronto para destruir a cidade!
+a04. (book p.4) CRASH! O Adamastor começou a atacar as pontes do rio Douro! — Isto é um trabalho para o Herosauro e o SuperBoxy! Vamos, Kiko! A cidade precisa de nós! — gritou Rui.
+a05. (book p.5) Esquerda! - exclamou, movendo rápido como o vento!
+a06. (book p.6) Direita! - gritou Kiko, lançando o primeiro murro!
+a07. (book p.7) Kiko, embora mais novo, não teve medo. "Boxy boxy!", gritou ele, pronto para a ação.
+a08. (book p.8) Os dois irmãos voaram à velocidade da luz até à Ponte de D. Luís. O Adamastor estava a abanar a ponte com as suas mãos gigantes expressando a sua destruição - Esta cidade e minha!
+a09. (book p.9) — Não vais destruir a nossa ponte! — gritou Rui, confiante. Rui ergueu as mãos e, num brilho verde, apareceu um enorme dinossauro. Um Tiranossauro Rex de energia pura surgiu e rugiu: RROOAAARRR! O Adamastor recuou assustado!
+a10. (book p.10) Rui juntou toda a sua força no punho… e avançou com coragem… POW!!! Um super golpe fez o Adamastor estremecer!
+a11. (book p.11) Em seguida, o T-Rex, guiado por Rui, avançou e mordeu o braço do Adamastor. Enquanto o gigante estava ocupado com o dinossauro, Kiko voou à volta da sua cabeça, distraindo-o com os seus rápidos movimentos de "boxy boxy”.
+a12. (book p.12) Agora, Kiko! - gritou Rui. E com rapidez, Kiko deu um soco "boxy boxy" superpoderoso no queixo do gigante!
+a13. (book p.13) Juntos, os dois irmãos, deram o golpe final.
+a14. (book p.14) O soco foi tão forte que o Adamastor perdeu o equilíbrio e caiu de volta no rio Douro com um "SPLASH" monumental!
+a15. (book p.15) Os céus da cidade do Porto voltaram a brilhar. Herosauro e SuperBoxy sorriram — tinham salvado o dia, juntos, mais uma vez!
 
-## Story 2: O Tesouro do Dragão (Estádio do Dragão "Script" doc)
+## Story 2: O Tesouro do Dragão
 
-1. O Porto dorme sob a lua cheia. Uma carrinha avança pelas ruas silenciosas.
-   Lá dentro, um grupo de duendes ri e aponta. Esta noite, eles não vieram para brincar.
-2. Eles chegam ao estádio do Porto. O duende-chefe olha pela janela e sorri.
-   Ele sonha com as taças brilhantes lá dentro. Os duendes não têm nenhuma taça própria.
-3. Os duendes entram na sala das taças. Eles veem copas grandes, brilhantes e bonitas.
-   "São melhores do que as nossas!", dizem a rir. Com cuidado, começam a roubá-las todas.
-4. No relvado, o dragão azul dorme tranquilo. Ele é o guardião do estádio.
-   Os duendes aproximam-se devagar, sem fazer barulho. Eles têm planos travessos para o atacar.
-5. O dragão acorda e luta com coragem. Ele ruge e tenta afastar os duendes.
-   Mas são muitos. Eles cercam-no e prendem-no com cordas.
-6. No escritório, o presidente vê tudo pela janela. O dragão azul está cercado e preso.
-   Os duendes levam as taças num saco. Assustado, ele liga: "Ajuda! Chamem o Herosauro e o Superboxy!"
-7. Em casa, o Rui e o Kiko olham pela janela. No céu, surgem dois sinais brilhantes.
-   Um dinossauro e uma luva de boxe. A cidade chama pelo Herosauro e pelo Super Boxy!
-8. O Herosauro e o Superboxy voam alto no céu! As capas abrem-se como asas.
-   Lá em baixo, a cidade brilha. Eles seguem rápidos para o estádio.
-9. Eles aterram com força no meio do estádio! No céu, voam os pterodáctilos mágicos do Herosauro.
-   Assustados, os duendes fogem a correr. O dragão sorri, livre e muito contente!
-10. O Superboxy pega numa bola. PUMBA! Ele chuta com toda a força.
-    A bola acerta nos duendes, um a um. Eles voam para todos os lados!
-11. Os duendes correm para a carrinha. Querem fugir depressa.
-    O dragão sopra fogo quente! A carrinha queima e eles param.
-12. "Eles cheiram mal!", diz o Herosauro. "Levem-nos até ao rio!"
-    "Está na hora de um bom banho!" Os pterodáctilos agarram nos duendes e levantam voo.
-13. Os pterodáctilos chegam ao rio Douro. Um a um, largam os duendes na água.
-    Eles caem com grandes salpicos. O rio leva-os a flutuar para longe da cidade.
-14. "Obrigado!", diz o presidente com um sorriso. O dragão está seguro outra vez.
-    As taças voltam ao seu lugar. O Herosauro e o Superboxy salvaram o tesouro do Dragão!
+d01. (book p.16) Numa noite de lua cheia, a cidade do Porto dormia tranquila. Mas nem todos dormiam. Conduzindo das terras do sul um grupo de duendes malandros preparavam um golpe terrível.
+d02. (book p.17) O chefe dos duendes desde sempre que desejava para ele todas as taças do incrível FC Porto. E com um sorriso maléfico, confirma: “Vamos roubar os tesouros do Dragão!
+d03. (book p.18) Silenciosos como ratinhos, os duendes entraram na sala dos troféus, preparados para roubar. “Uau! Estas taças são maiores, mais brilhantes e muito mais bonitas do que as nossas!”
+d04. (book p.19) Os duendes, quando atravesavam o estádio para fugir repararam no grande Dragão que dormia profundamente. “Vamos levar o dragão também!”, riram, aproximando-se devagar.
+d05. (book p.20) De repente, cordas voavan no ar! O Dragão acordou num subressalto... Mas já era tarde demais. Estava cercado de duendes.
+d06. (book p.21) Do seu camarote, o presidente do Porto viu tudo e com rapidez pegou no telefone e disse, aflito: “Socorro! Chamem o Herosauro e o Super Boxy! O Draco precisa de ajuda!”
+d07. (book p.22) Em casa, Rui e Kiko preparavam-se para ir dormir quando o céu se iluminou. E os dois irmãos disseram ao mesmo tempo: “A cidade precisa de nós!”
+d08. (book p.23) Num instante, transformaram-se! Herosauro e Super Boxy voaram à velocidade da luz, em direção ao Estádio do Dragão, prontos para salvar o amigo Draco.
+d09. (book p.24) BOOM! Os heróis aterram no estádio. Supreendidos os duendes fugiram em pânico ao ver as luvas vermelhas do Super Boxy... e os pterodáctilos do Herosauro a voar na sua direção.
+d10. (book p.25) PUMBA! Super Boxy chutou uma bola com toda a força contra os duendes fazendo-os voar tão alto que quase bateram nos holofotes.
+d11. (book p.26) Tentando fugir, os duendes da camisola vermelha correram para o carro. Mas o Dragão, solto das suas amarras cuspiu fogo e virou o carro num bloco de carvão.
+d12. (book p.27) “Estes duendes sempre jogam sujo!”, disse Herosauro. “Necessitam de um banho!” Os pterodáctilos do Herosauro agarraram os duendes um a um e voaram sobre a cidade iluminada.
+d13. (book p.28) SPLASH! SPLASH! SPLASH! Os duendes foram atirados ao Rio Douro. E agora tinham de nadar até casa. E assim aprenderam uma lição importante... que roubar o Dragão nunca é uma boa ideia.
+d14. (book p.29) Com o nascer do sol o Dragão e os seus tesouros estavam salvos. E para comemorar o Presidente disse com um grande sorriso: “Obrigado, Herosauro e Super Boxy! Mais uma vez vocês salvaram o Porto. O próximo jogo é vosso!”
 
-## Story 5: Os Turistas Panda
+## Story 5: Os Turistas Panda (the Bambosa family)
 
-The illustrated pages exist (cover plus pages 1–12b) but their text is baked
-into the images and could not be extracted. Only the outline line above is
-known. The game's text for this chapter is an adaptation written from the
-outline and is marked as such in the story data, so the owner can replace it
-with the book's words.
+p01. (book p.30) Os Bambosa, tinham chegado à cidade, super animados e curiosos, prontos para passear e explorar tudo o que o Porto tinha para mostrar. A família caminhava pelas ruas tradicionais, olhando para o rio Douro, debaixo das suas pontes, e as casas coloridas que enxiam os passeios de calçada portuguesa.
+p02. (book p.31) Passearam por parques verdes e praças. Viram estátuas altas e prédios muito antigos. A família estava encantada com a cidade do Porto!
+p03. (book p.32) Um cheirinho maravilhoso vinha de um café na esquina, e a família sentou-se a descansar. A família estava interessada em experimentar a cozinha portuguesa, e assim foi: O Senhor Bambosa pediu uma francesinha. A Dona Bambosa escolheu o caldo verde e os filhos como comeram o bacalhau todo ganharam cada um dois pastéis de nata. Que delícia!
+p04. (book p.33) Quando o sol começou a descer, os pandas ficaram cansados. Procuraram um lugar para dormir, mas estava tudo ocupado na cidade. E ninguém tinha tempo para os ajudar. A família começou a ficar preocupada.
+p05. (book p.34) Já quase sem esperança, chegaram ao famoso hotel Vitória’s Terrace. A Mãe Rita abriu a porta e sorriu. “Bem-vindos!”, disse com carinho. Os pandas sentiram-se um pouco melhor.
+p06. (book p.35) A Mãe Rita olhou para o tablet com atenção e infelizmente, o hotel estava cheio. “Como vamos ajudar esta família tão querida?”, pensou em silêncio. Mas, infelizmente, todos os quartos estavam ocupados.
+p07. (book p.36) A Mãe Rita, muito triste, teve de dizer à família que não havia espaço. O Senhor Bambosa engoliu em seco, olhando para os seus filhos. “Os meus bebés vão ter de dormir na rua?”, perguntou, assustado, com os olhos cheios de lágrimas. Mas nada se podia fazer.
+p08. (book p.37) A Mãe Rita tentou mais uma ideia: telefonou ao Pai Rui e pediu-lhe que procurasse ajuda no bairro, para ver se algum vizinho tinha um quarto disponível. Mas as casas estavam velhas, vazias e estragadas. Ninguém mais morava ali. O Pai Rui voltou triste e cansado.
+p09. (book p.38) Mais tarde, enquanto os pais conversavam sobre a Família Bambosa, Rui e Kiko ouviram tudo em silêncio. Olharam um para o outro e souberam logo que não podiam deixar aquela família sem ajuda. E entraram em ação!
+p10. (book p.39) Num instante, transformaram-se! Herosauro e Super Boxy voaram até ao bairro abandonado, prontos para fazer algo especial.
+p11. (book p.40) Restaurar o bairro era a ideia! “Epa!”, disse o Pai, espantado ao ver Herosauro com os seus espectros dinossauros, e o Super Boxy a correu com os materiais de obra.
+p12. (book p.41) Em poucos minutos, o bairro mudou completamente. As ruas estavam seguras, e as casas, novas e limpas. O Pai sorriu orgulhoso. Agora, muitas famílias podiam ficar ali… A Família Bambosa podia ficar ali.
+p13. (book p.42) E com as boas notícias, a Família Bambosa fez check-in num apartamento maravilhoso. As crianças brincavam no quarto com muita alegria.
+p14. (book p.43) E, na sala ao lado, os pais conversavam, relaxados. Havia comida, risos e agradecimentos. Como verdadeiras férias devem ser. E todos sabiam: ajudar faz o coração crescer.
+
+## Spelling corrected in the game's copy
+
+The game shows the text above with these slips fixed and nothing else changed;
+the owner may want the same fixes in the book.
+
+| page | book | game |
+|---|---|---|
+| a08 | "Esta cidade e minha!" | "Esta cidade é minha!" |
+| d01 | "Conduzindo das terras do sul um grupo de duendes malandros preparavam" | "Vindos das terras do sul, um grupo de duendes malandros preparava" |
+| d04 | "atravesavam" | "atravessavam" |
+| d05 | "voavan", "subressalto" | "voavam", "sobressalto" |
+| d11 | "virou o carro num bloco de carvão" | "transformou o carro num bloco de carvão" |
+| d12 | "sempre jogam sujo", "Necessitam de um banho" | "jogam sempre sujo", "Precisam de um banho" |
+| d09 | "Supreendidos" | "Surpreendidos" (beat excerpt) |
+| p01 | "enxiam" | "enchiam" |
+| p11 | "o Super Boxy a correu" | "o Super Boxy a correr" (beat excerpt) |

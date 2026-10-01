@@ -374,6 +374,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if GameManager.state != GameManager.State.PLAYING:
 		return
+	_guard_finite()
 	if _downed:
 		if _bubbled:
 			_process_bubble(delta)
@@ -397,7 +398,9 @@ func _physics_process(delta: float) -> void:
 	# Banked here because move_and_slide() zeroes velocity.y against the floor, so
 	# by the time _handle_landing runs the speed that caused the impact is gone.
 	_impact_speed = maxf(0.0, -velocity.y)
+	_guard_finite()
 	move_and_slide()
+	_last_finite_xform = global_transform
 	_clamp_separation(delta)
 	_handle_landing(delta)
 	_face_movement(delta)
@@ -1768,3 +1771,34 @@ func _custom_locomotion(_delta: float) -> bool:
 ## hero who is flattened mid-dash does not carry on lunging when helped back up.
 func _cancel_actions() -> void:
 	pass
+
+
+
+# --- Non-finite guard ----------------------------------------------------------
+#
+# Seen once in the dragao probe on a heavily loaded machine: Super Boxy's body
+# basis went NaN mid-stage-2, Jolt rejected every query against it for the rest
+# of the run (400k errors) and the level stalled. It did not reproduce on an
+# idle machine, which points at a large frame delta feeding some 0/0 or an
+# unstable step, exactly what a weak tablet in a browser produces. Whatever the
+# source, a hero whose transform or velocity stops being finite is put back on
+# its last good transform with velocity zeroed before the physics step sees it:
+# one invisible frame instead of a frozen game. Warns once so it stays visible.
+
+var _last_finite_xform := Transform3D.IDENTITY
+var _warned_non_finite := false
+
+
+func _guard_finite() -> void:
+	if global_transform.is_finite() and velocity.is_finite():
+		return
+	if not _warned_non_finite:
+		_warned_non_finite = true
+		push_warning("PlayerBase %d: non-finite transform or velocity, restored last good state" % player_id)
+	if _last_finite_xform.is_finite() and _last_finite_xform != Transform3D.IDENTITY:
+		global_transform = _last_finite_xform
+	else:
+		global_transform = Transform3D(Basis(), spawn_position)
+	velocity = Vector3.ZERO
+	if not facing_dir.is_finite() or facing_dir == Vector3.ZERO:
+		facing_dir = Vector3.RIGHT
