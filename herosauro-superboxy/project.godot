@@ -264,6 +264,9 @@ lights_and_shadows/directional_shadow/size=4096
 lights_and_shadows/directional_shadow/size.web=2048
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
 occlusion_culling/use_occlusion_culling=true
+; The web export template is built without occlusion culling; leaving it on
+; there only logs an error at every boot.
+occlusion_culling/use_occlusion_culling.web=false
 ; 64 (default) smears shafts cast by 0.2 m lattice members at 10-40 m.
 ; Forward+ only -- the web build has no volumetric fog to pay for it.
 environment/volumetric_fog/volume_size=96

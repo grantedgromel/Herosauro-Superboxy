@@ -59,14 +59,14 @@ const CHAPTERS := {
 		## (the boss crosses half health), "low" (boss under 20%).
 		"beats": [
 			{"id": "a09", "when": "start",
-				"pt": "— Não vais destruir a nossa ponte! Rui ergueu as mãos e, num brilho verde, surgiu um T-Rex de energia pura: RROOAAARRR!",
-				"en": "\"You won't wreck our bridge!\" Rui raised his hands and, in a green flash, a T-Rex of pure energy appeared: RROOAAARRR!"},
+				"pt": "— Não vais destruir a nossa ponte! RROOAAARRR! Surgiu o T-Rex de energia!",
+				"en": "\"You won't wreck our bridge!\" RROOAAARRR! The energy T-Rex appears!"},
 			{"id": "a11", "when": "phase2",
-				"pt": "Enquanto o gigante estava ocupado com o dinossauro, Kiko voou à volta da sua cabeça com os seus rápidos movimentos de \"boxy boxy\".",
-				"en": "While the giant was busy with the dinosaur, Kiko flew around his head with his speedy \"boxy boxy\" moves."},
+				"pt": "O Kiko voa à volta da cabeça do gigante: boxy boxy!",
+				"en": "Kiko zooms around the giant's head: boxy boxy!"},
 			{"id": "a12", "when": "low",
-				"pt": "— Agora, Kiko! — gritou Rui. Juntos, os dois irmãos deram o golpe final!",
-				"en": "\"Now, Kiko!\" shouted Rui. Together, the two brothers landed the final blow!"},
+				"pt": "— Agora, Kiko! Juntos, o golpe final!",
+				"en": "\"Now, Kiko!\" Together, the final blow!"},
 		],
 		"outro": [
 			{"id": "a14", "art": "res://assets/story/adamastor/a14.webp",
@@ -113,11 +113,11 @@ const CHAPTERS := {
 		],
 		"beats": [
 			{"id": "d09", "when": "start",
-				"pt": "Eles aterram com força no meio do estádio! Assustados, os duendes fogem a correr.",
-				"en": "They land with a BOOM in the middle of the stadium! The startled goblins scatter."},
+				"pt": "Eles aterram no estádio! Os duendes fogem a correr.",
+				"en": "They land in the stadium! The goblins run away."},
 			{"id": "d10", "when": "stage2",
-				"pt": "O Super Boxy pega numa bola. PUMBA! A bola acerta nos duendes, um a um. Eles voam para todos os lados!",
-				"en": "Super Boxy grabs a ball. WHAM! The ball knocks over the goblins, one by one. They go flying everywhere!"},
+				"pt": "O Super Boxy chuta a bola. PUMBA! Os duendes voam!",
+				"en": "Super Boxy kicks the ball. WHAM! The goblins go flying!"},
 		],
 		"outro": [
 			{"id": "d11", "art": "res://assets/story/dragao/d11.webp",
@@ -140,7 +140,7 @@ const CHAPTERS := {
 		"tagline": {"pt": "Faz uma cidade mágica para os pandas!", "en": "Build a magical town for the pandas!"},
 		"cover": "res://assets/story/pandas/cover.webp",
 		"accent": Color(0.93, 0.55, 0.20),
-		"objective": {"pt": "Repara as casas para os pandas!", "en": "Fix up the houses for the pandas!"},
+		"objective": {"pt": "Repara as casas!", "en": "Fix up the houses!"},
 		"adapted": true,
 		"intro": [
 			{"id": "p01", "art": "res://assets/story/pandas/p01.webp",
@@ -164,11 +164,11 @@ const CHAPTERS := {
 		],
 		"beats": [
 			{"id": "p07", "when": "start",
-				"pt": "Com a força do T-Rex e os murros do Super Boxy, a rua velha começa a mudar…",
-				"en": "With the power of the T-Rex and Super Boxy's punches, the old street begins to change…"},
+				"pt": "Com o T-Rex e os murros do Super Boxy, a rua começa a mudar…",
+				"en": "With the T-Rex and Super Boxy's punches, the street starts to change…"},
 			{"id": "p08", "when": "half",
-				"pt": "As casas ganham cor, azulejos novos e flores nas varandas! Os pandas batem palmas.",
-				"en": "The houses fill with colour, new tiles and flowers on the balconies! The pandas clap their paws."},
+				"pt": "As casas ganham cor e flores! Os pandas batem palmas.",
+				"en": "The houses get colour and flowers! The pandas clap."},
 		],
 		"outro": [
 			{"id": "p09", "art": "res://assets/story/pandas/p09.webp",
