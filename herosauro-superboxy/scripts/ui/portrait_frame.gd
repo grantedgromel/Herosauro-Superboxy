@@ -16,10 +16,23 @@ extends Control
 const RIM_WIDTH := 6
 ## The ink stroke around the outside of the plate, under the colour rim.
 const PLATE_KEYLINE := 3
+## Room around a stamped frame for its plate's drop shadow (14 px, 5 down).
+## A stamp must never draw outside its own cell: the shadow used to spill
+## into the neighbouring cell of the atlas and sat on whatever used it.
+const STAMP_PAD := 20.0
 
 var actor: int = UIStyle.Actor.HEROSAURO
 var accent: Color = UIStyle.HERO_GREEN
 
+## Stamped (the in-game HUD): the whole framed portrait is drawn once into the
+## IconAtlas and shown as one textured rect, which batches with the plate and
+## bar around it; live, it is a shadowed StyleBox polygon, the art and a rim
+## polygon, three draw calls. A hit flash then brightens the whole stamp rather
+## than only the art and the rim. Set before the frame enters the tree.
+var stamped: bool = false
+
+var _sprite: TextureRect
+var _stamped_for := ""
 var _plate: Panel
 var _art: TextureRect
 var _rim: Panel
@@ -33,6 +46,23 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	if stamped:
+		_sprite = TextureRect.new()
+		_sprite.name = "Stamp"
+		_sprite.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_sprite.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_sprite.stretch_mode = TextureRect.STRETCH_SCALE
+		# The stamp carries the plate's drop shadow, so it overhangs the frame.
+		_sprite.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_sprite.offset_left = -STAMP_PAD
+		_sprite.offset_top = -STAMP_PAD
+		_sprite.offset_right = STAMP_PAD
+		_sprite.offset_bottom = STAMP_PAD
+		add_child(_sprite)
+		resized.connect(_restamp)
+		_restamp()
+		set_process(false)
+		return
 	_plate = Panel.new()
 	_plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_plate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -74,8 +104,39 @@ func _ready() -> void:
 ## plate tint from UIStyle so nothing here hard-codes an asset path.
 func set_actor(which: int, resolution: int = 256) -> void:
 	actor = which
-	if is_inside_tree():
+	if stamped:
+		_restamp()
+	elif is_inside_tree():
 		_apply(which, resolution)
+
+
+## The live frame at this size, rendered into the atlas once per actor and size.
+func _restamp() -> void:
+	if _sprite == null:
+		return
+	var d := size.floor()
+	if d.x < 8.0 or d.y < 8.0:
+		return
+	var key := "%d:%dx%d" % [actor, int(d.x), int(d.y)]
+	if key == _stamped_for:
+		return
+	_stamped_for = key
+	accent = UIStyle.actor_color(actor)
+	_sprite.texture = stamp_for(actor, d)
+
+
+## The stamp for `which` at size `d`. Call it ahead of time for a frame whose
+## actor changes mid-run (the story toast), so the atlas never has to redraw
+## itself in the middle of play.
+static func stamp_for(which: int, d: Vector2) -> AtlasTexture:
+	var key := "portrait:%d:%dx%d" % [which, int(d.x), int(d.y)]
+	var dims := d + Vector2.ONE * STAMP_PAD * 2.0
+	return IconAtlas.shared().stamp(key, dims, func(root: Control) -> void:
+		var live := PortraitFrame.new()
+		live.actor = which
+		live.position = Vector2.ONE * STAMP_PAD
+		live.size = d
+		root.add_child(live))
 
 
 func _apply(which: int, resolution: int = 256) -> void:
@@ -114,6 +175,12 @@ func hit_flash() -> void:
 
 func _process(delta: float) -> void:
 	_flash = maxf(0.0, _flash - delta * 5.0)
+	if _sprite != null:
+		var lift := 1.0 + 0.9 * _flash
+		_sprite.self_modulate = Color(lift, lift, lift, 1.0)
+		if _flash <= 0.0:
+			set_process(false)
+		return
 	var wash := 1.0 + 1.6 * _flash
 	if _art:
 		_art.modulate = Color(wash, wash, wash, 1.0)

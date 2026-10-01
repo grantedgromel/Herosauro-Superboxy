@@ -233,6 +233,19 @@ static func text(body: String, scale: int = Scale.BODY, color: Color = TEXT_PRIM
 	return _make_label(body, scale, color, false, align, false)
 
 
+## `text()` as an InkText: the same look in two draw calls instead of four.
+## The in-game HUD uses these; menus keep Labels (they are not drawn over a 3D
+## frame on the web budget).
+static func ink(body: String, scale: int = Scale.BODY, color: Color = TEXT_PRIMARY,
+		align: int = HORIZONTAL_ALIGNMENT_LEFT) -> InkText:
+	return InkText.from_label(text(body, scale, color, align))
+
+
+## `title()` as an InkText.
+static func ink_title(body: String, scale_or_px: int = Scale.TITLE, color: Color = GOLD) -> InkText:
+	return InkText.from_label(title(body, scale_or_px, color))
+
+
 ## Display/comic face. `scale_or_px` takes a Scale entry, or a literal pixel size
 ## for call sites that have not migrated yet (see RAW_PX).
 static func title(body: String, scale_or_px: int = Scale.TITLE, color: Color = GOLD) -> Label:

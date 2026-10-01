@@ -240,6 +240,7 @@ func _process(delta: float) -> void:
 # --- Drawing -----------------------------------------------------------------
 
 func _rebuild_boxes() -> void:
+	_frame_stamp = null
 	var boss := variant == Variant.BOSS
 	var r := UIStyle.RADIUS_SM + (4 if boss else 1)
 
@@ -282,6 +283,25 @@ func _punch_scale() -> Vector2:
 	return Vector2(1.0 + swing * 0.22, 1.0 - swing)
 
 
+## The bar's boxes as IconAtlas nine-slices, made on first draw from the very
+## StyleBoxes above (so the look is defined once). Everything the bar draws
+## is a textured rect on the atlas: one batch for the whole bar, merged with
+## the plate and portrait around it, where the StyleBox polygons, lines and
+## rects used to cost six or seven draw calls a bar on GL Compatibility.
+var _frame_stamp: IconAtlas.Box
+var _track_stamp: IconAtlas.Box
+var _fill_stamp: IconAtlas.Box
+
+
+func _stamps() -> void:
+	if _frame_stamp != null:
+		return
+	var tag := "bar:%d" % variant
+	_frame_stamp = IconAtlas.box(tag + ":frame", [_frame_box])
+	_track_stamp = IconAtlas.box(tag + ":track", [_track_box])
+	_fill_stamp = IconAtlas.round_box(_fill_box.corner_radius_top_left)
+
+
 func _draw() -> void:
 	var boss := variant == Variant.BOSS
 	var pad := 5.0 if boss else 4.0
@@ -294,21 +314,20 @@ func _draw() -> void:
 	whole.position = centre - whole.size * 0.5
 	if whole.size.x < 4.0 or whole.size.y < 4.0:
 		return
+	_stamps()
 
-	draw_style_box(_frame_box, whole)
+	IconAtlas.draw_box(self, _frame_stamp, whole)
 	var inner := Rect2(whole.position + Vector2(pad, pad), whole.size - Vector2(pad, pad) * 2.0)
 	if inner.size.x <= 1.0 or inner.size.y <= 1.0:
 		return
-	draw_style_box(_track_box, inner)
+	IconAtlas.draw_box(self, _track_stamp, inner)
 
 	var live := fill_color.lerp(UIStyle.BOSS_RAGE, _rage)
 
 	# Chip bar. Hot orange and desaturated so it reads as "was here a moment ago"
 	# rather than as a second resource.
 	if _ghost > _shown + EPS:
-		var g := _slice(inner, _ghost)
-		_fill_box.bg_color = Color(1.0, 0.58, 0.26, 0.72)
-		draw_style_box(_fill_box, g)
+		IconAtlas.draw_box(self, _fill_stamp, _slice(inner, _ghost), Color(1.0, 0.58, 0.26, 0.72))
 
 	# Main fill, plus a lighter band across its top so it curves.
 	if _shown > 0.001:
@@ -319,40 +338,33 @@ func _draw() -> void:
 			# Slow warm throb in the danger band.
 			var throb := 0.5 + 0.5 * sin(_pulse * 5.2)
 			body = live.lerp(UIStyle.WARNING, 0.35 * throb)
-		_fill_box.bg_color = body.darkened(0.18)
-		draw_style_box(_fill_box, f)
+		IconAtlas.draw_box(self, _fill_stamp, f, body.darkened(0.18))
 
 		var top := f
 		top.size.y = f.size.y * 0.48
-		_sheen_box.bg_color = Color(
-			minf(1.0, body.r + 0.30), minf(1.0, body.g + 0.30), minf(1.0, body.b + 0.30), 0.92)
-		draw_style_box(_sheen_box, top)
+		IconAtlas.draw_box(self, _fill_stamp, top, Color(
+			minf(1.0, body.r + 0.30), minf(1.0, body.g + 0.30), minf(1.0, body.b + 0.30), 0.92))
 
 		# Leading edge. A bright cap on the end of the fill turns the bar into an
 		# object with a front face, and it is the part the eye tracks when the
 		# spring overshoots.
 		if f.size.x > 6.0:
 			var cap_x := f.position.x if mirrored else f.end.x - 4.0
-			draw_rect(Rect2(Vector2(cap_x, f.position.y + 1.0), Vector2(4.0, f.size.y - 2.0)),
-				Color(1.0, 1.0, 1.0, 0.55))
+			IconAtlas.draw_flat(self, Rect2(Vector2(cap_x, f.position.y + 1.0),
+				Vector2(4.0, f.size.y - 2.0)), Color(1.0, 1.0, 1.0, 0.55))
 
 		if _flash > 0.0:
-			_fill_box.bg_color = Color(1, 1, 1, 0.78 * _flash)
-			draw_style_box(_fill_box, f)
+			IconAtlas.draw_box(self, _fill_stamp, f, Color(1, 1, 1, 0.78 * _flash))
 
 	_draw_notches(inner)
 
 	# Bright rim along the top edge of the whole widget — the key light landing
 	# on the bezel. Warm, because the sun is the warm source; the sky fill is
 	# what everything else in the palette is made of.
-	draw_line(whole.position + Vector2(pad + 3.0, 2.5),
-		whole.position + Vector2(whole.size.x - pad - 3.0, 2.5),
-		Color(1.0, 0.94, 0.82, 0.30), 2.0, true)
+	IconAtlas.draw_flat(self, Rect2(whole.position + Vector2(pad + 3.0, 1.5),
+		Vector2(whole.size.x - pad * 2.0 - 6.0, 2.0)), Color(1.0, 0.94, 0.82, 0.30))
 
 
-## The filled part of `track` at `frac`, anchored to whichever end this bar
-## drains from. One helper so the chip bar and the real fill can never disagree
-## about which way round the widget is.
 func _slice(track: Rect2, frac: float) -> Rect2:
 	var w := maxf(track.size.x * frac, 3.0)
 	var x := track.end.x - w if mirrored else track.position.x
@@ -364,15 +376,12 @@ func _draw_notches(inner: Rect2) -> void:
 		var tick := Color(0, 0, 0, 0.48)
 		for i in range(1, segments):
 			var x := inner.position.x + inner.size.x * (float(i) / float(segments))
-			draw_line(Vector2(x, inner.position.y + 1.0),
-				Vector2(x, inner.position.y + inner.size.y - 1.0), tick, 3.0)
+			IconAtlas.draw_flat(self, Rect2(x - 1.5, inner.position.y + 1.0, 3.0, inner.size.y - 2.0), tick)
 	if phase_marker > 0.0 and phase_marker < 1.0:
 		var px := inner.position.x + inner.size.x * phase_marker
 		# Drawn proud of the channel top and bottom so it reads as a machined
 		# notch in the bezel, not as a tick painted inside the track.
-		draw_line(Vector2(px, inner.position.y - 3.0),
-			Vector2(px, inner.position.y + inner.size.y + 3.0),
-			UIStyle.KEYLINE, 5.0)
-		draw_line(Vector2(px, inner.position.y - 2.0),
-			Vector2(px, inner.position.y + inner.size.y + 2.0),
-			Color(UIStyle.GOLD.r, UIStyle.GOLD.g, UIStyle.GOLD.b, 0.95), 3.0)
+		IconAtlas.draw_flat(self, Rect2(px - 2.5, inner.position.y - 3.0, 5.0, inner.size.y + 6.0),
+			UIStyle.KEYLINE)
+		IconAtlas.draw_flat(self, Rect2(px - 1.5, inner.position.y - 2.0, 3.0, inner.size.y + 4.0),
+			Color(UIStyle.GOLD.r, UIStyle.GOLD.g, UIStyle.GOLD.b, 0.95))

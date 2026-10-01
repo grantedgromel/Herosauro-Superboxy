@@ -35,6 +35,9 @@ func _ready() -> void:
 	_plate.add_theme_stylebox_override("panel", BookKit.paper_box(30, 0))
 	_plate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_plate)
+	# Live, not an atlas stamp: the speaker changes from beat to beat, the toast
+	# is up for a few seconds at a time, and three 112 px portraits would take a
+	# seventh of the atlas for two draw calls saved while one shows.
 	_face = PortraitFrame.new()
 	_face.custom_minimum_size = Vector2(112, 112)
 	_face.size = Vector2(112, 112)

@@ -17,11 +17,11 @@ var label_entry: Dictionary = {}
 var done: int = 0
 var total: int = 0
 
-var _plate: Panel
-var _icon: KidIcon
-var _text: Label
+var _plate: AtlasPlate
+var _icon: TextureRect
+var _text: InkText
 var _pips: HBoxContainer
-var _count: Label
+var _count: InkText
 var _voice: Narrator
 var _spoken := false
 var _pop := 0.0
@@ -29,23 +29,26 @@ var _pop := 0.0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_plate = UIStyle.plate(UIStyle.GOLD, 0.06, UIStyle.RADIUS_LG, UIStyle.Elev.HIGH)
+	_plate = AtlasPlate.make(UIStyle.GOLD, 0.06, UIStyle.RADIUS_LG, UIStyle.Elev.HIGH)
 	_plate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_plate)
-	_icon = KidIcon.make(KidIcon.Kind.STAR, 54, BookKit.SUN)
+	# Every star here is an IconAtlas stamp (one textured rect each, all in one
+	# batch) rather than a live KidIcon (eight polygons each).
+	_icon = IconAtlas.sprite(IconAtlas.icon(KidIcon.Kind.STAR, 54, BookKit.SUN), Vector2(54, 54))
 	_icon.position = Vector2(14, 14)
 	add_child(_icon)
-	_text = UIStyle.text("", UIStyle.Scale.SUBHEAD, UIStyle.TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_LEFT)
-	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_text.add_theme_font_size_override("font_size", 22)
-	BookKit.place(_text, Vector2(76, 10), Vector2(W - 90, 60))
-	add_child(_text)
+	# Atlas pieces (plate, star, pips) first, so they are one batch; text after.
 	_pips = HBoxContainer.new()
 	_pips.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_pips.add_theme_constant_override("separation", 4)
 	_pips.position = Vector2(16, 74)
 	add_child(_pips)
-	_count = UIStyle.text("", UIStyle.Scale.READOUT, UIStyle.GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
+	_text = UIStyle.ink("", UIStyle.Scale.SUBHEAD, UIStyle.TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_LEFT)
+	_text.autowrap = true
+	_text.add_theme_font_size_override("font_size", 22)
+	BookKit.place(_text, Vector2(76, 10), Vector2(W - 90, 60))
+	add_child(_text)
+	_count = UIStyle.ink("", UIStyle.Scale.READOUT, UIStyle.GOLD, HORIZONTAL_ALIGNMENT_RIGHT)
 	_count.position = Vector2(W - 70, 74)
 	_count.size = Vector2(58, 34)
 	add_child(_count)
@@ -152,7 +155,7 @@ func _rebuild_pips() -> void:
 		c.queue_free()
 	var shown := mini(total, MAX_PIPS)
 	for i in shown:
-		var ic := KidIcon.make(KidIcon.Kind.STAR_EMPTY, PIP)
+		var ic := IconAtlas.sprite(_pip_texture(false), Vector2(PIP, PIP))
 		_pips.add_child(ic)
 	_fit()
 	_paint()
@@ -162,13 +165,16 @@ func _paint() -> void:
 	var shown := _pips.get_child_count()
 	var lit := lit_count()
 	for i in shown:
-		var ic := _pips.get_child(i) as KidIcon
+		var ic := _pips.get_child(i) as TextureRect
 		var on := i < lit
 		ic.set_meta("lit", on)
-		ic.set_kind(KidIcon.Kind.STAR if on else KidIcon.Kind.STAR_EMPTY)
-		ic.set_fill(BookKit.SUN)
+		ic.texture = _pip_texture(on)
 	_count.visible = total > 0
 	_count.text = "%d/%d" % [done, total]
+
+
+static func _pip_texture(lit: bool) -> AtlasTexture:
+	return IconAtlas.icon(KidIcon.Kind.STAR if lit else KidIcon.Kind.STAR_EMPTY, PIP, BookKit.SUN)
 
 
 func _process(delta: float) -> void:

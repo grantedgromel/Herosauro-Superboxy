@@ -90,22 +90,22 @@ var compact: bool = false
 var base_scale: float = 1.0
 var ai_badge: Control
 
-var _plate: Panel
+var _plate: AtlasPlate
 var _face: PortraitFrame
-var _name: Label
-var _tag: PanelContainer
-var _hp: Label
+var _name: InkText
+var _tag: Control
+var _hp: InkText
 var _bar: StatBar
 var _dial: AbilityDial
-var _dial_cap: Label
+var _dial_cap: InkText
 var _status: PanelContainer
 var _status_label: Label
 var _down_veil: ColorRect
 
-var _combo_count: Label
-var _combo_word: Label
-var _combo_track: Panel
-var _combo_fill: Panel
+var _combo_count: InkText
+var _combo_word: InkText
+var _combo_track: IconAtlas.Tile
+var _combo_fill: IconAtlas.Tile
 ## Resting position of the numeral, captured at build time. The shake is
 ## measured from it, and every combo control is placed with explicit top-left
 ## offsets, so writing `position` here fights no anchor.
@@ -140,31 +140,34 @@ func setup(id: int, right_hand: bool) -> void:
 	accent = UIStyle.actor_color(actor)
 	size = PANEL
 
-	_plate = UIStyle.plate(accent, 0.13, UIStyle.RADIUS_LG, UIStyle.Elev.HIGH)
+	# DRAW ORDER IS BATCHING. Everything from the plate to the dial is drawn
+	# from the IconAtlas (plate, spine, portrait, P1 pill, AI badge, bar, dial),
+	# so on GL Compatibility it is ONE draw call; the text comes after it, two
+	# calls a line. Interleave a text between them and the batch splits.
+	_plate = AtlasPlate.make(accent, 0.13, UIStyle.RADIUS_LG, UIStyle.Elev.HIGH)
 	_plate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_plate)
 
 	# A solid bar of the hero's colour down the outside edge. It is the fastest
 	# possible answer to "which of these two is me" — readable from the corner of
 	# the eye, at any distance, with no text involved.
-	var spine := Panel.new()
-	spine.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var spine_box := StyleBoxFlat.new()
-	spine_box.bg_color = accent
-	spine_box.set_corner_radius_all(3)
-	spine.add_theme_stylebox_override("panel", spine_box)
+	var spine := IconAtlas.tile(IconAtlas.round_box(3), accent)
 	_place(spine, Vector2(4.0, 14.0), Vector2(6.0, PANEL.y - 28.0))
 
 	_face = PortraitFrame.new()
 	_face.actor = actor
+	_face.stamped = true
 	_place(_face, Vector2(PAD + 6.0, (PANEL.y - AVATAR) * 0.5), Vector2(AVATAR, AVATAR))
 
 	var text_x := PAD + 6.0 + AVATAR + GUTTER
 	var dial_x := PANEL.x - PAD - DIAL
 	var text_w := dial_x - GUTTER - text_x
 
-	_tag = UIStyle.pill("P%d" % player_id, accent, UIStyle.BASE, UIStyle.Scale.MICRO)
-	_place(_tag, Vector2(text_x, 12.0), Vector2(34.0, 22.0))
+	var tag_text := "P%d" % player_id
+	var tag_tint := accent
+	_tag = IconAtlas.snapshot("pill:%s:%s" % [tag_text, tag_tint.to_html()], func() -> Control:
+		return UIStyle.pill(tag_text, tag_tint, UIStyle.BASE, UIStyle.Scale.MICRO), Vector2(34.0, 22.0))
+	_place(_tag, Vector2(text_x, 12.0), _tag.size)
 
 	# The brother nobody is holding a controller for: in solo with the
 	# companion on, he is the AI helper, and his panel wears a robot with a
@@ -172,24 +175,28 @@ func setup(id: int, right_hand: bool) -> void:
 	is_ai = GameManager.is_ai(id)
 	if is_ai:
 		_tag.visible = false
-		ai_badge = _AIBadge.new()
+		ai_badge = IconAtlas.sprite(_ai_badge_stamp(), Vector2(50.0, 50.0))
 		ai_badge.name = "AIBadge"
 		_place(ai_badge, Vector2(PAD + AVATAR - 30.0, PANEL.y - 54.0), Vector2(50.0, 50.0))
-
-	_name = UIStyle.text(UIStyle.actor_name(actor), UIStyle.Scale.SUBHEAD,
-		UIStyle.TEXT_PRIMARY, _lead_align())
-	_place(_name, Vector2(text_x + 42.0, 9.0), Vector2(text_w - 42.0, 28.0))
 
 	_bar = StatBar.new()
 	_bar.mirrored = mirrored
 	_bar.setup(StatBar.Variant.HERO, float(GameManager.MAX_PLAYER_HEALTH), accent, 4)
 	_place(_bar, Vector2(text_x, 44.0), Vector2(text_w, BAR_H))
 
+	_dial = AbilityDial.new()
+	_place(_dial, Vector2(dial_x, 10.0), Vector2(DIAL, DIAL))
+	_dial.setup("E", accent)
+
+	_name = UIStyle.ink(UIStyle.actor_name(actor), UIStyle.Scale.SUBHEAD,
+		UIStyle.TEXT_PRIMARY, _lead_align())
+	_place(_name, Vector2(text_x + 42.0, 9.0), Vector2(text_w - 42.0, 28.0))
+
 	# The numbers ride INSIDE the bar rather than beside it. There is not room for
 	# both a readable name and a readable readout on one line at this width, and
 	# putting the count on the thing it counts is what a console HUD does anyway —
 	# it survives because every glyph carries the kit's ink keyline.
-	_hp = UIStyle.text("100/100", UIStyle.Scale.LABEL, UIStyle.TEXT_PRIMARY, _trail_align())
+	_hp = UIStyle.ink("100/100", UIStyle.Scale.LABEL, UIStyle.TEXT_PRIMARY, _trail_align())
 	_place(_hp, Vector2(text_x + 8.0, 44.0), Vector2(text_w - 16.0, BAR_H))
 
 	_status = UIStyle.pill("INVINCIBLE", UIStyle.GOLD, UIStyle.BASE, UIStyle.Scale.MICRO)
@@ -197,11 +204,7 @@ func setup(id: int, right_hand: bool) -> void:
 	_place(_status, Vector2(text_x, 80.0), Vector2(124.0, 22.0))
 	_status.visible = false
 
-	_dial = AbilityDial.new()
-	_place(_dial, Vector2(dial_x, 10.0), Vector2(DIAL, DIAL))
-	_dial.setup("E", accent)
-
-	_dial_cap = UIStyle.text(Loc.t("special"), UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
+	_dial_cap = UIStyle.ink(Loc.t("special"), UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY,
 		HORIZONTAL_ALIGNMENT_CENTER)
 	_place(_dial_cap, Vector2(dial_x - 14.0, 76.0), Vector2(DIAL + 28.0, 16.0))
 
@@ -252,7 +255,7 @@ func _build_combo() -> void:
 		align = HORIZONTAL_ALIGNMENT_CENTER
 		rail = w - 20.0
 
-	_combo_count = UIStyle.title("", COMBO_PX, UIStyle.GOLD)
+	_combo_count = UIStyle.ink_title("", COMBO_PX, UIStyle.GOLD)
 	_combo_count.horizontal_alignment = align
 	# Heavier than the raw-pixel path would give it. This is the one readout with
 	# nothing behind it but the live 3D frame, so the ink keyline is doing the
@@ -261,29 +264,22 @@ func _build_combo() -> void:
 	_place(_combo_count, Vector2(x, y0 if not compact else 0.0), Vector2(w, 72.0))
 	_combo_home = _combo_count.position
 
-	_combo_word = UIStyle.text("HIT COMBO", UIStyle.Scale.LABEL, UIStyle.GOLD_DEEP, align)
+	_combo_word = UIStyle.ink("HIT COMBO", UIStyle.Scale.LABEL, UIStyle.GOLD_DEEP, align)
 	_place(_combo_word, Vector2(x, y0 + COMBO_RISE - 34.0 if not compact else 72.0),
 		Vector2(w, 20.0))
 
 	# Depletion rail: this hero's own combo window running out, drawn as a
 	# shrinking bar so they can see how long they have to land the next hit.
-	_combo_track = Panel.new()
-	_combo_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var tb := StyleBoxFlat.new()
 	tb.bg_color = UIStyle.BASE
 	tb.set_corner_radius_all(4)
 	tb.set_border_width_all(2)
 	tb.border_color = UIStyle.KEYLINE
-	_combo_track.add_theme_stylebox_override("panel", tb)
+	_combo_track = IconAtlas.tile(IconAtlas.box("combo_track", [tb]))
 	_place(_combo_track, Vector2(x + w - rail - (10.0 if compact else 0.0),
 		y0 + COMBO_RISE - 12.0 if not compact else 98.0), Vector2(rail, 8.0))
 
-	_combo_fill = Panel.new()
-	_combo_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var fb := StyleBoxFlat.new()
-	fb.bg_color = UIStyle.GOLD
-	fb.set_corner_radius_all(4)
-	_combo_fill.add_theme_stylebox_override("panel", fb)
+	_combo_fill = IconAtlas.tile(IconAtlas.round_box(4), UIStyle.GOLD)
 	# Pinned to the track's top-left with all four anchors at 0, so resizing the
 	# fill each frame only moves its own offsets. A stretched preset here would
 	# have the layout fight the width we set and log an override warning.
@@ -423,9 +419,7 @@ func set_combo(count: int) -> void:
 	var tint := accent.lerp(UIStyle.GOLD, 0.72).lerp(UIStyle.EMBER, heat)
 	_combo_count.add_theme_color_override("font_color", tint)
 	_combo_word.add_theme_color_override("font_color", tint.darkened(0.15))
-	var fb := _combo_fill.get_theme_stylebox("panel") as StyleBoxFlat
-	if fb:
-		fb.bg_color = tint
+	_combo_fill.color = tint
 
 	# Pop AND shake. The pop says "this went up"; the shake says "you hit
 	# something". A counter that only scales reads as a UI transition.
@@ -549,19 +543,22 @@ func _process(delta: float) -> void:
 
 
 ## A round chip with a robot and a little heart: "the computer is playing this
-## brother, and he is on your side".
-class _AIBadge extends Control:
-	func _init() -> void:
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-	func _ready() -> void:
+## brother, and he is on your side". One IconAtlas stamp: the robot alone was
+## about forty polygons, every frame.
+static func _ai_badge_stamp() -> AtlasTexture:
+	return IconAtlas.shared().stamp("hud:ai_badge", Vector2(50, 50), func(root: Control) -> void:
+		var disc := _AIBadgeDisc.new()
+		disc.size = Vector2(50, 50)
+		root.add_child(disc)
 		var robot := KidIcon.make(KidIcon.Kind.ROBOT, 34.0, Color("bfe3ff"), Color("f2564a"))
 		robot.position = Vector2(6, 6)
-		add_child(robot)
+		root.add_child(robot)
 		var heart := KidIcon.make(KidIcon.Kind.HEART, 22.0, Color("f2564a"))
 		heart.position = Vector2(30, 28)
-		add_child(heart)
+		root.add_child(heart))
 
+
+class _AIBadgeDisc extends Control:
 	func _draw() -> void:
 		var c := size * 0.5
 		draw_circle(c, c.x, Color(0.016, 0.043, 0.078, 0.96))

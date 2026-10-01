@@ -41,7 +41,7 @@ const MAX_ACTIVE := 16
 ## change, because the stored capture baseline was taken with it.
 const SEED := 0x0DA3A6E5
 
-var _active: Array[Label] = []
+var _active: Array[Control] = []
 var _side: int = 1
 var _rng := RandomNumberGenerator.new()
 
@@ -53,6 +53,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	set_process(false)
 
 
 ## Pop `body` at a viewport position. `crit` uses the larger, warmer treatment
@@ -60,12 +61,12 @@ func _ready() -> void:
 func pop(body: String, at: Vector2, color: Color = UIStyle.GOLD, crit: bool = false) -> void:
 	_prune()
 	if _active.size() >= MAX_ACTIVE:
-		var oldest := _active.pop_front() as Label
+		var oldest := _active.pop_front() as Control
 		if is_instance_valid(oldest):
 			oldest.queue_free()
 
 	var scale_step: int = UIStyle.Scale.TITLE if crit else UIStyle.Scale.HEADING
-	var l := UIStyle.text(body, scale_step, color, HORIZONTAL_ALIGNMENT_CENTER)
+	var l := UIStyle.ink(body, scale_step, color, HORIZONTAL_ALIGNMENT_CENTER)
 	# Heavier than the type scale's own step. These sit directly on the 3D frame
 	# with no plate under them, over whatever the camera is pointing at, so the
 	# ink keyline has to do the whole job on its own.
@@ -74,8 +75,14 @@ func pop(body: String, at: Vector2, color: Color = UIStyle.GOLD, crit: bool = fa
 	l.size = BOX
 	l.pivot_offset = BOX * 0.5
 	l.position = at - BOX * 0.5
+	# The number is a hidden InkText that only carries the text, the look and
+	# the tweened position, scale and fade; this layer draws every live number
+	# itself, all keylines in one pass and all fills in a second, so a burst of
+	# sixteen costs two to four draw calls on GL Compatibility instead of 32.
+	l.visible = false
 	add_child(l)
 	_active.append(l)
+	set_process(true)
 
 	# The side alternates so a fast combo fans out instead of stacking into a
 	# smear; the magnitude is jittered so the fan is not a metronome.
@@ -131,8 +138,53 @@ func clear_all() -> void:
 	_side = 1
 
 
+func _process(_delta: float) -> void:
+	queue_redraw()
+	_prune()
+	if _active.is_empty():
+		set_process(false)
+
+
+func _draw() -> void:
+	var live: Array[InkText] = []
+	for l in _active:
+		if is_instance_valid(l) and l.modulate.a > 0.001:
+			live.append(l as InkText)
+	if live.is_empty():
+		return
+	# Grouped by size (each size is its own glyph texture), so the passes stay
+	# whole batches however crits and plain hits interleave.
+	live.sort_custom(func(a: InkText, b: InkText) -> bool:
+		return a.get_theme_font_size("font_size") < b.get_theme_font_size("font_size"))
+	for fill_pass in [false, true]:
+		for l in live:
+			var font := l.get_theme_font("font")
+			var fs := l.get_theme_font_size("font_size")
+			draw_set_transform_matrix(Transform2D(0.0, l.scale, 0.0, l.position + l.pivot_offset)
+				* Transform2D(0.0, -l.pivot_offset))
+			var w := font.get_string_size(l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			var base := Vector2((BOX.x - w) * 0.5,
+				(BOX.y - font.get_height(fs)) * 0.5 + font.get_ascent(fs))
+			var a := l.modulate.a
+			if fill_pass:
+				var fc := l.get_theme_color("font_color")
+				draw_string(font, base, l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs,
+					Color(fc, fc.a * a))
+				continue
+			var o := l.get_theme_constant("outline_size")
+			var sh := l.get_theme_color("font_shadow_color")
+			var drop := Vector2(l.get_theme_constant("shadow_offset_x"),
+				l.get_theme_constant("shadow_offset_y"))
+			var ink := l.get_theme_color("font_outline_color")
+			draw_string_outline(font, base + drop, l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, o,
+				Color(sh, sh.a * a))
+			draw_string_outline(font, base, l.text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, o,
+				Color(ink, ink.a * a))
+	draw_set_transform_matrix(Transform2D.IDENTITY)
+
+
 func _prune() -> void:
-	var keep: Array[Label] = []
+	var keep: Array[Control] = []
 	for l in _active:
 		if is_instance_valid(l):
 			keep.append(l)

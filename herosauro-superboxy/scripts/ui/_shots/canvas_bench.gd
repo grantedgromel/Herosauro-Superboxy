@@ -1,4 +1,16 @@
 extends Node
+## What single widgets and draw primitives cost on GL Compatibility, in canvas
+## draw calls. Not shipped, not a probe; it is where the HUD's rules came from:
+##
+##   * every filled polygon is its own call (StyleBoxFlat, draw_circle,
+##     draw_colored_polygon): they never batch;
+##   * rects that share a texture batch, across canvas items too;
+##   * a Label with the kit's outline and shadow is four calls; InkText is two;
+##   * a KidIcon is 8 (star) to 45 (robot); an IconAtlas stamp is one rect.
+##
+##   xvfb-run -a -s "-screen 0 1280x720x24" godot --path . \
+##       --rendering-method gl_compatibility scripts/ui/_shots/canvas_bench.tscn \
+##       -- [--atlas_stars5 | --ink_vs_label] [--out=/tmp/bench.png]
 
 var _root: Control
 
@@ -139,7 +151,7 @@ func _ready() -> void:
 			d.kind = kk
 			d.size = Vector2(200, 200)
 			return [d]
-	cases["atlas_stars5"] = func() -> Array:
+	cases["atlas_stars5"] = func() -> Array:  # IconAtlas vs live KidIcon
 		var a := []
 		for i in 5:
 			var t := IconAtlas.sprite(IconAtlas.icon(KidIcon.Kind.STAR, 40.0, UIStyle.GOLD), Vector2(40, 40))
@@ -158,9 +170,53 @@ func _ready() -> void:
 		big.position = Vector2(500, 350)
 		a.append(big)
 		return a
-	if OS.get_cmdline_user_args().has("--atlas"):
-		var only := {"atlas_stars5": cases["atlas_stars5"]}
-		cases = only
+	cases["ink_vs_label"] = func() -> Array:
+		var a := []
+		var specs := [[UIStyle.Scale.SUBHEAD, "HEROSAURO"], [UIStyle.Scale.LABEL, "100/100"],
+			[UIStyle.Scale.HEADING, "ADAMASTOR"], [UIStyle.Scale.MICRO, "O GIGANTE DO DOURO"]]
+		for i in specs.size():
+			var l := UIStyle.text(specs[i][1], specs[i][0], UIStyle.TEXT_PRIMARY)
+			l.position = Vector2(40, 40 + i * 60)
+			l.size = Vector2(300, 50)
+			a.append(l)
+			var t := InkText.from_label(UIStyle.text(specs[i][1], specs[i][0], UIStyle.TEXT_PRIMARY))
+			t.position = Vector2(360, 40 + i * 60)
+			t.size = Vector2(300, 50)
+			a.append(t)
+		var big := UIStyle.title("7", 52, UIStyle.GOLD)
+		big.add_theme_constant_override("outline_size", 12)
+		big.position = Vector2(40, 300)
+		big.size = Vector2(100, 72)
+		a.append(big)
+		var big2 := UIStyle.title("7", 52, UIStyle.GOLD)
+		big2.add_theme_constant_override("outline_size", 12)
+		var bt := InkText.from_label(big2)
+		bt.position = Vector2(360, 300)
+		bt.size = Vector2(100, 72)
+		a.append(bt)
+		var wrap := UIStyle.text("Liberta o dragão e recupera as taças!", UIStyle.Scale.SUBHEAD)
+		wrap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		wrap.position = Vector2(40, 400)
+		wrap.size = Vector2(210, 80)
+		a.append(wrap)
+		var wrap2 := UIStyle.text("Liberta o dragão e recupera as taças!", UIStyle.Scale.SUBHEAD)
+		wrap2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		var wt := InkText.from_label(wrap2)
+		wt.position = Vector2(360, 400)
+		wt.size = Vector2(210, 80)
+		a.append(wt)
+		return a
+	cases["ink4"] = func() -> Array:
+		var a := []
+		for i in 4:
+			var t := InkText.from_label(UIStyle.text("HEROSAURO", UIStyle.Scale.SUBHEAD))
+			t.position = Vector2(0, i * 40)
+			t.size = Vector2(300, 40)
+			a.append(t)
+		return a
+	for only_key in ["atlas_stars5", "ink_vs_label"]:
+		if OS.get_cmdline_user_args().has("--" + only_key):
+			cases = {only_key: cases[only_key], "ink4": cases["ink4"], "label4": cases["label4"]}
 	for name in cases.keys():
 		for c in _root.get_children():
 			_root.remove_child(c)
@@ -174,7 +230,7 @@ func _ready() -> void:
 			await RenderingServer.frame_post_draw
 			worst = maxi(worst, int(get_viewport().get_render_info(Viewport.RENDER_INFO_TYPE_CANVAS, Viewport.RENDER_INFO_DRAW_CALLS_IN_FRAME)))
 		print("[bench] %-28s %d" % [name, worst])
-		if name == "atlas_stars5":
-			var img := get_viewport().get_texture().get_image()
-			img.save_png("/tmp/claude-0/-home-user-Herosauro-Superboxy/5cdb02a4-673a-562e-935a-b50af713c506/scratchpad/atlas.png")
+		for a in OS.get_cmdline_user_args():
+			if a.begins_with("--out=") and name in ["atlas_stars5", "ink_vs_label"]:
+				get_viewport().get_texture().get_image().save_png(a.substr(6))
 	get_tree().quit()

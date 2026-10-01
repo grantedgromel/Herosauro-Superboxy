@@ -4,7 +4,7 @@ extends Node
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --path . \
 ##       --rendering-method gl_compatibility scripts/ui/_shots/hud_cost.tscn \
 ##       -- --chapter=dragao [--players=1|2] [--busy] [--touch] [--size=1024x768] \
-##       [--out=/tmp/hud.png] [--frames=120]
+##       [--out=/tmp/hud.png] [--frames=120] [--budget=90] [--breakdown]
 ##
 ## Boots main.tscn into the chapter, lets it settle, then reads the root
 ## viewport's CANVAS draw calls over several frames with the HUD shown and
@@ -62,7 +62,7 @@ func _ready() -> void:
 		GameManager.damage_player(1, 12)
 		var beats: Array = StoryData.chapter(_chapter).get("beats", [])
 		if not beats.is_empty():
-			GameManager.request_story_beat(str(beats[0].get("id", "")))
+			GameManager.request_story_beat(str(beats[beats.size() - 1].get("id", "")))
 		await _wait(20)
 	var with_hud := await _sample(6)
 	var items := _visible_items(hud)
@@ -78,10 +78,20 @@ func _ready() -> void:
 		_chapter, _players, str(_busy), str(_touch), str(get_viewport().get_visible_rect().size)])
 	print("[hud cost] canvas draw calls: with HUD %d, without %d, HUD = %d; visible HUD canvas items %d; whole frame %d" % [
 		with_hud, without, with_hud - without, items, total])
+	print("[hud cost] icon atlas: %d stamps, %.0f%% full" % [IconAtlas.shared().stamp_count(),
+		IconAtlas.shared().fill() * 100.0])
 	if _out != "":
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(_out)
 		print("[hud cost] saved %s" % _out)
+		var sheet := IconAtlas.shared().get_texture().get_image()
+		sheet.save_png(_out.replace(".png", "_atlas.png"))
+	# --budget=N makes this a gate: exit 1 when the HUD costs more than N.
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--budget=") and with_hud - without > int(a.substr(9)):
+			print("[hud cost] OVER BUDGET: %d > %s" % [with_hud - without, a.substr(9)])
+			get_tree().quit(1)
+			return
 	get_tree().quit()
 
 

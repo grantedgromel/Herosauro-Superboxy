@@ -52,6 +52,8 @@ func _ready() -> void:
 	print("=== touch layout ===")
 	await _check_layout(Vector2i(1280, 720))
 	await _check_layout(Vector2i(1280, 960))
+	print("=== HUD draw-call budget (structural) ===")
+	await _check_budget()
 	print("=== every screen by tapping ===")
 	await _check_menus()
 
@@ -310,6 +312,72 @@ func _check_layout(view: Vector2i) -> void:
 
 
 const SLOP := 6.0
+
+
+# --- Draw-call budget ------------------------------------------------------------------
+
+## Upper bound on visible canvas items in the busiest gameplay HUD (boss
+## banner, both panels with combos, goal, toast, touch overlay). Measured with
+## scripts/ui/_shots/hud_cost.tscn under GL Compatibility, the HUD costs
+## about one draw call per visible item or less once the expensive kinds below
+## are gone, so this cap is the budget in a form a headless run can measure.
+const BUDGET_ITEMS := 85
+
+
+## The headless renderer counts nothing, so the budget is checked by structure:
+## the two things that made the old HUD cost 210-300 draw calls are banned from
+## the live gameplay HUD (KidIcons, which are 8-45 polygons each, and Labels
+## drawn in four passes), and the number of visible items is capped.
+func _check_budget() -> void:
+	for touch_on in [false, true]:
+		TouchControls.force = TouchControls.Force.ON if touch_on else TouchControls.Force.OFF
+		var fake_boss := Node3D.new()
+		fake_boss.add_to_group("boss")
+		add_child(fake_boss)
+		var hud := await _hud(1, 1)
+		GameManager.chapter_id = "adamastor"
+		GameManager.set_objective({"pt": "Derrota o Adamastor!", "en": "Beat him!"}, 4)
+		GameManager.advance_objective(1)
+		GameManager.combo_changed.emit(1, 6)
+		GameManager.combo_changed.emit(2, 4)
+		GameManager.damage_player(1, 20)
+		GameManager.request_story_beat("a09")
+		await _frames(4)
+		var tag := "touch" if touch_on else "keyboard"
+		var census := {"items": 0, "kid_icons": [], "four_pass": []}
+		_census(hud, census)   # the touch overlay is the HUD's child: counted too
+		print("  %s HUD: %d visible canvas items" % [tag, census["items"]])
+		_ok((census["kid_icons"] as Array).is_empty(),
+			"%s: no live KidIcon is drawn in play (atlas stamps instead) %s" % [tag, str(census["kid_icons"])])
+		_ok((census["four_pass"] as Array).is_empty(),
+			"%s: no four-pass Label is drawn in play (InkText instead) %s" % [tag, str(census["four_pass"])])
+		_ok(int(census["items"]) <= BUDGET_ITEMS, "%s: %d visible canvas items, budget %d"
+			% [tag, census["items"], BUDGET_ITEMS])
+		GameManager.change_state(GameManager.State.MENU)
+		await _frames(1)
+		_free(hud)
+		fake_boss.queue_free()
+	TouchControls.force = TouchControls.Force.AUTO
+
+
+func _census(n: Node, out: Dictionary) -> void:
+	if n is CanvasItem:
+		if not (n as CanvasItem).visible:
+			return
+		if (n as CanvasItem).modulate.a <= 0.001 or (n as CanvasItem).self_modulate.a <= 0.001:
+			return   # culled by the renderer
+		out["items"] = int(out["items"]) + 1
+		if n is KidIcon:
+			(out["kid_icons"] as Array).append(str(n.get_path()).get_file())
+		elif n is Label:
+			var l := n as Label
+			if l.get_theme_constant("outline_size") > 0 and l.get_theme_color("font_shadow_color").a > 0.0 \
+					and not l.text.is_empty():
+				(out["four_pass"] as Array).append(l.text)
+	elif n is CanvasLayer and not (n as CanvasLayer).visible:
+		return
+	for c in n.get_children():
+		_census(c, out)
 
 
 # --- Every screen, by tapping --------------------------------------------------------

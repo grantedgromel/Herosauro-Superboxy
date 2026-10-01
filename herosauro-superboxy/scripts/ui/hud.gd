@@ -71,14 +71,14 @@ var _hero_layer: Control
 
 # Boss banner, all under one layer so it can disappear when there is no boss.
 var _boss_layer: Control
-var _boss_plate: Panel
+var _boss_plate: AtlasPlate
 var _boss_face: PortraitFrame
-var _boss_name: Label
-var _boss_epithet: Label
+var _boss_name: InkText
+var _boss_epithet: InkText
 var _boss_bar: StatBar
-var _boss_hp: Label
-var _phase_label: Label
-var _phase_pips: Array[Panel] = []
+var _boss_hp: InkText
+var _phase_label: InkText
+var _phase_pips: Array[IconAtlas.Tile] = []
 
 # Storybook
 var _objective: ObjectiveWidget
@@ -169,48 +169,56 @@ func _build_boss_banner() -> void:
 	# Only a whisper of amber in the fill. The giant's colour is carried by his
 	# portrait rim, his health fill and his phase pips; pushing it into the plate
 	# as well only neutralises the blue ink and leaves a grey slab.
-	_boss_plate = UIStyle.plate(UIStyle.BOSS_AMBER, 0.06, UIStyle.RADIUS_LG, UIStyle.Elev.HIGH)
+	# Atlas first (plate, portrait, bar, pips: one batch), then the text.
+	_boss_plate = AtlasPlate.make(UIStyle.BOSS_AMBER, 0.06, UIStyle.RADIUS_LG, UIStyle.Elev.HIGH)
 	_place(_boss_plate, Control.PRESET_CENTER_TOP, Vector2(-half, 14.0), BOSS_PLATE)
 
 	_boss_face = PortraitFrame.new()
 	_boss_face.actor = BOSS_ACTOR
+	_boss_face.stamped = true
 	_place(_boss_face, Control.PRESET_CENTER_TOP, Vector2(-half + 16.0, 34.0),
 		Vector2(BOSS_AVATAR, BOSS_AVATAR))
 
 	var text_x := -half + 16.0 + BOSS_AVATAR + 16.0
 	var text_w := BOSS_PLATE.x - 32.0 - BOSS_AVATAR - 16.0
 
-	_boss_name = UIStyle.text(UIStyle.actor_name(BOSS_ACTOR), UIStyle.Scale.HEADING,
-		UIStyle.TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_LEFT)
-	_place(_boss_name, Control.PRESET_CENTER_TOP, Vector2(text_x, 22.0), Vector2(text_w * 0.6, 34))
-
-	_boss_hp = UIStyle.text("", UIStyle.Scale.LABEL, UIStyle.TEXT_SECONDARY,
-		HORIZONTAL_ALIGNMENT_RIGHT)
-	_place(_boss_hp, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w * 0.6, 26.0),
-		Vector2(text_w * 0.4, 26))
-
 	_boss_bar = StatBar.new()
 	_boss_bar.setup(StatBar.Variant.BOSS, float(GameManager.MAX_BOSS_HEALTH), UIStyle.BOSS_AMBER, 10)
 	_boss_bar.phase_marker = GameManager.BOSS_PHASE2_RATIO
 	_place(_boss_bar, Control.PRESET_CENTER_TOP, Vector2(text_x, 58.0), Vector2(text_w, BOSS_BAR_H))
 
+	# The chip's keyline and white face, tinted per pip: ink times gold is
+	# still ink, so one stamp serves every state.
+	var chip := UIStyle.chip(Color.WHITE, 11.0)
+	var chip_box := IconAtlas.box("chip:11", [chip.get_theme_stylebox("panel")])
+	chip.free()
+	for i in 2:
+		var pip := IconAtlas.tile(chip_box, UIStyle.GOLD if i == 0 else UIStyle.HAIRLINE_STRONG)
+		_place(pip, Control.PRESET_CENTER_TOP,
+			Vector2(text_x + text_w - 28.0 + i * 15.0, 95.0), Vector2(11, 11))
+		_phase_pips.append(pip)
+
+	_boss_name = UIStyle.ink(UIStyle.actor_name(BOSS_ACTOR), UIStyle.Scale.HEADING,
+		UIStyle.TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_LEFT)
+	_place(_boss_name, Control.PRESET_CENTER_TOP, Vector2(text_x, 22.0), Vector2(text_w * 0.6, 34))
+
+	_boss_hp = UIStyle.ink("", UIStyle.Scale.LABEL, UIStyle.TEXT_SECONDARY,
+		HORIZONTAL_ALIGNMENT_RIGHT)
+	_place(_boss_hp, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w * 0.6, 26.0),
+		Vector2(text_w * 0.4, 26))
+
 	# Epithet and phase share the line under the bar. Their boxes are sized to
 	# butt up against each other without overlapping, so a long name can never
 	# draw over the phase readout.
-	_boss_epithet = UIStyle.text(Loc.t("boss_epithet"), UIStyle.Scale.MICRO,
+	_boss_epithet = UIStyle.ink(Loc.t("boss_epithet"), UIStyle.Scale.MICRO,
 		UIStyle.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
 	_place(_boss_epithet, Control.PRESET_CENTER_TOP, Vector2(text_x, 92.0),
 		Vector2(text_w - 138.0, 16))
 
-	_phase_label = UIStyle.text(Loc.f("phase", [1]), UIStyle.Scale.MICRO, UIStyle.GOLD,
+	_phase_label = UIStyle.ink(Loc.f("phase", [1]), UIStyle.Scale.MICRO, UIStyle.GOLD,
 		HORIZONTAL_ALIGNMENT_RIGHT)
 	_place(_phase_label, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w - 106.0, 92.0),
 		Vector2(72, 16))
-	for i in 2:
-		var pip := UIStyle.chip(UIStyle.GOLD if i == 0 else UIStyle.HAIRLINE_STRONG, 11.0)
-		_place(pip, Control.PRESET_CENTER_TOP,
-			Vector2(text_x + text_w - 28.0 + i * 15.0, 95.0), Vector2(11, 11))
-		_phase_pips.append(pip)
 	_building_boss = false
 	# Kids do not read "250 / 500"; the bar is the number.
 	_boss_hp.visible = false
@@ -344,6 +352,7 @@ func _build_storybook() -> void:
 	_pause_btn = BookKit.round_button(KidIcon.Kind.PAUSE, BookKit.SKY, PAUSE_BUTTON)
 	_pause_btn.name = "PauseButton"
 	_pause_btn.focus_mode = Control.FOCUS_NONE
+	_stamp_icon(_pause_btn, KidIcon.Kind.PAUSE, UIStyle.TEXT_PRIMARY)
 	_pause_btn.pressed.connect(func() -> void:
 		if GameManager.state == GameManager.State.PLAYING:
 			GameManager.toggle_pause())
@@ -470,6 +479,24 @@ func _rebuild_pause_hints() -> void:
 	resume.add_theme_constant_override("separation", UIStyle.SPACE_MD)
 	resume.add_child(UIStyle.binding_pair(Loc.t("resume").to_upper(), UIStyle.binding_caps(1, ["ui_pause"], 2)))
 	_pause_hints.add_child(resume)
+
+
+## Swap a BookKit button's live KidIcon for the same picture from the
+## IconAtlas: one textured rect instead of a dozen polygons, every frame.
+func _stamp_icon(b: Button, kind: int, tint: Color) -> void:
+	var live := b.get_meta("icon", null) as Control
+	if live == null:
+		return
+	var sprite := IconAtlas.sprite(IconAtlas.icon(kind, live.size.x, tint), live.size)
+	sprite.set_anchors_preset(Control.PRESET_CENTER)
+	sprite.offset_left = live.offset_left
+	sprite.offset_top = live.offset_top
+	sprite.offset_right = live.offset_right
+	sprite.offset_bottom = live.offset_bottom
+	b.remove_child(live)
+	live.queue_free()
+	b.add_child(sprite)
+	b.set_meta("icon", sprite)
 
 
 func _place(ctrl: Control, preset: int, pos: Vector2, dims: Vector2) -> Control:
@@ -693,9 +720,7 @@ func _set_phase(phase: int) -> void:
 	_phase_label.add_theme_color_override("font_color", hot)
 	for i in _phase_pips.size():
 		var lit := i < phase
-		var sb := _phase_pips[i].get_theme_stylebox("panel") as StyleBoxFlat
-		if sb:
-			sb.bg_color = hot if lit else UIStyle.HAIRLINE_STRONG
+		_phase_pips[i].color = hot if lit else UIStyle.HAIRLINE_STRONG
 	if phase < 2:
 		_boss_name.add_theme_color_override("font_color", UIStyle.TEXT_PRIMARY)
 		_boss_bar.enrage(false)
