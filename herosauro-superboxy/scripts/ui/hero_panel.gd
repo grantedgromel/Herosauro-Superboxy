@@ -80,6 +80,14 @@ var accent: Color = UIStyle.HERO_GREEN
 var mirrored: bool = false
 ## True for the AI-driven companion brother (GameManager.is_ai).
 var is_ai: bool = false
+## Touch layout (TouchControls live): the HUD stacks the panels top-left under
+## the pause button, scaled by `base_scale`, so the bottom corners are free for
+## the thumbs. The combo then hangs off the plate's right edge instead of its
+## top, since above the top panel is the pause button. Set before setup().
+var compact: bool = false
+## Resting scale. Every squash and pop is relative to it, so a hit on a
+## compact panel never snaps it back to full size.
+var base_scale: float = 1.0
 var ai_badge: Control
 
 var _plate: Panel
@@ -198,6 +206,9 @@ func setup(id: int, right_hand: bool) -> void:
 	_place(_dial_cap, Vector2(dial_x - 14.0, 76.0), Vector2(DIAL + 28.0, 16.0))
 
 	_build_combo()
+	if compact:
+		_dial.visible = false
+		_dial_cap.visible = false
 
 	# Drawn over everything and normally invisible: a hero at zero health is out
 	# of the fight and the panel has to say so louder than a dimmed portrait can.
@@ -225,18 +236,34 @@ func refresh_text() -> void:
 ## a panel that appeared and vanished five times a fight would read as a bug.
 func _build_combo() -> void:
 	var x := PANEL.x - COMBO_W
+	var w := COMBO_W
+	var y0 := -COMBO_RISE
+	var align := _trail_align()
+	var rail := 150.0
+	if compact:
+		# Compact (touch layout): the panels stack in a column with the boss
+		# banner and the story toast right beside them, so there is no free
+		# air to overhang into. The combo takes the dial's slot on the plate
+		# instead; the dial itself is hidden there, because the touch Power
+		# button carries the cooldown.
+		w = DIAL + 40.0
+		x = PANEL.x - PAD - w + 8.0
+		y0 = -COMBO_RISE + 2.0
+		align = HORIZONTAL_ALIGNMENT_CENTER
+		rail = w - 20.0
 
 	_combo_count = UIStyle.title("", COMBO_PX, UIStyle.GOLD)
-	_combo_count.horizontal_alignment = _trail_align()
+	_combo_count.horizontal_alignment = align
 	# Heavier than the raw-pixel path would give it. This is the one readout with
 	# nothing behind it but the live 3D frame, so the ink keyline is doing the
 	# whole legibility job on its own.
 	_combo_count.add_theme_constant_override("outline_size", 12)
-	_place(_combo_count, Vector2(x, -COMBO_RISE), Vector2(COMBO_W, 72.0))
+	_place(_combo_count, Vector2(x, y0 if not compact else 0.0), Vector2(w, 72.0))
 	_combo_home = _combo_count.position
 
-	_combo_word = UIStyle.text("HIT COMBO", UIStyle.Scale.LABEL, UIStyle.GOLD_DEEP, _trail_align())
-	_place(_combo_word, Vector2(x, -34.0), Vector2(COMBO_W, 20.0))
+	_combo_word = UIStyle.text("HIT COMBO", UIStyle.Scale.LABEL, UIStyle.GOLD_DEEP, align)
+	_place(_combo_word, Vector2(x, y0 + COMBO_RISE - 34.0 if not compact else 72.0),
+		Vector2(w, 20.0))
 
 	# Depletion rail: this hero's own combo window running out, drawn as a
 	# shrinking bar so they can see how long they have to land the next hit.
@@ -248,7 +275,8 @@ func _build_combo() -> void:
 	tb.set_border_width_all(2)
 	tb.border_color = UIStyle.KEYLINE
 	_combo_track.add_theme_stylebox_override("panel", tb)
-	_place(_combo_track, Vector2(x + COMBO_W - 150.0, -12.0), Vector2(150.0, 8.0))
+	_place(_combo_track, Vector2(x + w - rail - (10.0 if compact else 0.0),
+		y0 + COMBO_RISE - 12.0 if not compact else 98.0), Vector2(rail, 8.0))
 
 	_combo_fill = Panel.new()
 	_combo_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -260,7 +288,7 @@ func _build_combo() -> void:
 	# fill each frame only moves its own offsets. A stretched preset here would
 	# have the layout fight the width we set and log an override warning.
 	_combo_fill.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
-	_combo_fill.size = Vector2(150.0, 8.0)
+	_combo_fill.size = Vector2(rail, 8.0)
 	_combo_track.add_child(_combo_fill)
 
 	_show_combo(false)
@@ -327,11 +355,12 @@ func take_hit(amount: int) -> void:
 	# squash never drags a corner across the screen gutter.
 	pivot_offset = size * 0.5
 	var shove := 10.0 * (1.0 if mirrored else -1.0)
+	var k := base_scale
 	_recoil = create_tween()
-	_recoil.tween_property(self, "scale", Vector2(1.05, 0.94), 0.06) \
+	_recoil.tween_property(self, "scale", Vector2(1.05, 0.94) * k, 0.06) \
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_recoil.parallel().tween_property(self, "position:x", _rest_x + shove, 0.06)
-	_recoil.tween_property(self, "scale", Vector2.ONE, 0.34) \
+	_recoil.tween_property(self, "scale", Vector2.ONE * k, 0.34) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	_recoil.parallel().tween_property(self, "position:x", _rest_x, 0.34) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -348,9 +377,9 @@ func revive() -> void:
 	set_process(true)
 	pivot_offset = size * 0.5
 	var t := create_tween()
-	t.tween_property(self, "scale", Vector2(1.07, 1.07), 0.12) \
+	t.tween_property(self, "scale", Vector2(1.07, 1.07) * base_scale, 0.12) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.tween_property(self, "scale", Vector2.ONE, 0.30) \
+	t.tween_property(self, "scale", Vector2.ONE * base_scale, 0.30) \
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
@@ -368,7 +397,7 @@ func reset() -> void:
 		_recoil.kill()
 	if not is_inf(_rest_x):
 		position.x = _rest_x
-	scale = Vector2.ONE
+	scale = Vector2.ONE * base_scale
 	modulate = Color.WHITE
 	_plate.modulate = Color.WHITE
 
@@ -401,7 +430,8 @@ func set_combo(count: int) -> void:
 	# Pop AND shake. The pop says "this went up"; the shake says "you hit
 	# something". A counter that only scales reads as a UI transition.
 	_combo_count.pivot_offset = Vector2(
-		0.0 if mirrored else _combo_count.size.x, _combo_count.size.y * 0.5)
+		_combo_count.size.x * 0.5 if compact else (0.0 if mirrored else _combo_count.size.x),
+		_combo_count.size.y * 0.5)
 	var pop := 1.34 - 0.12 * heat
 	_combo_count.scale = Vector2(pop, pop)
 	_combo_shake = 1.0

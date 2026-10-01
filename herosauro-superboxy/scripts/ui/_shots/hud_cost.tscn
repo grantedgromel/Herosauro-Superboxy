@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/_shots/hud_cost.gd" id="1_cost"]
+
+[node name="HudCost" type="Node"]
+script = ExtResource("1_cost")

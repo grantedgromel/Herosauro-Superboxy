@@ -41,6 +41,10 @@ const BOSS_PLATE := Vector2(600.0, 108.0)
 const BOSS_BAR_H := 30.0
 const BOSS_AVATAR := 68.0
 const PAUSE_BUTTON := 88.0
+## Hero panel scale in the touch layout, where they stack top-left under the
+## pause button and leave both bottom corners to the thumbs.
+const COMPACT := 0.72
+const COMPACT_GAP := 8.0
 ## Seconds into a run before the chapter's "start" story beat shows.
 const START_BEAT_DELAY := 5.0
 ## Boss health fraction under which the "low" beat shows.
@@ -100,6 +104,12 @@ var _pause_hints: VBoxContainer
 var _rng := RandomNumberGenerator.new()
 var _building_boss := false
 
+# Touch: the on-screen stick and buttons, and whether the HUD is laid out
+# around them (see _apply_layout).
+var _touch: TouchControls
+var _compact := false
+var _roster_order: Array[int] = []
+
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -122,6 +132,11 @@ func _ready() -> void:
 	add_child(_hero_layer)
 	_build_storybook()
 	_build_pause()
+	_touch = TouchControls.new()
+	_touch.pause_target = _pause_btn
+	add_child(_touch)
+	_touch.active_changed.connect(func(_on: bool) -> void: _apply_layout())
+	_compact = _touch.is_active()
 	_sync_roster()
 
 	GameManager.player_damaged.connect(_on_player_damaged)
@@ -217,14 +232,15 @@ func _build_boss_banner() -> void:
 ## is the only hook that fires after the menu has chosen a roster. A run whose
 ## roster is unchanged keeps its panels rather than discarding them, so a restart
 ## does not throw away live tweens for nothing.
-func _sync_roster() -> void:
+func _sync_roster(rebuild: bool = false) -> void:
 	var roster := GameManager.active_player_ids()
-	if _heroes.size() == roster.size():
+	if _heroes.size() == roster.size() and not rebuild:
 		var same := true
 		for pid in roster:
 			# Same ids but a different driver (co-op <-> solo with the AI
 			# brother) is a different roster: his panel wears the robot badge.
-			if not _heroes.has(pid) or (_heroes[pid] as HeroPanel).is_ai != GameManager.is_ai(pid):
+			if not _heroes.has(pid) or (_heroes[pid] as HeroPanel).is_ai != GameManager.is_ai(pid) \
+					or (_heroes[pid] as HeroPanel).compact != _compact:
 				same = false
 		if same:
 			return
@@ -238,11 +254,43 @@ func _sync_roster() -> void:
 	# that is. Mirroring is a position in a pair, not a property of a player id:
 	# a lone hero 2 belongs in the same bottom-left slot a lone hero 1 would take,
 	# because there is nothing on the other side of the screen to mirror against.
+	_roster_order.clear()
 	for i in roster.size():
 		var pid: int = roster[i]
-		var right := i == 1
+		# Compact panels stack in one column, so none of them is mirrored.
+		var right := i == 1 and not _compact
 		var panel := HeroPanel.new()
+		panel.compact = _compact
 		panel.setup(pid, right)
+		_hero_layer.add_child(panel)
+		_heroes[pid] = panel
+		_roster_order.append(pid)
+		# A rebuild mid-run (the touch layout switching) keeps the live health.
+		if GameManager.player_health.has(pid):
+			panel.set_health(int(GameManager.player_health[pid]), false)
+	_place_panels()
+
+
+## Bottom corners, mirrored (the default), or stacked top-left under the pause
+## button at COMPACT scale while the touch controls own the bottom corners.
+func _place_panels() -> void:
+	for i in _roster_order.size():
+		var panel: HeroPanel = _heroes.get(_roster_order[i])
+		if panel == null:
+			continue
+		if _compact:
+			panel.base_scale = COMPACT
+			panel.scale = Vector2.ONE * COMPACT
+			panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+			var top := _compact_top() + i * (HeroPanel.PANEL.y * COMPACT + COMPACT_GAP)
+			panel.offset_left = M
+			panel.offset_top = top
+			panel.offset_right = M + HeroPanel.PANEL.x
+			panel.offset_bottom = top + HeroPanel.PANEL.y
+			continue
+		var right := i == 1
+		panel.base_scale = 1.0
+		panel.scale = Vector2.ONE
 		var x := -(M + HeroPanel.PANEL.x) if right else float(M)
 		panel.set_anchors_preset(
 			Control.PRESET_BOTTOM_RIGHT if right else Control.PRESET_BOTTOM_LEFT)
@@ -251,8 +299,27 @@ func _sync_roster() -> void:
 		panel.offset_top = y
 		panel.offset_right = x + HeroPanel.PANEL.x
 		panel.offset_bottom = y + HeroPanel.PANEL.y
-		_hero_layer.add_child(panel)
-		_heroes[pid] = panel
+	if _touch != null:
+		_touch.set_stick_top(_compact_bottom() + 24.0)
+
+
+func _compact_top() -> float:
+	return 14.0 + PAUSE_BUTTON + 10.0
+
+
+## Bottom edge of the compact column (the stick may appear below it).
+func _compact_bottom() -> float:
+	var n := maxi(1, _roster_order.size())
+	return _compact_top() + n * HeroPanel.PANEL.y * COMPACT + (n - 1) * COMPACT_GAP
+
+
+## The touch controls appeared or went away: lay the HUD out around them.
+func _apply_layout() -> void:
+	var want := _touch != null and _touch.is_active()
+	if want == _compact:
+		return
+	_compact = want
+	_sync_roster(true)
 
 
 func _build_storybook() -> void:
@@ -432,16 +499,23 @@ func _tick_story(delta: float) -> void:
 	# Under the giant's banner when there is one; otherwise in the top row,
 	# centred in the gap between the pause button and the goal.
 	var shift := 0.0
+	var k := 1.0
 	if _boss_layer.visible:
 		_toast.offset_top = 14.0 + BOSS_PLATE.y + 14.0
 	else:
 		_toast.offset_top = 14.0
-		var gap_l := M + PAUSE_BUTTON + 12.0
+	if _compact or not _boss_layer.visible:
+		# Centred in the gap between the left column (the pause button, plus
+		# the compact hero panels in the touch layout) and the goal, and scaled
+		# down if the gap is narrower than the toast.
+		var gap_l := M + (HeroPanel.PANEL.x * COMPACT if _compact else PAUSE_BUTTON) + 12.0
 		var gap_r := size.x - M - ObjectiveWidget.W - 12.0
+		k = clampf((gap_r - gap_l) / StoryToast.W, 0.6, 1.0)
 		shift = (gap_l + gap_r) * 0.5 - size.x * 0.5
+	_toast.scale = Vector2(k, k)
 	_toast.offset_bottom = _toast.offset_top + StoryToast.H
-	_toast.offset_left = -StoryToast.W * 0.5 + shift
-	_toast.offset_right = StoryToast.W * 0.5 + shift
+	_toast.offset_left = -StoryToast.W * 0.5 * k + shift
+	_toast.offset_right = _toast.offset_left + StoryToast.W
 	if GameManager.state != GameManager.State.PLAYING:
 		return
 	var was := _run_clock
@@ -468,8 +542,11 @@ func _tick_heroes() -> void:
 		var panel: HeroPanel = _heroes.get(pid)
 		if panel == null:
 			continue
-		panel.set_ability(float(p.get_ability_fraction()))
+		var frac := float(p.get_ability_fraction())
+		panel.set_ability(frac)
 		panel.set_invulnerable(p.has_method("is_invulnerable") and bool(p.is_invulnerable()))
+		if _touch.is_shown() and pid == _touch.hero():
+			_touch.set_ability(frac)
 
 
 # --- Signals ------------------------------------------------------------------

@@ -14,6 +14,9 @@ enum Kind {
 	NEXT, BACK, PLAY, SKIP, PAUSE, GEAR, GLOBE, BOOK, STAR, STAR_EMPTY, ROBOT,
 	HEART, SPEAKER, MUSIC, SPEECH, BUBBLE, TURTLE, CLOSE, CHECK, RETRY, PERSON,
 	TWO_PEOPLE, INFO, TAP, MINUS, PLUS,
+	# The touch buttons (scripts/ui/touch): a comic POW burst for "hit", a
+	# lightning bolt for "power", a fat up-arrow off a ground line for "jump".
+	BURST, BOLT, JUMP,
 }
 
 const INK := Color(0.016, 0.043, 0.078, 0.96)
@@ -114,6 +117,16 @@ func _draw() -> void:
 			_tap(w)
 		Kind.MINUS:
 			_stroke_line(Vector2(22, 50), Vector2(78, 50), 16.0, w)
+		Kind.BURST:
+			_poly(_burst(Vector2(50, 50), 44, 26, 9), fill, w)
+			_poly(_burst(Vector2(50, 50), 22, 13, 9), accent, w * 0.6)
+		Kind.BOLT:
+			_poly([Vector2(58, 8), Vector2(22, 56), Vector2(46, 56), Vector2(38, 92),
+				Vector2(78, 40), Vector2(53, 40)], fill, w)
+		Kind.JUMP:
+			_poly([Vector2(50, 10), Vector2(84, 46), Vector2(62, 46), Vector2(62, 72),
+				Vector2(38, 72), Vector2(38, 46), Vector2(16, 46)], fill, w)
+			_stroke_line(Vector2(24, 88), Vector2(76, 88), 7.0, w * 0.7)
 		Kind.PLUS:
 			# Both inks first, then both fills, so the cross has no seam.
 			for seg in [[Vector2(22, 50), Vector2(78, 50)], [Vector2(50, 22), Vector2(50, 78)]]:
@@ -195,6 +208,17 @@ func _star(c: Vector2, outer: float, inner: float) -> Array:
 	for i in 10:
 		var a := -PI * 0.5 + i * PI / 5.0
 		var r := outer if i % 2 == 0 else inner
+		pts.append(c + Vector2(cos(a), sin(a)) * r)
+	return pts
+
+
+## A comic impact star: `n` spikes, alternating radii, slightly irregular so
+## it reads as a POW and not as a sun.
+func _burst(c: Vector2, outer: float, inner: float, n: int) -> Array:
+	var pts: Array = []
+	for i in n * 2:
+		var a := -PI * 0.5 + i * PI / n
+		var r := outer * (1.0 if i % 4 == 0 else 0.86) if i % 2 == 0 else inner
 		pts.append(c + Vector2(cos(a), sin(a)) * r)
 	return pts
 
