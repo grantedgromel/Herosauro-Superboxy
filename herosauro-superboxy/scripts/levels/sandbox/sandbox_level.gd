@@ -24,6 +24,10 @@ const TargetDummy := preload("res://scripts/levels/sandbox/target_dummy.gd")
 const OBJECTIVE := {"pt": "Acerta nos 3 alvos!", "en": "Hit the 3 targets!"}
 const HALF := 16.0           # the yard is 32 x 32 m, centred on the origin
 const WALL_HEIGHT := 1.2     # low: tall WORLD geometry pulls the camera in
+## The colliders stand taller than the wall you see: a hero's jump peaks at
+## about 2.8 m (13 m/s against 30 m/s^2), so a 1.2 m collider would let them
+## hop out of the yard. 3.4 m still sits under the co-op camera's arm.
+const WALL_COLLIDER_HEIGHT := 3.4
 const WALL_THICK := 0.6
 ## Heroes start at -X facing +X, like on the bridge; the dummies wait ahead.
 const SPAWNS := {1: Vector3(-9.0, 1.2, -1.5), 2: Vector3(-9.0, 1.2, 1.5)}
@@ -140,7 +144,11 @@ func _build_yard() -> void:
 	SceneryKit.solid(self, "GroundCollider", Vector3(HALF * 2.0, 1.0, HALF * 2.0),
 		Vector3(0.0, -0.5, 0.0))
 	for i in wall_boxes.size():
-		SceneryKit.solid(self, "WallCollider%d" % i, wall_boxes[i][0], wall_boxes[i][1])
+		var size: Vector3 = wall_boxes[i][0]
+		var centre: Vector3 = wall_boxes[i][1]
+		size.y = WALL_COLLIDER_HEIGHT
+		centre.y = WALL_COLLIDER_HEIGHT * 0.5
+		SceneryKit.solid(self, "WallCollider%d" % i, size, centre)
 
 
 ## [size, centre] for the four perimeter walls.

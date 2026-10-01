@@ -271,6 +271,7 @@ const BUBBLE_RADIUS := 1.25
 ## How far above the recovery point the bubble floats before it pops.
 const BUBBLE_RISE := 1.4
 const BUBBLE_BOB := 0.12
+const BUBBLE_SWAY := 0.22   # radians of gentle rocking inside the bubble
 const BUBBLE_POP_POWER := 1.2
 ## Health comes back on its own once the hero has not been hit for a while.
 const REGEN_DELAY := 3.0
@@ -1466,7 +1467,7 @@ func auto_aim_target(ref: Vector3) -> Node3D:
 ## impulse landing on it (the body touching the deck after the knockdown) would
 ## never be integrated away and the hero would come back the wrong shape.
 func _kick_squash(amount: float) -> void:
-	if _downed:
+	if _downed and not _bubbled:
 		return
 	_stretch = clampf(_stretch + amount, -SQUASH_LIMIT, SQUASH_LIMIT)
 
@@ -1491,11 +1492,14 @@ func body_lag() -> BodyLag:
 func _drive_squash(delta: float) -> void:
 	if _model_root == null:
 		return
-	if _downed:
+	if _downed and not _bubbled:
 		# Held, not sprung: a downed hero stays flat until they are helped up.
 		_tilt = lerpf(_tilt, DOWN_TILT, clampf(1.0 - exp(-TILT_LAMBDA * delta), 0.0, 1.0))
 	else:
-		_tilt = lerpf(_tilt, 0.0, clampf(1.0 - exp(-TILT_LAMBDA * delta), 0.0, 1.0))
+		# Upright, or (in a bubble) rocking gently: kid rule 6, a hero in a
+		# bubble is having a ride, not lying knocked out.
+		var sway := sin(_bubble_clock * TAU * 0.6) * BUBBLE_SWAY if _bubbled else 0.0
+		_tilt = lerpf(_tilt, sway, clampf(1.0 - exp(-TILT_LAMBDA * delta), 0.0, 1.0))
 		# Semi-implicit Euler on a damped spring toward zero. Stable at the 90 Hz
 		# tick this project runs (dt * sqrt(stiffness) is ~0.15) and, because it
 		# integrates delta rather than reading a clock, identical on every run.
