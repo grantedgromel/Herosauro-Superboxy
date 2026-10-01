@@ -71,6 +71,11 @@ const S := {
 	"jump": {"pt": "SALTAR", "en": "JUMP"},
 	"hit": {"pt": "SOCO", "en": "HIT"},
 	"special": {"pt": "PODER", "en": "POWER"},
+	"key_space": {"pt": "Espaço", "en": "Space"},
+	"key_enter": {"pt": "Enter", "en": "Enter"},
+	"mouse_left": {"pt": "Clique esq.", "en": "Left click"},
+	"mouse_right": {"pt": "Clique dir.", "en": "Right click"},
+	"mouse_middle": {"pt": "Clique meio", "en": "Middle click"},
 }
 
 

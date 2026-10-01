@@ -204,6 +204,10 @@ func setup(id: int, right_hand: bool) -> void:
 	# it survives because every glyph carries the kit's ink keyline.
 	_hp = UIStyle.ink("100/100", UIStyle.Scale.LABEL, UIStyle.TEXT_PRIMARY, _trail_align())
 	_place(_hp, Vector2(text_x + 8.0, 44.0), Vector2(text_w - 16.0, BAR_H))
+	# Kept live but not drawn, like the boss's: a 4-year-old does not read
+	# "70/100", the bar is the number, and the digits were the busiest thing
+	# on the plate (and unreadable at the compact scale).
+	_hp.visible = false
 
 	_status = UIStyle.pill("INVINCIBLE", UIStyle.GOLD, UIStyle.BASE, UIStyle.Scale.MICRO)
 	_status_label = _status.get_child(0) as Label

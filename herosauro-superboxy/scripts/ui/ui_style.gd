@@ -734,15 +734,27 @@ static func event_caption(ev: InputEvent) -> String:
 		var code := k.physical_keycode if k.physical_keycode != 0 else k.keycode
 		var caption := OS.get_keycode_string(code)
 		# The keypad twins of Enter and the arrows say nothing a player needs.
-		return "" if caption.begins_with("Kp ") else caption
+		if caption.begins_with("Kp "):
+			return ""
+		# Words on caps follow the game's language ("ESPAÇO", not "SPACE");
+		# letters and "Esc" read the same in both.
+		match code:
+			KEY_SPACE:
+				return Loc.t("key_space")
+			KEY_ESCAPE:
+				return "Esc"
+			KEY_ENTER:
+				return Loc.t("key_enter")
+		return caption
 	if ev is InputEventMouseButton:
+		# Not "LMB"/"RMB": gamer shorthand a parent does not know, and English.
 		match (ev as InputEventMouseButton).button_index:
 			MOUSE_BUTTON_LEFT:
-				return "LMB"
+				return Loc.t("mouse_left")
 			MOUSE_BUTTON_RIGHT:
-				return "RMB"
+				return Loc.t("mouse_right")
 			MOUSE_BUTTON_MIDDLE:
-				return "MMB"
+				return Loc.t("mouse_middle")
 			_:
 				return ""
 	if ev is InputEventJoypadButton:

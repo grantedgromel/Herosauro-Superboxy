@@ -117,7 +117,8 @@ func _build() -> void:
 	_next.pressed.connect(next_page)
 	add_child(_next)
 
-	_skip = BookKit.button(Loc.t("skip"), KidIcon.Kind.SKIP, BookKit.CHERRY, Vector2(200, 84))
+	# Sky, not cherry: red on a page-turn control reads as "stop" or "wrong".
+	_skip = BookKit.button(Loc.t("skip"), KidIcon.Kind.SKIP, BookKit.SKY, Vector2(200, 84))
 	_skip.name = "Skip"
 	_skip.focus_mode = Control.FOCUS_NONE
 	_skip.pressed.connect(skip)
