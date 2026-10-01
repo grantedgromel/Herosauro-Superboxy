@@ -256,6 +256,11 @@ anti_aliasing/quality/screen_space_aa=1
 anti_aliasing/quality/screen_space_aa.web=0
 scaling_3d/mode=1
 scaling_3d/mode.web=0
+; The 3D pass renders at 75% on web and is upscaled bilinearly; the UI stays
+; crisp. Measured on the CPU-rasteriser stand-in: bridge -620 ms per frame,
+; stadium -92 ms. Children mostly play on tablets with high-DPI screens, where
+; full resolution is the single largest cost.
+scaling_3d/scale.web=0.75
 lights_and_shadows/directional_shadow/size=4096
 ; A 4096 directional map is a 64 MiB depth texture. Desktop spends it across
 ; four cascades over 260 m and gets its money's worth; the web tier runs two
@@ -263,6 +268,8 @@ lights_and_shadows/directional_shadow/size=4096
 ; use and 48 MiB it cannot afford — against a 52 MiB world.
 lights_and_shadows/directional_shadow/size.web=2048
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+; Web: the cheapest soft filter (bridge -337 ms, stadium -52 ms measured).
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality.web=1
 occlusion_culling/use_occlusion_culling=true
 ; The web export template is built without occlusion culling; leaving it on
 ; there only logs an error at every boot.
