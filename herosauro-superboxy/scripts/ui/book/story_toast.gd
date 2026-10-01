@@ -70,6 +70,11 @@ func show_beat(beat: Dictionary) -> void:
 	_begin(beat)
 
 
+## True while the toast's line is being read aloud: the idle hint holds still.
+func is_speaking() -> bool:
+	return _showing and _narrated and not _voice_done
+
+
 func is_showing() -> bool:
 	return _showing
 

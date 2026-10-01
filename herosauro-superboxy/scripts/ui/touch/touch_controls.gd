@@ -196,6 +196,17 @@ func button_rect(role: int) -> Rect2:
 	return Rect2(b.position, b.size) if b != null else Rect2()
 
 
+## A button's rect in global canvas space (the onboarding rings use it).
+func button_global_rect(role: int) -> Rect2:
+	var b: TextureRect = _buttons.get(role)
+	return b.get_global_rect() if b != null and b.is_visible_in_tree() else Rect2()
+
+
+## The resting stick hint's rect in global canvas space.
+func stick_hint_rect() -> Rect2:
+	return _stick_base.get_global_rect() if _stick_base != null and _stick_base.is_visible_in_tree() else Rect2()
+
+
 ## Where the stick may appear: the left half, under `stick_top`.
 func stick_zone() -> Rect2:
 	var v := _view()

@@ -110,6 +110,13 @@ var _building_boss := false
 # Touch: the on-screen stick and buttons, and whether the HUD is laid out
 # around them (see _apply_layout).
 var _touch: TouchControls
+## Start-of-level controls card and the idle hint ladder (scripts/ui/hint).
+var _coach: ControlsCard
+var _hint: IdleHint
+## The start beat waits for the controls card's spoken line to finish, so the
+## two voices never talk over each other (capped, so the beat always comes).
+var _start_pending := false
+const START_BEAT_HOLD := 6.0
 var _compact := false
 var _roster_order: Array[int] = []
 
@@ -139,6 +146,13 @@ func _ready() -> void:
 	_touch.pause_target = _pause_btn
 	add_child(_touch)
 	_touch.active_changed.connect(func(_on: bool) -> void: _apply_layout())
+	_coach = ControlsCard.new()
+	_coach.touch = _touch
+	add_child(_coach)
+	_hint = IdleHint.new()
+	_hint.card = _coach
+	_hint.toast = _toast
+	add_child(_hint)
 	_compact = _touch.is_active()
 	_sync_roster()
 	_rebuild_pause_hints()
@@ -616,6 +630,10 @@ func _tick_story(delta: float) -> void:
 	var was := _run_clock
 	_run_clock += delta
 	if was < START_BEAT_DELAY and _run_clock >= START_BEAT_DELAY:
+		_start_pending = true
+	if _start_pending and (not _coach.is_speaking()
+			or _run_clock >= START_BEAT_DELAY + START_BEAT_HOLD):
+		_start_pending = false
 		_beat_when("start")
 	# A level that never sets a goal (the bridge) still shows the chapter's.
 	if was < 0.6 and _run_clock >= 0.6 and not _objective_seen:
@@ -658,7 +676,10 @@ func _on_game_started() -> void:
 	_boss_bar.reset_to(float(GameManager.MAX_BOSS_HEALTH))
 	_boss_bar.set_fill_color(UIStyle.BOSS_AMBER)
 	_run_clock = 0.0
+	_start_pending = false
 	_beats_shown.clear()
+	_coach.begin()
+	_hint.reset()
 	_objective_seen = false
 	_objective.reset()
 	_toast.clear()

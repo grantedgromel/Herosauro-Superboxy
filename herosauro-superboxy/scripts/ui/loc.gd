@@ -71,6 +71,13 @@ const S := {
 	"jump": {"pt": "SALTAR", "en": "JUMP"},
 	"hit": {"pt": "SOCO", "en": "HIT"},
 	"special": {"pt": "PODER", "en": "POWER"},
+	# Start-of-level controls card (scripts/ui/hint), one line per device.
+	"coach_keys": {"pt": "Anda com as setas, salta com o espaço e ataca com o J!",
+		"en": "Move with the arrows, jump with Space and attack with J!"},
+	"coach_pad": {"pt": "Anda com o manípulo, salta com o A e ataca com o X!",
+		"en": "Move with the stick, jump with A and attack with X!"},
+	"coach_touch": {"pt": "Arrasta o dedo para andar, toca no azul para saltar e no laranja para atacar!",
+		"en": "Drag your finger to move, tap blue to jump and orange to attack!"},
 	"key_space": {"pt": "Espaço", "en": "Space"},
 	"key_enter": {"pt": "Enter", "en": "Enter"},
 	"mouse_left": {"pt": "Clique esq.", "en": "Left click"},
