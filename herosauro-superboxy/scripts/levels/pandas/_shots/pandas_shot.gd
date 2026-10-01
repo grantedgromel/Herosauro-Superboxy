@@ -19,6 +19,9 @@ var _finale := -1.0
 var _cam := PackedFloat32Array()
 var _hero := Vector2.INF
 var _nohud := false
+var _settle := 60
+var _lit := -1
+var _repair := -1
 
 
 func _ready() -> void:
@@ -36,6 +39,12 @@ func _ready() -> void:
 		elif a.begins_with("--cam="):
 			for v in a.substr(6).split(","):
 				_cam.append(float(v))
+		elif a.begins_with("--settle="):
+			_settle = int(a.substr(9))
+		elif a.begins_with("--lit="):
+			_lit = int(a.substr(6))
+		elif a.begins_with("--repair="):
+			_repair = int(a.substr(9))
 		elif a == "--nohud":
 			_nohud = true
 		elif a.begins_with("--hero="):
@@ -59,7 +68,6 @@ func _ready() -> void:
 		printerr("[pandas shot] no level")
 		get_tree().quit(1)
 		return
-	print("[pandas shot] build %.0f ms" % float(level.get("build_ms")))
 	var houses: Array = level.get("houses")
 	for i in mini(_fixed, houses.size()):
 		var h: Node3D = houses[i]
@@ -67,8 +75,24 @@ func _ready() -> void:
 		h.star.take_hit(100.0, Vector3.BACK)
 		h.star.set("_since_hit", 10.0)
 		h.star.take_hit(100.0, Vector3.BACK)
+	if _fixed > 0:
+		for i in 200:
+			await get_tree().physics_frame
 	if _hero.is_finite():
 		level.place_heroes_near(Vector3(_hero.x, 0.0, _hero.y), 0.0)
+		for i in _settle:
+			await get_tree().physics_frame
+	if _lit >= 0:
+		houses[_lit].pile.take_hit(100.0, Vector3.BACK)
+	if _repair >= 0:
+		var h: Node3D = houses[_repair]
+		h.pile.take_hit(100.0, Vector3.BACK)
+		for i in 20:
+			await get_tree().physics_frame
+		h.star.take_hit(100.0, Vector3.BACK)
+		for i in 30:
+			await get_tree().physics_frame
+		h.star.take_hit(100.0, Vector3.BACK)
 	if _cases or _finale >= 0.0:
 		for h in houses:
 			if not h.is_repaired():
@@ -79,6 +103,8 @@ func _ready() -> void:
 		for i in 200:
 			await get_tree().physics_frame
 	if _finale >= 0.0:
+		for i in 300:
+			await get_tree().physics_frame
 		for s in level.get("suitcases"):
 			s.call("_on_body_entered", level.get("_human"))
 			for i in 30:

@@ -38,6 +38,7 @@ var _spin_boost: float = 0.0
 var _float: Node3D
 var _star: MeshInstance3D
 var _orbs: MultiMeshInstance3D
+var _halo: MeshInstance3D
 var _hurtbox: Hurtbox
 var _mat_lit: StandardMaterial3D
 var _mat_dark: StandardMaterial3D
@@ -59,6 +60,7 @@ func reset() -> void:
 		remove_from_group("targets")
 	_hurtbox.collision_layer = 0
 	_star.material_override = _mat_dark
+	_halo.visible = false
 	_refresh_orbs()
 
 
@@ -77,6 +79,7 @@ func light_up() -> void:
 	add_to_group("targets")
 	_hurtbox.collision_layer = PhysicsLayers.TARGETS
 	_star.material_override = _mat_lit
+	_halo.visible = true
 	_kick(0.45)
 	_spin_boost = 9.0
 	MagicFX.burst(self, global_position + Vector3.UP * FLOAT_Y, Color(1.0, 0.9, 0.35), 16, 3.5,
@@ -89,6 +92,7 @@ func finish() -> void:
 	if is_in_group("targets"):
 		remove_from_group("targets")
 	_hurtbox.collision_layer = 0
+	_halo.visible = false
 	visible = false
 
 
@@ -128,6 +132,9 @@ func _physics_process(delta: float) -> void:
 		_float.position.y = FLOAT_Y + 0.12 * sin(_t * 2.4)
 		_float.rotation.y += (1.4 + _spin_boost) * delta
 		_float.scale = Vector3(pulse * (1.0 - s * 0.5), pulse * (1.0 + s), pulse * (1.0 - s * 0.5))
+		# A golden ring on the ground says "stand here and hit me".
+		var hs := 1.0 + 0.12 * sin(_t * 3.2)
+		_halo.scale = Vector3(hs, 1.0, hs)
 	else:
 		_float.position.y = FLOAT_Y - 0.15
 		_float.rotation.y = 0.35 * sin(_t * 0.7)
@@ -168,6 +175,23 @@ func _build() -> void:
 	_float.add_child(_star)
 	_mat_lit = ToonFactory.glow(Color(1.0, 0.8, 0.25), 1.6)
 	_mat_dark = ToonFactory.build(Color(0.5, 0.47, 0.4), ToonFactory.Surface.FLAT, 0.6)
+
+	var hb := Kit.VBaker.new()
+	var segs := 28
+	for i in segs:
+		var a0 := TAU * float(i) / float(segs)
+		var a1 := TAU * float(i + 1) / float(segs)
+		var r0 := 1.05
+		var r1 := 1.3
+		hb.quad(Vector3(cos(a0) * r0, 0.04, sin(a0) * r0), Vector3(cos(a0) * r1, 0.04, sin(a0) * r1),
+			Vector3(cos(a1) * r1, 0.04, sin(a1) * r1), Vector3(cos(a1) * r0, 0.04, sin(a1) * r0),
+			Color(1.0, 0.86, 0.35) if i % 2 == 0 else Color(1.0, 0.95, 0.6))
+	_halo = MeshInstance3D.new()
+	_halo.name = "Halo"
+	_halo.mesh = hb.bake_mesh()
+	_halo.material_override = Kit.unshaded(true)
+	_halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(_halo)
 
 	_orbs = Kit.multimesh(Kit.sparkle_mesh(), HITS_TO_REPAIR, Kit.unshaded(),
 		AABB(Vector3(-1.5, 0.0, -1.5), Vector3(3.0, 3.5, 3.0)), "Orbs")

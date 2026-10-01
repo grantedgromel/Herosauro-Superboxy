@@ -75,7 +75,7 @@ func _ready() -> void:
 	GameManager.objective_changed.connect(func(label: Dictionary, done: int, total: int) -> void:
 		_objectives.append({"label": label, "done": done, "total": total}))
 	await _run()
-	_ok(_log.errors == 0, "no engine or script errors from the level build to the end (%d)" % _log.errors)
+	_ok(_log.errors == 0, "no engine or script errors from the first level build to the end (%d)" % _log.errors)
 	for e in _log.first:
 		printerr("     ", e)
 	print("\npandas probe: %d passed, %d failed" % [_pass, _fail])
@@ -84,10 +84,10 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	await _measure_cold_build()
 	_main = MainScene.instantiate()
 	add_child(_main)
 	await _settle(4)
-	_log.armed = true
 	GameManager.set_chapter("pandas")
 	GameManager.set_player_count(1)
 	GameManager.set_human_hero(1)
@@ -105,6 +105,22 @@ func _run() -> void:
 
 
 # --- The level loads ------------------------------------------------------------------
+
+## The level's whole GDScript build (its _ready), cold: nothing of it cached
+## yet. On the web this runs on the one main thread, so it is the load screen.
+func _measure_cold_build() -> void:
+	_log.armed = true
+	var packed: PackedScene = load(LEVEL_SCENE)
+	var t0 := Time.get_ticks_usec()
+	var lvl := packed.instantiate()
+	add_child(lvl)
+	var ms := float(Time.get_ticks_usec() - t0) / 1000.0
+	print("  -- cold build %.0f ms" % ms)
+	_ok(ms > 1.0 and ms < MAX_BUILD_MS, "the level builds in %.0f ms (< %.0f)" % [ms, MAX_BUILD_MS])
+	remove_child(lvl)
+	lvl.free()
+	await _settle(2)
+
 
 func _check_world() -> bool:
 	_level = LevelBase.current(get_tree()) as Node3D
@@ -131,8 +147,6 @@ func _check_world() -> bool:
 	_ok(lit == 0, "no door star is lit while its rubbish is in the way (%d lit)" % lit)
 	_ok(get_tree().get_nodes_in_group("targets").size() == 9,
 		"targets are the 8 heaps and the last rubbish (%d)" % get_tree().get_nodes_in_group("targets").size())
-	var build_ms: float = _level.get("build_ms")
-	_ok(build_ms > 0.0 and build_ms < MAX_BUILD_MS, "the level builds in %.0f ms (< %.0f)" % [build_ms, MAX_BUILD_MS])
 	var census: Dictionary = _level.render_census()
 	print("  -- census ", census)
 	_ok(int(census["mesh_instances"]) <= MAX_MESH_INSTANCES,

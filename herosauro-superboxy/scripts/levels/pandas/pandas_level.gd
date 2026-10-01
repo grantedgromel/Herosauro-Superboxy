@@ -35,15 +35,18 @@ const OBJECTIVE_CASES := {"pt": "Encontra as malas dos pandas!", "en": "Find the
 enum Stage { HOUSES, CASES, FINALE, DONE }
 
 const FOUNTAIN := Square.FOUNTAIN
-const SPAWNS := {1: Vector3(12.5, 1.2, -1.6), 2: Vector3(12.5, 1.2, 1.6)}
+## On the terrace, nearer the first house (the one with the tiny heap) than any other.
+const SPAWNS := {1: Vector3(11.8, 1.2, -4.6), 2: Vector3(12.6, 1.2, -1.8)}
 ## Where the panda family stands when the run starts (on the terrace).
-const PANDA_STARTS: Array[Vector3] = [Vector3(15.2, 0.0, -3.0), Vector3(15.6, 0.0, -1.7),
-	Vector3(14.6, 0.0, 3.1), Vector3(15.4, 0.0, 2.2)]
+const PANDA_STARTS: Array[Vector3] = [Vector3(15.0, 0.0, -5.0), Vector3(15.6, 0.0, -3.8),
+	Vector3(14.4, 0.0, -1.0), Vector3(15.3, 0.0, -1.9)]
 ## Formation offsets (across, along the camera aim), metres.
 const FORMATION: Array[Vector2] = [Vector2(0.0, 0.0), Vector2(1.0, 0.45), Vector2(-0.5, -0.9), Vector2(0.7, -1.2)]
 const BOUNDS_MIN := Vector2(-16.6, -11.2)
 const BOUNDS_MAX := Vector2(18.8, 11.2)
 const HERO_SPACE := 1.9
+## How far the pandas keep from the heap or star the heroes are working on.
+const JOB_SPACE := 2.8
 const STAGE2_DELAY := 2.6
 ## How fast the camera's aim may swing, radians per second.
 const AIM_TURN_RATE := 1.7
@@ -68,7 +71,6 @@ const HOUSES := [
 const FIRST_HOUSE := 3
 const BALCONY_HOUSE := 5
 
-var build_ms: float = 0.0
 var houses: Array[Node3D] = []
 var pandas: Array[Node3D] = []
 var suitcases: Array[Node3D] = []
@@ -87,6 +89,7 @@ var _human: Node3D = null
 var _centroid := Vector3.ZERO
 var _aim_dir := Vector3(-0.6, 0.0, -0.8)
 var _side_sign: float = 1.0
+var _job := Vector3.INF
 var _avoid := PackedVector4Array()   # x, z, radius, active (1/0)
 var _avoid_static: int = 0
 var _t: float = 0.0
@@ -108,11 +111,14 @@ var _water: MeshInstance3D
 var _jet: Node3D
 var _drops: MultiMeshInstance3D
 var _water_on: float = 0.0
+var _gulls: MultiMeshInstance3D
 var _lamps: Array = []
+var _twinkle_at := PackedVector3Array()
 
 
+## Everything is built here, once. The probe times this (cold) against the
+## web budget; gameplay code never reads the wall clock.
 func _ready() -> void:
-	var t0 := Time.get_ticks_usec()
 	_build_environment()
 	var info := Square.build(self)
 	_lamps = info["lamps"]
@@ -132,8 +138,6 @@ func _ready() -> void:
 	_centroid = _flat(to_global(c))
 	_aim_dir = _flat(houses[FIRST_HOUSE].work_point() - _centroid).normalized()
 	_apply_mood()
-	build_ms = float(Time.get_ticks_usec() - t0) / 1000.0
-	print("[pandas] level built in %.0f ms" % build_ms)
 
 
 # --- LevelBase ----------------------------------------------------------------------
@@ -452,16 +456,22 @@ func _update_pandas() -> void:
 	if side.dot(to_mid) * _side_sign < -3.0:
 		_side_sign = -_side_sign
 	side *= _side_sign
-	var anchor := _centroid + _aim_dir * 0.6 + side * 3.4
+	var anchor := _centroid + _aim_dir * 0.4 + side * 3.3
 	anchor = panda_clamp(anchor)
 	var interest := _centroid + Vector3.UP * 1.0
 	var focus := _focus_point(_centroid)
+	_job = _flat(focus) if focus.is_finite() else Vector3.INF
 	if focus.is_finite() and _flat(focus - _centroid).length() < 6.0:
 		interest = focus + Vector3.UP * 1.5
 	for i in pandas.size():
 		var p: Node3D = pandas[i]
 		var f := FORMATION[i]
 		var g := panda_clamp(anchor + side * f.x + _aim_dir * f.y)
+		if _job.is_finite():
+			# Never stand on the job: the kids must see the star they are hitting.
+			var off := _flat(g - _job)
+			if off.length() < JOB_SPACE:
+				g = panda_clamp(_job + (off.normalized() if off.length() > 0.01 else -_aim_dir) * JOB_SPACE)
 		if _flat(g - p.goal).length() > 1.4 or _flat(p.goal - p.position).length() < 0.4 and _flat(g - p.goal).length() > 0.6:
 			p.goal = g
 		p.interest = interest
@@ -476,6 +486,11 @@ func panda_steer(pos: Vector3, want: Vector3) -> Vector3:
 		var l := d.length()
 		if l < HERO_SPACE and l > 0.001:
 			v += d / l * (HERO_SPACE - l) * 4.0
+	if _job.is_finite():
+		var dj := Vector3(pos.x - _job.x, 0.0, pos.z - _job.z)
+		var lj := dj.length()
+		if lj < JOB_SPACE and lj > 0.001:
+			v += dj / lj * (JOB_SPACE - lj) * 5.0
 	for a in _avoid:
 		if a.w < 0.5:
 			continue
@@ -564,7 +579,7 @@ func _tick_lights(delta: float) -> void:
 				continue
 			var phase := _t * 2.2 + float(idx) * 1.37
 			var s := maxf(0.0, sin(phase)) * 0.28
-			var p: Vector3 = h.get_meta("twinkle_%d" % k, Vector3.ZERO)
+			var p: Vector3 = _twinkle_at[idx]
 			tw.set_instance_transform(idx, Transform3D(Basis(Vector3.UP, phase).scaled(Vector3.ONE * maxf(s, 0.0001)), p))
 	# String lights twinkle once unfurled.
 	if _bulbs.multimesh.visible_instance_count > 0:
@@ -574,6 +589,23 @@ func _tick_lights(delta: float) -> void:
 			var f := 0.82 + 0.18 * sin(_t * 4.0 + float(i) * 0.9)
 			bm.set_instance_color(i, Color(base.r * f, base.g * f, base.b * f))
 	_tick_fountain(delta)
+	_tick_gulls()
+
+
+## Gulls wheeling over the river and the terrace: motion in every frame.
+func _tick_gulls() -> void:
+	var mm := _gulls.multimesh
+	for i in mm.instance_count:
+		var fi := float(i)
+		var centre := Vector3(34.0 + 9.0 * fi, 7.0 + 2.5 * fmod(fi, 3.0), -14.0 + 7.0 * fi)
+		var r := 9.0 + 3.0 * fmod(fi * 1.7, 4.0)
+		var w := (0.32 + 0.05 * fi) * (1.0 if i % 2 == 0 else -1.0)
+		var a := _t * w + fi * 1.9
+		var p := centre + Vector3(cos(a) * r, 0.8 * sin(_t * 0.7 + fi), sin(a) * r)
+		var heading := Vector3(-sin(a), 0.0, cos(a)) * signf(w)
+		var flap := 1.0 + 0.55 * sin(_t * 7.5 + fi * 2.3)
+		var b := Basis.looking_at(heading, Vector3.UP).scaled(Vector3(1.0, flap, 1.0))
+		mm.set_instance_transform(i, Transform3D(b.rotated(heading, -0.25 * signf(w)), p))
 
 
 func _tick_fountain(_delta: float) -> void:
@@ -681,6 +713,7 @@ func _build_houses() -> void:
 		h.low_balcony = i == BALCONY_HOUSE
 		h.has_door_leaf = i == PRETTIEST
 		h.rng_seed = 101 + i * 17
+		h.end_wall = 1.0 if i == 3 else (-1.0 if i == 7 else 0.0)
 		if row < 0:
 			h.position = Vector3(cx, 0.0, -Square.ROW_Z)
 		else:
@@ -689,9 +722,8 @@ func _build_houses() -> void:
 			h.rotation.y = PI
 		add_child(h)
 		h.repaired.connect(_on_house_repaired)
-		var pts: Array[Vector3] = h.twinkle_points()
-		for k in pts.size():
-			h.set_meta("twinkle_%d" % k, pts[k])
+		for p in h.twinkle_points():
+			_twinkle_at.append(p)
 		houses.append(h)
 
 
@@ -775,6 +807,15 @@ func _build_lights() -> void:
 	_flags.multimesh.visible_instance_count = 0
 	add_child(_bulbs)
 	add_child(_flags)
+	var gb := Kit.VBaker.new()
+	gb.blob(Vector3(0.13, 0.11, 0.36), Transform3D.IDENTITY, Color(0.97, 0.97, 0.95), 8, 5)
+	for sx: float in [-1.0, 1.0]:
+		gb.box(Vector3(0.7, 0.03, 0.26), Vector3(sx * 0.42, 0.06, 0.02), Color(0.92, 0.93, 0.95), Vector3(0.0, 0.0, sx * 0.3))
+		gb.box(Vector3(0.3, 0.03, 0.2), Vector3(sx * 0.9, 0.24, 0.0), Color(0.3, 0.32, 0.36), Vector3(0.0, 0.0, -sx * 0.35))
+	gb.box(Vector3(0.05, 0.05, 0.12), Vector3(0.0, 0.02, -0.4), Color(1.0, 0.75, 0.2))
+	_gulls = Kit.multimesh(gb.bake_mesh(), 7, Kit.vc("soft"),
+		AABB(Vector3(10.0, -5.0, -40.0), Vector3(110.0, 30.0, 110.0)), "Gulls")
+	add_child(_gulls)
 
 
 func _build_fountain_water() -> void:

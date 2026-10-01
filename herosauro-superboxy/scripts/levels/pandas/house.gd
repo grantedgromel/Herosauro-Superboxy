@@ -50,6 +50,8 @@ var pile_size: int = 1
 var door_side: float = -1.0
 var low_balcony: bool = false
 var has_door_leaf: bool = false
+## The end of a row: which side wall is seen (+1 local +X, -1 local -X, 0 none).
+var end_wall: float = 0.0
 var rng_seed: int = 1
 
 var star: Node3D
@@ -369,6 +371,8 @@ func _build_look(broken: bool) -> Node3D:
 				hanging_done = true
 				_make_hanging(Vector2(x, wy), shutter)
 
+	if end_wall != 0.0:
+		_side_wall(body, trim, glow, broken, granite, glass, shutter, rng)
 	if broken:
 		_dilapidate(body, rng, holes)
 	else:
@@ -587,6 +591,37 @@ func _flowers(body: Kit.VBaker, at: Vector3, span: float, rng: RandomNumberGener
 		var c := tone if rng.randf() < 0.65 else (palette[rng.randi_range(0, palette.size() - 1)] as Color)
 		body.blob(Vector3(0.075, 0.06, 0.075), Transform3D(Basis(), at + Vector3(x, rng.randf_range(0.12, 0.2),
 			rng.randf_range(-0.05, 0.08))), c, 6, 4)
+
+
+## The exposed side of the last house in a row: windows, a cornice return, a
+## drainpipe, so the end of the street is not a blank slab.
+func _side_wall(body: Kit.VBaker, trim: Kit.VBaker, glow: Kit.VBaker, broken: bool, granite: Color,
+		glass: Color, shutter: Color, rng: RandomNumberGenerator) -> void:
+	var sx := end_wall
+	var x := sx * width * 0.5
+	trim.box(Vector3(0.42, 0.32, 8.0), Vector3(x + sx * 0.12, _h + 0.1, -4.0), granite)
+	trim.box(Vector3(0.14, 0.5, 8.0), Vector3(x + sx * 0.07, 0.25, -4.0), granite.darkened(0.08))
+	body.box(Vector3(0.12, _h, 0.12), Vector3(x + sx * 0.1, _h * 0.5, -0.5), Color(0.3, 0.32, 0.34))
+	for f in floors:
+		var y0 := 0.9 if f == 0 else GF + FH * float(f - 1) + 0.7
+		for zc: float in [-2.4, -5.6]:
+			var ww := 0.95
+			var wh := 1.6 if f > 0 else 1.4
+			trim.box(Vector3(0.14, 0.14, ww + 0.28), Vector3(x + sx * 0.07, y0 + wh + 0.07, zc), granite)
+			trim.box(Vector3(0.14, wh, 0.14), Vector3(x + sx * 0.07, y0 + wh * 0.5, zc - ww * 0.5 - 0.07), granite)
+			trim.box(Vector3(0.14, wh, 0.14), Vector3(x + sx * 0.07, y0 + wh * 0.5, zc + ww * 0.5 + 0.07), granite)
+			trim.box(Vector3(0.24, 0.09, ww + 0.34), Vector3(x + sx * 0.12, y0 - 0.04, zc), granite)
+			if broken:
+				body.box(Vector3(0.04, wh, ww), Vector3(x + sx * 0.02, y0 + wh * 0.5, zc), glass)
+				if rng.randf() < 0.5:
+					body.box(Vector3(0.04, 0.15, ww + 0.3), Vector3(x + sx * 0.1, y0 + wh * 0.5, zc), Color(0.6, 0.5, 0.38),
+						Vector3(rng.randf_range(-0.3, 0.3), 0.0, 0.0))
+			else:
+				glow.box(Vector3(0.04, wh, ww), Vector3(x + sx * 0.02, y0 + wh * 0.5, zc), Color.WHITE)
+				for sz: float in [-1.0, 1.0]:
+					body.box(Vector3(0.05, wh, ww * 0.5), Vector3(x + sx * 0.04, y0 + wh * 0.5, zc + sz * (ww * 0.75 + 0.16)), shutter)
+				if f > 0:
+					body.box(Vector3(0.26, 0.24, ww + 0.1), Vector3(x + sx * 0.2, y0 + 0.06, zc), Color(0.62, 0.36, 0.22))
 
 
 ## Broken look: stains, cracks and a patch of bare brick, kept cartoon-tidy.
