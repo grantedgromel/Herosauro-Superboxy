@@ -458,6 +458,28 @@ func _hero_tint() -> Color:
 	return UIStyle.actor_color(UIStyle.actor_for_player(_hero))
 
 
+# --- Legend (the pause sheet's reminder of what each control does) ------------------
+
+## The same picture the overlay draws for `role` (STICK, ATTACK, ABILITY, JUMP),
+## at `px`, as atlas sprites: the stick is its dish with the hero's knob in it.
+## For the HUD's pause sheet, which shows these instead of key caps while the
+## child is playing by touch.
+static func legend_icon(role: int, px: float, hero: int = 1) -> Control:
+	var sz := Vector2(px, px)
+	if role == Role.STICK:
+		var base := IconAtlas.sprite(_stamp_stick_base(), sz)
+		var k := px * STICK_KNOB / STICK_BASE
+		var knob := IconAtlas.sprite(
+			_stamp_knob(UIStyle.actor_color(UIStyle.actor_for_player(hero))), Vector2(k, k))
+		knob.position = (sz - Vector2(k, k)) * 0.5
+		base.add_child(knob)
+		base.custom_minimum_size = sz
+		return base
+	var b := IconAtlas.sprite(_stamp_button(role), sz)
+	b.custom_minimum_size = sz
+	return b
+
+
 # --- Stamps (drawn once into the IconAtlas) ------------------------------------------
 
 static func _stamp_button(role: int) -> AtlasTexture:

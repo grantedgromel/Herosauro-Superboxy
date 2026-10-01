@@ -141,6 +141,7 @@ func _ready() -> void:
 	_touch.active_changed.connect(func(_on: bool) -> void: _apply_layout())
 	_compact = _touch.is_active()
 	_sync_roster()
+	_rebuild_pause_hints()
 
 	GameManager.player_damaged.connect(_on_player_damaged)
 	GameManager.player_respawned.connect(_on_player_respawned)
@@ -339,6 +340,7 @@ func _apply_layout() -> void:
 		return
 	_compact = want
 	_sync_roster(true)
+	_rebuild_pause_hints()
 
 
 func _build_storybook() -> void:
@@ -458,8 +460,17 @@ func _rebuild_pause_hints() -> void:
 		_pause_hints.remove_child(c)
 		c.queue_free()
 
+	# A child playing by touch has no keyboard: key caps on the pause sheet are
+	# a reminder of controls they do not have. The hero the overlay drives gets
+	# the overlay's own pictures instead (stick, jump, hit, power); a second
+	# player on keys or a pad keeps their key row.
+	var touch_hero := _touch.hero() if _touch != null and _touch.is_active() else 0
+	var key_rows := 0
 	var roster := GameManager.active_player_ids()
 	for pid in roster:
+		if pid == touch_hero and not GameManager.is_ai(pid):
+			_pause_hints.add_child(_touch_legend(pid))
+			continue
 		var row := HBoxContainer.new()
 		row.alignment = BoxContainer.ALIGNMENT_CENTER
 		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -481,6 +492,10 @@ func _rebuild_pause_hints() -> void:
 		row.add_child(UIStyle.binding_pair(Loc.t("hit"), UIStyle.binding_caps(pid, ["attack"], 1)))
 		row.add_child(UIStyle.binding_pair(Loc.t("special"), UIStyle.binding_caps(pid, ["ability"], 1)))
 		_pause_hints.add_child(row)
+		key_rows += 1
+	if key_rows == 0:
+		_grow_text(_pause_hints, PAUSE_HINT_PX)
+		return
 
 	# Pause is not a per-slot action — either player's Esc resumes — so it sits on
 	# its own line rather than being repeated in both rows.
@@ -496,6 +511,35 @@ func _rebuild_pause_hints() -> void:
 
 
 const PAUSE_HINT_PX := 17
+## Size of each pictogram in the touch legend on the pause sheet.
+const LEGEND_PX := 56.0
+
+
+## The touch overlay's controls as pictures with a word under each, in the
+## order the thumbs meet them: the stick on the left, then jump, hit, power.
+func _touch_legend(pid: int) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.name = "TouchLegend"
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", UIStyle.SPACE_LG)
+	if GameManager.player_count > 1:
+		var actor := UIStyle.actor_for_player(pid)
+		var tag := UIStyle.pill("P%d" % pid, UIStyle.actor_color(actor), UIStyle.BASE)
+		tag.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(tag)
+	for entry: Array in [[TouchControls.Role.STICK, "move"], [TouchControls.Role.JUMP, "jump"],
+			[TouchControls.Role.ATTACK, "hit"], [TouchControls.Role.ABILITY, "special"]]:
+		var cell := VBoxContainer.new()
+		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.alignment = BoxContainer.ALIGNMENT_CENTER
+		cell.add_theme_constant_override("separation", 2)
+		var icon := TouchControls.legend_icon(int(entry[0]), LEGEND_PX, pid)
+		icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		cell.add_child(icon)
+		cell.add_child(UIStyle.text(Loc.t(str(entry[1])), UIStyle.Scale.MICRO, UIStyle.TEXT_SECONDARY))
+		row.add_child(cell)
+	return row
 
 
 static func _grow_text(n: Node, px: int) -> void:

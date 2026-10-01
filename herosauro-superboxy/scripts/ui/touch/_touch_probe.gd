@@ -212,6 +212,7 @@ func _check_pause() -> void:
 	_ok(GameManager.state == GameManager.State.PAUSED, "tapping the pause button pauses")
 	_ok(not hud._touch.is_shown(), "the overlay steps aside for the pause sheet")
 	_ok(Input.emulate_mouse_from_touch, "and the sheet is tappable (emulation back on)")
+	_check_pause_hints(hud, true, "touch")
 	await _frames(2)
 	_tap(hud._resume_btn.get_global_rect().get_center())
 	await _frames(2)
@@ -227,10 +228,40 @@ func _check_pause() -> void:
 	_tap(hud._pause_btn.get_global_rect().get_center())
 	await _frames(2)
 	_ok(GameManager.state == GameManager.State.PAUSED, "no overlay: the pause button still taps")
+	_check_pause_hints(hud, false, "keyboard")
 	GameManager.change_state(GameManager.State.MENU)
 	await _frames(1)
 	_free(hud)
 	TouchControls.force = TouchControls.Force.AUTO
+
+
+## The pause sheet's control reminder. By touch it is the overlay's own
+## pictures (stick, jump, hit, power) and not a single key cap: a child on a
+## tablet has no WASD and no Esc. On keys it is the key caps, as before.
+func _check_pause_hints(hud: Control, touch_on: bool, tag: String) -> void:
+	var hints: Control = hud._pause_hints
+	var caps := _count_caps(hints)
+	var legend := hints.find_child("TouchLegend", true, false) as Control
+	if touch_on:
+		_ok(caps == 0, "%s pause sheet shows no key caps (%d)" % [tag, caps])
+		_ok(legend != null and legend.is_visible_in_tree(),
+			"%s pause sheet shows the touch pictograms instead" % tag)
+		if legend != null:
+			var pics := 0
+			for cell in legend.get_children():
+				if cell.get_child_count() > 0 and cell.get_child(0) is TextureRect:
+					pics += 1
+			_ok(pics == 4, "%s legend has stick, jump, hit and power (%d)" % [tag, pics])
+	else:
+		_ok(caps > 0, "%s pause sheet shows the key caps (%d)" % [tag, caps])
+		_ok(legend == null, "%s pause sheet has no touch legend" % tag)
+
+
+func _count_caps(n: Node) -> int:
+	var k := 1 if n is PanelContainer else 0
+	for c in n.get_children():
+		k += _count_caps(c)
+	return k
 
 
 # --- Layout ------------------------------------------------------------------------------

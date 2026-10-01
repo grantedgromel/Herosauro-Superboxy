@@ -61,12 +61,14 @@ func enter() -> void:
 
 func go_back() -> void:
 	if step == 1:
-		show_step(0)
+		# Back from the heroes lands on the card that led there.
+		show_step(0, 0)
 	else:
 		back_requested.emit()
 
 
-func show_step(which: int) -> void:
+## `focus_i` picks the card to focus; -1 means the remembered choice.
+func show_step(which: int, focus_i: int = -1) -> void:
 	step = which
 	for c in _cards:
 		_host.remove_child(c)
@@ -83,13 +85,40 @@ func show_step(which: int) -> void:
 	_note.visible = step == 1
 	_refresh_text()
 	_layout()
-	var last_players := int(UIProgress.get_pref("players", 1))
-	var last_hero := int(UIProgress.get_pref("hero", 1))
-	var focus_i := (last_players - 1) if step == 0 else (last_hero - 1)
+	_wire_focus()
+	if focus_i < 0:
+		var last_players := int(UIProgress.get_pref("players", 1))
+		var last_hero := int(UIProgress.get_pref("hero", 1))
+		focus_i = (last_players - 1) if step == 0 else (last_hero - 1)
 	var target := _cards[clampi(focus_i, 0, 1)]
 	(func() -> void:
 		if is_instance_valid(target) and target.is_inside_tree():
 			target.grab_focus()).call_deferred()
+
+
+## Arrow keys / d-pad. The two cards are a closed row: Left off the first card
+## and Right off the last go nowhere, and Down has nothing under it. Left the
+## engine's geometric search, Left from the first card found the round Back
+## button up in the corner, and the next Enter quietly threw the child back to
+## the shelf. Back is reached on purpose only: Up from the cards (it is above
+## them), Esc / pad B, or a tap.
+func _wire_focus() -> void:
+	var n := _cards.size()
+	for i in n:
+		var c := _cards[i]
+		c.focus_neighbor_left = c.get_path_to(_cards[i - 1] if i > 0 else c)
+		c.focus_neighbor_right = c.get_path_to(_cards[i + 1] if i < n - 1 else c)
+		c.focus_neighbor_top = c.get_path_to(_back)
+		c.focus_neighbor_bottom = c.get_path_to(c)
+		c.focus_previous = c.get_path_to(_cards[i - 1] if i > 0 else _back)
+		c.focus_next = c.get_path_to(_cards[i + 1] if i < n - 1 else _back)
+	if n > 0:
+		_back.focus_neighbor_bottom = _back.get_path_to(_cards[0])
+		_back.focus_neighbor_right = _back.get_path_to(_cards[0])
+		_back.focus_neighbor_left = _back.get_path_to(_back)
+		_back.focus_neighbor_top = _back.get_path_to(_back)
+		_back.focus_next = _back.get_path_to(_cards[0])
+		_back.focus_previous = _back.get_path_to(_cards[n - 1])
 
 
 func pick_players(n: int) -> void:

@@ -212,6 +212,24 @@ const _FIGURE_REGION := [
 	Rect2i(1, 6, 623, 886),      # Adamastor  — one pose
 ]
 
+## Full-figure cut-outs for the two brothers, cut from the model sheets at the
+## repo root (front pose, background keyed to alpha, nothing cropped off).
+## The 900 px files above are hard-cropped through Herosauro's arm and Super
+## Boxy's glove, which drew a straight vertical edge down every hero card and
+## story page; those files stay for the HEAD crops, where the edge never shows.
+## Adamastor's figure is the story-page version of his sheet: the flaming
+## brows and glowing eyes repainted as white brows and dark, kind pupils, for
+## four-year-olds turning the pages. Same 631 x 900 canvas, so his measured
+## _FIGURE_REGION still applies. The HUD boss plate keeps the fierce head.
+## `load()`ed on first use, not preloaded: only the menu screens draw a full
+## figure, so the fight never pays for them. Lossless, since nothing keeps
+## them resident (the resampled copy in _tex_cache is what is drawn).
+const _FIGURE_PATH := [
+	"res://assets/ui/portraits/herosauro_full.png",
+	"res://assets/ui/portraits/superboxy_full.png",
+	"res://assets/ui/portraits/adamastor_soft.png",
+]
+
 const _ACTOR_NAME := ["HEROSAURO", "SUPER BOXY", "ADAMASTOR"]
 const _ACTOR_EPITHET := [
 	"THE LITTLE DINO OF THE RIBEIRA",
@@ -914,6 +932,13 @@ static func portrait_scaled(actor: int, height: int) -> Texture2D:
 	# Explicitly typed: the const array is untyped, so `:=` cannot infer Rect2i
 	# here and the whole design system fails to compile.
 	var region: Rect2i = _FIGURE_REGION[a]
+	var full_path: String = _FIGURE_PATH[a]
+	if not full_path.is_empty() and ResourceLoader.exists(full_path):
+		var full := load(full_path) as Texture2D
+		if full != null:
+			if full.get_size() != src.get_size():
+				region = Rect2i(Vector2i.ZERO, Vector2i(full.get_width(), full.get_height()))
+			src = full
 	var target := Vector2i(
 		maxi(1, int(round(float(region.size.x) * height / maxf(float(region.size.y), 1.0)))),
 		height)
