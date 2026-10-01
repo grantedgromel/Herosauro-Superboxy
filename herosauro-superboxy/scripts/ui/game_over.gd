@@ -1,306 +1,309 @@
 extends Control
-## Victory / Defeat card.
+## The end of a chapter's play, in the storybook frame.
 ##
-## Two-column: the character who decided the fight on the left (the heroes on a
-## win, the giant on a loss) and the verdict, the run's numbers and the two
-## things you can do next on the right. Using the concept art here is the whole
-## point — a results screen with a face on it is authored, one with a font on it
-## is a debug print.
+## VICTORY: the heroes hold their pose for a moment, then the book opens again
+## for the chapter's last pages (the outro, read aloud like the intro), then a
+## sticker lands on the chapter's cover ("Muito bem! Ganhaste um
+## autocolante!") and Continue goes back to the bookshelf, where the next
+## story is waiting, highlighted. The sticker is recorded the moment the
+## chapter is won, so skipping the pages never loses it.
 ##
-## IN CO-OP BOTH HEROES TAKE THE WIN. The partner is staged behind and to the
-## side of the lead figure rather than being left out, because a two-player run
-## that ends on a portrait of player one is the same slight the old single-hero
-## HUD was making, moved to the last screen of the game.
+## DEFEAT only exists with Ajudas off. It is never called a defeat: "Vamos
+## tentar outra vez!", the two brothers smiling, Try again and Back to the
+## book. No loss language anywhere (docs/story/ADAPTATION.md, kid rule 5).
 ##
-## It does not appear, it ARRIVES: the scrim fades, the card drops in past its
-## resting size and springs back, then the verdict punches. Roughly half a
-## second, and it turns "the game stopped" into "the game is telling you
-## something".
+## The outro runs while GameManager is in VICTORY; Continue calls go_to_menu.
 
-const CARD_W := 780.0
-## Declared height. The PanelContainer grows past this if its content demands it,
-## so the reveal takes its pivot from the measured size, not from this constant.
-const CARD_H := 462.0
-const ART_H := 310.0
-const REVEAL := 0.46
+const POSE_WAIT := 2.0
+const RETRY_WAIT := 1.0
 
+var phase: String = ""            # "", "pose", "outro", "sticker", "retry"
+var chapter_id: String = ""
+
+var _reader: PageReader
 var _dim: ColorRect
-## Full-rect wrapper the card is centred inside. The rise animation moves THIS,
-## because `position` on an anchor-centred control is measured from the parent's
-## top-left, not from the anchor — tweening the card itself would fling it to the
-## top of the screen.
-var _stage: Control
-var _card: PanelContainer
-var _glow: TextureRect
-var _art: TextureRect
-## The co-op partner, staged behind and outboard of the lead figure. Hidden in a
-## solo run and on a defeat, where the giant stands alone.
-var _art2: TextureRect
-var _title: Label
-var _subtitle: Label
-var _rows: VBoxContainer
-var _badge: PanelContainer
-var _again_btn: Button
-var _menu_btn: Button
-## Input is ignored until the reveal finishes, so a mashed attack button on the
-## killing blow cannot skip straight past the results.
-var _interactive: bool = false
+var _sticker_card: Panel
+var _retry_card: Panel
+var _cover: BookCover
+var _well_done: Label
+var _sticker_line: Label
+var _stars: Array[KidIcon] = []
+var _continue: Button
+var _retry_title: Label
+var _retry_body: Label
+var _again: Button
+var _to_book: Button
+var _voice: Narrator
+var _token := 0
 
 
 func _ready() -> void:
-	process_mode = Node.PROCESS_MODE_ALWAYS
-	visible = false
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
-
+	visible = false
 	_dim = ColorRect.new()
-	_dim.color = UIStyle.OVERLAY
-	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_dim.color = Color(0.06, 0.03, 0.08, 0.55)
 	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_dim)
 
-	_stage = Control.new()
-	_stage.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_stage)
+	_reader = PageReader.new()
+	_reader.name = "Outro"
+	add_child(_reader)
+	_reader.finished.connect(func(_skipped: bool) -> void: _show_sticker())
 
-	_card = UIStyle.card(UIStyle.Elev.MODAL, UIStyle.RADIUS_LG, UIStyle.SPACE_XL)
-	_card.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	_card.offset_left = -CARD_W * 0.5
-	_card.offset_right = CARD_W * 0.5
-	_card.offset_top = -CARD_H * 0.5
-	_card.offset_bottom = CARD_H * 0.5
-	_stage.add_child(_card)
+	_build_sticker_card()
+	_build_retry_card()
 
-	var columns := HBoxContainer.new()
-	columns.add_theme_constant_override("separation", UIStyle.SPACE_XL)
-	_card.add_child(columns)
+	_voice = Narrator.new()
+	_voice.name = "Voice"
+	add_child(_voice)
 
-	columns.add_child(_build_art_column())
-	columns.add_child(_build_body_column())
-
+	resized.connect(_layout)
 	GameManager.game_over.connect(_on_game_over)
 	GameManager.game_started.connect(_hide_now)
+	GameManager.settings_changed.connect(_refresh_text)
 
 
-func _build_art_column() -> Control:
-	var holder := Control.new()
-	holder.custom_minimum_size = Vector2(252, ART_H)
-	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	holder.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-
-	# Soft coloured bloom behind the figures so the line art lifts off the panel.
-	_glow = TextureRect.new()
-	_glow.stretch_mode = TextureRect.STRETCH_SCALE
-	_glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	holder.add_child(_glow)
-	_glow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_glow.offset_left = -40.0
-	_glow.offset_right = 40.0
-	_glow.offset_top = -20.0
-	_glow.offset_bottom = 20.0
-
-	# Partner first, so the lead figure draws over it. Smaller, pushed left and
-	# down, and knocked back a touch — a staged group shot, not two cut-outs.
-	_art2 = _figure(holder)
-	_art2.offset_left = -58.0
-	_art2.offset_right = -58.0
-	_art2.offset_top = 34.0
-	_art2.modulate = Color(0.86, 0.88, 0.92, 1.0)
-	_art2.visible = false
-
-	_art = _figure(holder)
-	return holder
+func _build_sticker_card() -> void:
+	_sticker_card = Panel.new()
+	_sticker_card.name = "StickerCard"
+	_sticker_card.add_theme_stylebox_override("panel", BookKit.paper_box(36, 0))
+	_sticker_card.visible = false
+	add_child(_sticker_card)
+	_well_done = BookKit.loud_label("", 70, BookKit.SUN)
+	_sticker_card.add_child(_well_done)
+	_sticker_line = BookKit.print_label("", 32, true)
+	_sticker_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_sticker_card.add_child(_sticker_line)
+	for i in 3:
+		var st := KidIcon.make(KidIcon.Kind.STAR, 72, BookKit.SUN)
+		_sticker_card.add_child(st)
+		_stars.append(st)
+	_continue = BookKit.button(Loc.t("continue"), KidIcon.Kind.NEXT, BookKit.LEAF, Vector2(300, 92))
+	_continue.name = "Continue"
+	_continue.pressed.connect(_on_continue)
+	_sticker_card.add_child(_continue)
 
 
-func _figure(holder: Control) -> TextureRect:
-	var tr := TextureRect.new()
-	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	tr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	holder.add_child(tr)
-	tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	return tr
+func _build_retry_card() -> void:
+	_retry_card = Panel.new()
+	_retry_card.name = "RetryCard"
+	_retry_card.add_theme_stylebox_override("panel", BookKit.paper_box(36, 0))
+	_retry_card.visible = false
+	add_child(_retry_card)
+	var heads := HBoxContainer.new()
+	heads.name = "Heads"
+	heads.add_theme_constant_override("separation", 18)
+	heads.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for actor in [UIStyle.Actor.HEROSAURO, UIStyle.Actor.SUPERBOXY]:
+		var f := PortraitFrame.new()
+		f.actor = actor
+		f.custom_minimum_size = Vector2(132, 132)
+		heads.add_child(f)
+	_retry_card.add_child(heads)
+	_retry_title = BookKit.loud_label("", 60, BookKit.SUN)
+	_retry_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_retry_card.add_child(_retry_title)
+	_retry_body = BookKit.print_label("", 28, false)
+	_retry_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_retry_card.add_child(_retry_body)
+	_again = BookKit.button(Loc.t("try_again"), KidIcon.Kind.RETRY, BookKit.SUN, Vector2(300, 92))
+	_again.name = "TryAgain"
+	_again.pressed.connect(_on_try_again)
+	_retry_card.add_child(_again)
+	_to_book = BookKit.button(Loc.t("back_to_book"), KidIcon.Kind.BOOK, BookKit.PLUM, Vector2(300, 92))
+	_to_book.name = "BackToBook"
+	_to_book.pressed.connect(_on_back_to_book)
+	_retry_card.add_child(_to_book)
 
 
-func _build_body_column() -> Control:
-	var col := VBoxContainer.new()
-	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	col.add_theme_constant_override("separation", UIStyle.SPACE_SM)
-
-	_title = UIStyle.title("", UIStyle.Scale.TITLE, UIStyle.VICTORY)
-	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	col.add_child(_title)
-
-	_subtitle = UIStyle.text("", UIStyle.Scale.BODY, UIStyle.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
-	_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_subtitle.custom_minimum_size = Vector2(0, 42)
-	col.add_child(_subtitle)
-
-	col.add_child(UIStyle.divider(2, 0.12))
-
-	_rows = VBoxContainer.new()
-	_rows.add_theme_constant_override("separation", UIStyle.SPACE_XS)
-	col.add_child(_rows)
-
-	# A solid gold chip, not a gold sentence. A personal best is the one piece of
-	# good news on this card and it should look like a sticker stuck to it.
-	_badge = UIStyle.pill("NEW PERSONAL BEST", UIStyle.GOLD, UIStyle.BASE, UIStyle.Scale.LABEL)
-	_badge.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_badge.visible = false
-	col.add_child(_badge)
-
-	var gap := Control.new()
-	gap.custom_minimum_size = Vector2(0, UIStyle.SPACE_MD)
-	col.add_child(gap)
-
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", UIStyle.SPACE_MD)
-	col.add_child(actions)
-
-	_again_btn = UIStyle.button("PLAY AGAIN", true, Vector2(230, 56))
-	_again_btn.pressed.connect(_on_play_again)
-	actions.add_child(_again_btn)
-
-	_menu_btn = UIStyle.button("MAIN MENU", false, Vector2(190, 56))
-	_menu_btn.pressed.connect(_on_main_menu)
-	actions.add_child(_menu_btn)
-	return col
-
-
-# --- Presentation -------------------------------------------------------------
+# --- Flow ----------------------------------------------------------------------------
 
 func _on_game_over(victory: bool) -> void:
-	# Let the death animation land before the UI takes the screen.
-	await get_tree().create_timer(2.0 if victory else 1.0).timeout
-	if GameManager.state != GameManager.State.VICTORY and GameManager.state != GameManager.State.DEFEAT:
-		return
-
-	var accent := UIStyle.VICTORY if victory else UIStyle.DEFEAT
-	var actor: int = UIStyle.Actor.HEROSAURO if victory else UIStyle.Actor.ADAMASTOR
-	var co_op := GameManager.player_count >= 2
-
-	_title.text = "VICTORY!" if victory else "DEFEAT"
-	_title.add_theme_color_override("font_color", accent)
+	_token += 1
+	var mine := _token
+	chapter_id = GameManager.chapter_id
+	UIProgress.submit(GameManager.score, GameManager.fight_time, victory)
 	if victory:
-		_subtitle.text = "Porto stands. The giant of the Douro is stone again."
+		UIProgress.complete_chapter(chapter_id)
+	phase = "pose"
+	await get_tree().create_timer(POSE_WAIT if victory else RETRY_WAIT, true, false, true).timeout
+	if mine != _token or phase != "pose":
+		return
+	if victory:
+		_show_outro()
 	else:
-		_subtitle.text = "Adamastor still holds the bridge. The city waits."
-
-	_art.texture = UIStyle.portrait_scaled(actor, int(ART_H * 1.6))
-	# Both heroes take a co-op win. A defeat is the giant's moment and he takes
-	# the frame alone — putting the losers next to him would undercut it.
-	_art2.visible = victory and co_op
-	if _art2.visible:
-		_art2.texture = UIStyle.portrait_scaled(UIStyle.Actor.SUPERBOXY, int(ART_H * 1.34))
-	_glow.texture = _bloom(accent)
-
-	var beat := UIProgress.submit(GameManager.score, GameManager.fight_time, victory)
-	_fill_rows(victory, accent, beat)
-	_badge.visible = beat
-
-	# The win/lose music is started by AudioManager off GameManager.game_over.
-	# The old synth fanfare played on top of that real track, so it is gone.
-
-	_reveal()
+		_show_retry()
 
 
-func _fill_rows(victory: bool, accent: Color, beat: bool) -> void:
-	for c in _rows.get_children():
-		_rows.remove_child(c)
-		c.queue_free()
-	_rows.add_child(UIStyle.stat_row("Score", UIProgress.format_score(GameManager.score),
-		accent if beat else UIStyle.GOLD))
-	_rows.add_child(UIStyle.stat_row("Time", UIProgress.format_time(GameManager.fight_time),
-		UIStyle.TEXT_PRIMARY))
-	var best := UIProgress.best_score()
-	_rows.add_child(UIStyle.stat_row("Best score", UIProgress.format_score(best),
-		UIStyle.TEXT_SECONDARY))
-	if victory:
-		var bt := UIProgress.best_time()
-		if bt >= 0.0:
-			_rows.add_child(UIStyle.stat_row("Fastest win", UIProgress.format_time(bt),
-				UIStyle.TEXT_SECONDARY))
-
-
-## Radial bloom, opaque-ish in the middle and gone at the edges — the inverse of
-## the screen vignette, used as a backlight for the character art.
-func _bloom(tint: Color) -> GradientTexture2D:
-	var grad := Gradient.new()
-	grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
-	grad.colors = PackedColorArray([
-		Color(tint.r, tint.g, tint.b, 0.30),
-		Color(tint.r, tint.g, tint.b, 0.11),
-		Color(tint.r, tint.g, tint.b, 0.0),
-	])
-	var gt := GradientTexture2D.new()
-	gt.gradient = grad
-	gt.width = 192
-	gt.height = 192
-	gt.fill = GradientTexture2D.FILL_RADIAL
-	gt.fill_from = Vector2(0.5, 0.52)
-	gt.fill_to = Vector2(1.0, 0.52)
-	return gt
-
-
-## The card SLAMS in. It starts oversized and above its resting place and drops
-## onto it with a back overshoot, which is a different move from the old gentle
-## rise: a verdict that eases in politely reads as a dialog box, and this one is
-## supposed to read as the game landing a full stop.
-func _reveal() -> void:
+func _show_outro() -> void:
+	phase = "outro"
 	visible = true
-	_interactive = false
-	_dim.modulate.a = 0.0
-	_stage.modulate.a = 0.0
-	_stage.position.y = -46.0
-	_card.pivot_offset = _card.size * 0.5
-	_card.scale = Vector2(1.10, 1.10)
-	_title.scale = Vector2(0.55, 0.55)
-	_title.pivot_offset = Vector2(0.0, _title.size.y * 0.5)
-
-	var t := create_tween()
-	t.set_parallel(true)
-	t.tween_property(_dim, "modulate:a", 1.0, REVEAL * 0.55)
-	t.tween_property(_stage, "modulate:a", 1.0, REVEAL * 0.5)
-	t.tween_property(_stage, "position:y", 0.0, REVEAL) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.tween_property(_card, "scale", Vector2.ONE, REVEAL) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	# The verdict lands a beat AFTER the card, so the two reads are sequential
-	# rather than fighting each other for the same quarter second.
-	t.chain().tween_property(_title, "scale", Vector2(1.08, 1.08), 0.16) \
-		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	t.chain().tween_property(_title, "scale", Vector2.ONE, 0.26) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	t.chain().tween_callback(func() -> void:
-		_interactive = true
-		_again_btn.grab_focus())
-
-
-func _hide_now() -> void:
-	visible = false
-	_interactive = false
-
-
-# --- Input --------------------------------------------------------------------
-
-func _unhandled_input(event: InputEvent) -> void:
-	if not visible or not _interactive:
+	_dim.visible = false
+	_sticker_card.visible = false
+	_retry_card.visible = false
+	var pages: Array = StoryData.chapter(chapter_id).get("outro", [])
+	if pages.is_empty():
+		_show_sticker()
 		return
-	if event.is_action_pressed("ui_confirm"):
-		_on_play_again()
-		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed("ui_cancel"):
-		_on_main_menu()
-		get_viewport().set_input_as_handled()
+	_reader.modulate.a = 0.0
+	_reader.open(chapter_id, "outro")
+	create_tween().tween_property(_reader, "modulate:a", 1.0, 0.4)
 
 
-func _on_play_again() -> void:
+func _show_sticker() -> void:
+	phase = "sticker"
+	visible = true
+	_reader.close()
+	_dim.visible = true
+	_retry_card.visible = false
+	if _cover != null:
+		_cover.queue_free()
+	_cover = BookCover.new()
+	_cover.focus_mode = Control.FOCUS_NONE
+	_cover.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sticker_card.add_child(_cover)
+	_cover.setup(chapter_id if StoryData.CHAPTERS.has(chapter_id) else "adamastor")
+	_refresh_text()
+	_layout()
+	_sticker_card.visible = true
+	_cover.play_sticker()
+	_pop_card(_sticker_card)
+	for i in _stars.size():
+		_stars[i].pivot_offset = _stars[i].size * 0.5
+		if BookKit.reduce_motion():
+			_stars[i].scale = Vector2.ONE
+			continue
+		_stars[i].scale = Vector2.ZERO
+		var t := create_tween()
+		t.tween_interval(0.6 + i * 0.18)
+		t.tween_callback(func() -> void: BookKit.sfx(&"star"))
+		t.tween_property(_stars[i], "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_BACK) \
+			.set_ease(Tween.EASE_OUT)
+	_continue.call_deferred("grab_focus")
+	_say([Loc.t("well_done"), Loc.t("sticker_won")])
+
+
+func _show_retry() -> void:
+	phase = "retry"
+	visible = true
+	_reader.close()
+	_dim.visible = true
+	_sticker_card.visible = false
+	_refresh_text()
+	_layout()
+	_retry_card.visible = true
+	_pop_card(_retry_card)
+	_again.call_deferred("grab_focus")
+	_say([Loc.t("try_again_title")])
+
+
+func _pop_card(card: Control) -> void:
+	card.pivot_offset = card.size * 0.5
+	if BookKit.reduce_motion():
+		return
+	card.scale = Vector2(0.86, 0.86)
+	card.modulate.a = 0.0
+	var t := create_tween().set_parallel(true)
+	t.tween_property(card, "scale", Vector2.ONE, 0.4).set_trans(Tween.TRANS_BACK) \
+		.set_ease(Tween.EASE_OUT)
+	t.tween_property(card, "modulate:a", 1.0, 0.25)
+
+
+func _say(lines: Array) -> void:
+	if GameManager.narration:
+		_voice.speak(" ".join(lines), Loc.lang())
+
+
+func _on_continue() -> void:
+	_voice.stop()
+	_hide_now()
+	GameManager.go_to_menu()
+
+
+func _on_try_again() -> void:
+	_voice.stop()
 	_hide_now()
 	GameManager.start_game()
 
 
-func _on_main_menu() -> void:
+func _on_back_to_book() -> void:
+	_voice.stop()
 	_hide_now()
 	GameManager.go_to_menu()
+
+
+func _hide_now() -> void:
+	_token += 1
+	phase = ""
+	_reader.close()
+	_voice.stop()
+	visible = false
+
+
+func _refresh_text() -> void:
+	_well_done.text = Loc.t("well_done")
+	_sticker_line.text = Loc.t("sticker_won")
+	_retry_title.text = Loc.t("try_again_title")
+	_retry_body.text = Loc.t("try_again_body")
+	BookKit.set_caption(_continue, Loc.t("continue"))
+	BookKit.set_caption(_again, Loc.t("try_again"))
+	BookKit.set_caption(_to_book, Loc.t("back_to_book"))
+	if _cover != null:
+		_cover.refresh()
+	_layout()
+
+
+func _layout() -> void:
+	if size.x <= 1.0:
+		return
+	# Sticker card: the cover on the left, the cheer on the right.
+	var cw := minf(size.x - 80.0, 960.0)
+	var ch := minf(size.y - 80.0, 520.0)
+	_sticker_card.size = Vector2(cw, ch)
+	_sticker_card.position = ((size - _sticker_card.size) * 0.5).round()
+	var cover_h := ch - 110.0
+	var cover_w := cover_h * 0.74
+	if _cover != null:
+		_cover.position = Vector2(48, 56)
+		_cover.size = Vector2(cover_w, cover_h)
+	var rx := 48.0 + cover_w + 48.0
+	var rw := cw - rx - 40.0
+	_well_done.position = Vector2(rx, 44)
+	_well_done.size = Vector2(rw, 90)
+	_sticker_line.position = Vector2(rx, 140)
+	_sticker_line.size = Vector2(rw, 90)
+	for i in _stars.size():
+		_stars[i].position = Vector2(rx + rw * 0.5 - 132.0 + i * 96.0, 238 - (16 if i == 1 else 0))
+	_continue.reset_size()
+	_continue.position = Vector2(rx + (rw - _continue.size.x) * 0.5, ch - _continue.size.y - 44)
+
+	# Try-again card, centred column.
+	var tw := minf(size.x - 80.0, 820.0)
+	var th := minf(size.y - 80.0, 520.0)
+	_retry_card.size = Vector2(tw, th)
+	_retry_card.position = ((size - _retry_card.size) * 0.5).round()
+	var heads := _retry_card.get_node("Heads") as Control
+	heads.reset_size()
+	heads.position = Vector2((tw - heads.size.x) * 0.5, 34)
+	_retry_title.position = Vector2(30, 186)
+	_retry_title.size = Vector2(tw - 60, 80)
+	_retry_body.position = Vector2(40, 270)
+	_retry_body.size = Vector2(tw - 80, 70)
+	_again.reset_size()
+	_to_book.reset_size()
+	var bw := _again.size.x + _to_book.size.x + 36.0
+	_again.position = Vector2((tw - bw) * 0.5, th - _again.size.y - 40)
+	_to_book.position = Vector2(_again.position.x + _again.size.x + 36.0, _again.position.y)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if phase == "sticker" and event.is_action_pressed("ui_cancel"):
+		_on_continue()
+		get_viewport().set_input_as_handled()
+	elif phase == "retry" and event.is_action_pressed("ui_cancel"):
+		_on_back_to_book()
+		get_viewport().set_input_as_handled()

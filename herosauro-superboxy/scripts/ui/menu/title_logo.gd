@@ -144,12 +144,18 @@ func _ready() -> void:
 
 	_strap_font = FontVariation.new()
 	_strap_font.base_font = UIStyle.UI_BOLD
-	_strap = UIStyle.label(STRAPLINE, SIZE_STRAP, UIStyle.TEXT_PRIMARY, true,
+	_strap = UIStyle.label(Loc.t("strapline"), SIZE_STRAP, UIStyle.TEXT_PRIMARY, true,
 			HORIZONTAL_ALIGNMENT_LEFT)
 	_strap.add_theme_font_override("font", _strap_font)
 	add_child(_strap)
 
 	_start_shine()
+
+
+## The strapline follows the language toggle (the name of the game does not).
+func refresh_text() -> void:
+	if _strap != null:
+		_strap.text = Loc.t("strapline")
 
 
 # --- Construction ------------------------------------------------------------
@@ -249,8 +255,8 @@ func relayout(max_width: float, ui_scale: float) -> float:
 	var strap_size := maxi(11, roundi(SIZE_STRAP * ui_scale))
 	var track := maxi(2, roundi(strap_size * 0.34))
 	var strap_w := UIStyle.UI_BOLD.get_string_size(
-			STRAPLINE, HORIZONTAL_ALIGNMENT_LEFT, -1.0, strap_size).x \
-			+ float(track * maxi(0, STRAPLINE.length() - 1))
+			_strap.text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, strap_size).x \
+			+ float(track * maxi(0, _strap.text.length() - 1))
 	if strap_w > max_width:
 		var strap_fit := max_width / maxf(strap_w, 1.0)
 		strap_size = maxi(9, roundi(strap_size * strap_fit))
