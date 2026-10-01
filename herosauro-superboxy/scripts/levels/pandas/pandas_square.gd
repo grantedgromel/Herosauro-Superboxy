@@ -7,7 +7,7 @@ extends RefCounted
 ## Collision follows the camera rule: everything a hero bumps into that is LOW
 ## (ground, kerbs, fountain rim, benches, balustrade, planters) is on WORLD; the
 ## tall things (facade rows, chapel, lamp posts, the fountain's column, the
-## invisible fences above the low walls) are on BOSS, which heroes collide with
+## invisible fences above the low walls) are on BLOCKERS, which heroes collide with
 ## and the camera's spring arm does not.
 ##
 ## Layout (metres, the level root at the origin, +X toward the river):
@@ -484,7 +484,7 @@ static func _colliders(level: Node3D) -> void:
 	# Ground.
 	SceneryKit.solid(level, "GroundCollider", Vector3(48.0, 1.0, 36.0), Vector3(0.0, -0.5, 0.0))
 	# Facade rows, the chapel end and the fences above the low terrace walls are
-	# tall, so they live on BOSS: heroes collide with them, the camera does not.
+	# tall, so they live on BLOCKERS: heroes collide with them, the camera does not.
 	var row_len := ROW_X1 - ROW_X0 + 1.0
 	barrier(level, "NorthRow", Vector3(row_len, 9.0, 2.5), Vector3((ROW_X0 + ROW_X1) * 0.5, 4.5, -ROW_Z - 1.25))
 	barrier(level, "SouthRow", Vector3(row_len, 9.0, 2.5), Vector3((ROW_X0 + ROW_X1) * 0.5, 4.5, ROW_Z + 1.25))
@@ -504,7 +504,7 @@ static func _colliders(level: Node3D) -> void:
 	level.add_child(fb)
 	var col := StaticBody3D.new()
 	col.name = "FountainColumn"
-	col.collision_layer = PhysicsLayers.BOSS
+	col.collision_layer = PhysicsLayers.BLOCKERS
 	col.collision_mask = 0
 	_cyl_shape(col, 0.75, 3.2, FOUNTAIN + Vector3(0.0, 1.6, 0.0))
 	level.add_child(col)
@@ -524,7 +524,7 @@ static func _colliders(level: Node3D) -> void:
 	for i in LAMPS.size():
 		var lb := StaticBody3D.new()
 		lb.name = "Lamp%d" % i
-		lb.collision_layer = PhysicsLayers.BOSS
+		lb.collision_layer = PhysicsLayers.BLOCKERS
 		lb.collision_mask = 0
 		_cyl_shape(lb, 0.26, 4.0, LAMPS[i] + Vector3(0.0, 2.0, 0.0))
 		level.add_child(lb)
@@ -532,12 +532,12 @@ static func _colliders(level: Node3D) -> void:
 		SceneryKit.solid(level, "Planter", Vector3(1.6, 0.9, 0.9), p + Vector3(0.0, 0.45, 0.0))
 
 
-## A tall static box on BOSS: heroes (mask WORLD | BOSS) bump into it; the
+## A tall static box on BLOCKERS: heroes (whose mask includes BLOCKERS) bump into it; the
 ## camera's spring arm (mask WORLD) passes through it.
 static func barrier(parent: Node3D, n: String, size: Vector3, pos: Vector3) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.name = n
-	body.collision_layer = PhysicsLayers.BOSS
+	body.collision_layer = PhysicsLayers.BLOCKERS
 	body.collision_mask = 0
 	parent.add_child(body)
 	SceneryKit.solid_shape(body, size, pos)

@@ -29,3 +29,9 @@ const PROPS := 1 << 5
 ## group "targets". The hero jab, Dino Energy and Boxy Dash all reach it
 ## (docs/story/ADAPTATION.md, "Things heroes can hit").
 const TARGETS := 1 << 6
+
+## Tall level scenery that must stop heroes but not the camera: stadium fences,
+## facade rows, the dragon's body. Heroes mask it; the CameraRig's spring arm
+## sweeps WORLD only, so it never pulls the camera in against a wall. The two
+## storybook levels used BOSS for this before the layer existed.
+const BLOCKERS := 1 << 7

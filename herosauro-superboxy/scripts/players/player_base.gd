@@ -344,7 +344,7 @@ func _ready() -> void:
 	# other. On a deck with an open drop either side, a partner who can body-check
 	# you is a partner who can kill you by accident, and "my friend shoved me into
 	# the Douro" is a co-op story nobody enjoys twice.
-	collision_mask = PhysicsLayers.WORLD | PhysicsLayers.BOSS
+	collision_mask = PhysicsLayers.WORLD | PhysicsLayers.BOSS | PhysicsLayers.BLOCKERS
 
 	motion_mode = CharacterBody3D.MOTION_MODE_GROUNDED
 	up_direction = Vector3.UP

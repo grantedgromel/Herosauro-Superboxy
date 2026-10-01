@@ -11,7 +11,7 @@ extends Node3D
 ## their cups (a helping paw for small players). breathe_fire_at(): walks over,
 ## faces the van and lets out one big cartoon puff of fire.
 ##
-## Its solid is on BOSS: heroes bump into it, the camera arm and the balls do
+## Its solid is on BLOCKERS: heroes bump into it, the camera arm and the balls do
 ## not. All motion from an accumulated clock; one seeded RNG.
 
 signal roared
@@ -508,7 +508,7 @@ func _build() -> void:
 	_solid = AnimatableBody3D.new()
 	_solid.name = "Solid"
 	_solid.sync_to_physics = false
-	_solid.collision_layer = PhysicsLayers.BOSS
+	_solid.collision_layer = PhysicsLayers.BLOCKERS
 	_solid.collision_mask = 0
 	var cs := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()

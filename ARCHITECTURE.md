@@ -140,13 +140,18 @@ say so in your report — the lead adds it to `game_manager.gd`.
 
 `PhysicsLayers` is the single source of truth. Never write a raw bitmask.
 
-`WORLD` `PLAYERS` `BOSS` `PLAYER_PROJECTILES` `HAZARDS` `PROPS` `TARGETS`
+`WORLD` `PLAYERS` `BOSS` `PLAYER_PROJECTILES` `HAZARDS` `PROPS` `TARGETS` `BLOCKERS`
 
 `TARGETS` (64) is everything hittable that is neither the boss nor a
 `PropBody`: a `Hurtbox` on that layer whose target implements
 `take_hit(amount: float, knockback: Vector3) -> void` and whose root joins group
 `targets`. The hero jab, Dino Energy and Boxy Dash all reach it; make the
 Hurtbox larger than any solid collider on the same object.
+
+`BLOCKERS` (128) is tall level scenery that must stop heroes but not the
+camera: stadium fences, facade rows, the dragon's body. Heroes mask it; the
+CameraRig's spring arm sweeps `WORLD` only, so a wall on `BLOCKERS` never yanks
+the camera in. Anything tall on `WORLD` will.
 
 Two rules that are easy to get wrong: Godot collides when **either** side's mask
 names the other's layer, and **the boss deliberately masks `WORLD` only** — a

@@ -1,7 +1,7 @@
 extends Node3D
 ## One of the four glowing stakes the goblins drove into the pitch to rope the
 ## dragon down. A "thing heroes can hit": root in group "targets", a Hurtbox on
-## TARGETS, a slim solid on BOSS (heroes bump it, the camera arm does not).
+## TARGETS, a slim solid on BLOCKERS (heroes bump it, the camera arm does not).
 ##
 ## Three glowing rings are its hit counter, so a child can SEE how many more
 ## bonks it needs: each hit puts one out with a wobble and a chip of wood; the
@@ -67,7 +67,7 @@ func reset() -> void:
 	_halo.visible = true
 	_rope.visible = true
 	_rope.scale = Vector3.ONE
-	_body.collision_layer = PhysicsLayers.BOSS
+	_body.collision_layer = PhysicsLayers.BLOCKERS
 	_hurtbox.collision_layer = PhysicsLayers.TARGETS
 	if not is_in_group("targets"):
 		add_to_group("targets")
@@ -208,7 +208,7 @@ func _build() -> void:
 
 	_body = StaticBody3D.new()
 	_body.name = "Body"
-	_body.collision_layer = PhysicsLayers.BOSS
+	_body.collision_layer = PhysicsLayers.BLOCKERS
 	_body.collision_mask = 0
 	var cs := CollisionShape3D.new()
 	var cyl := CylinderShape3D.new()

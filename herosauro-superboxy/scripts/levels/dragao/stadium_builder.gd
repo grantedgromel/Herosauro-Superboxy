@@ -12,7 +12,7 @@ extends RefCounted
 ## Colliders follow the camera rule: WORLD only for low things (the ground, a
 ## 1 m ball wall along the boards, the goal frames), because the camera's
 ## spring arm sweeps WORLD. The tall wall that stops a hero jumping out over the
-## boards is on BOSS, which heroes collide with and the spring arm ignores. No
+## boards is on BLOCKERS, which heroes collide with and the spring arm ignores. No
 ## club crest, sponsor or lettering anywhere: colours only.
 
 const VC := preload("res://scripts/levels/dragao/vc_baker.gd")
@@ -421,10 +421,10 @@ static func _colliders(root: Node3D) -> void:
 		var s: Vector3 = walls[i][0]
 		var c: Vector3 = walls[i][1]
 		SceneryKit.solid(root, "BallWall%d" % i, Vector3(s.x, BALL_WALL_H, s.z), c + Vector3.UP * BALL_WALL_H * 0.5)
-	# Tall on BOSS: heroes collide with BOSS, the spring arm does not.
+	# Tall on BLOCKERS: heroes collide with BLOCKERS, the spring arm does not.
 	var fence := StaticBody3D.new()
 	fence.name = "HeroFence"
-	fence.collision_layer = PhysicsLayers.BOSS
+	fence.collision_layer = PhysicsLayers.BLOCKERS
 	fence.collision_mask = 0
 	root.add_child(fence)
 	for w in walls:

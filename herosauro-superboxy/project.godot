@@ -224,6 +224,7 @@ ui_pause={
 3d_physics/layer_5="hazards"
 3d_physics/layer_6="props"
 3d_physics/layer_7="targets"
+3d_physics/layer_8="blockers"
 
 [physics]
 

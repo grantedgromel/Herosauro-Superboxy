@@ -4,7 +4,7 @@ extends Node3D
 ## it smokes, cartoon-style (nothing burns, nobody is hurt: the goblins sit down
 ## dazed and the pterodactyls take them for a bath in the river).
 ##
-## Faces +Z (its nose); the level places and turns it. A solid on BOSS (heroes
+## Faces +Z (its nose); the level places and turns it. A solid on BLOCKERS (heroes
 ## walk round it, the camera arm passes) and a low one on WORLD for balls.
 
 const VC := preload("res://scripts/levels/dragao/vc_baker.gd")
@@ -145,7 +145,7 @@ func _build() -> void:
 
 	var heroes_block := StaticBody3D.new()
 	heroes_block.name = "Solid"
-	heroes_block.collision_layer = PhysicsLayers.BOSS
+	heroes_block.collision_layer = PhysicsLayers.BLOCKERS
 	heroes_block.collision_mask = 0
 	SceneryKit.solid_shape(heroes_block, Vector3(wid, hgt, len), Vector3(0, hgt * 0.5, 0))
 	add_child(heroes_block)
