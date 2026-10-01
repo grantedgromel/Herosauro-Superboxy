@@ -79,6 +79,9 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	# First, while the library is still the one boot loaded: every other check
+	# below rebuilds it from code.
+	_check_baked_library()
 	_check_library_integrity()
 	await _check_entry_points()
 	_check_story_files()
@@ -330,6 +333,57 @@ func _check_library_integrity() -> void:
 		"every shipped name still has a procedural fallback under it (%s)"
 			% ("all" if no_fallback.is_empty() else str(no_fallback)))
 	# Put the shipped samples back on top.
+	_am.call("_load_sfx_files")
+
+
+# --- 1b. The baked library ---------------------------------------------------
+
+## Boot loads the procedural library from `bake_synth.gd`'s files instead of
+## synthesising it, and those files are exactly what the code makes today.
+func _check_baked_library() -> void:
+	print("\n=== baked library ===")
+	var lib: Dictionary = _am.get("_streams")
+	var keys: Array = _am.call("synth_keys")
+	var dir: String = _am.get("SYNTH_DIR")
+	var shipped: Dictionary = _am.get("SFX_FILES")
+
+	# Boot. A key with a shipped sample shows the sample, so skip those.
+	var built: Array = []
+	for k in keys:
+		if shipped.has(k):
+			continue
+		var s: AudioStream = lib.get(k)
+		if s == null or not s.resource_path.begins_with(dir):
+			built.append(k)
+	_ok(built.is_empty(), "boot LOADED the procedural library instead of synthesising it (%s)"
+		% ("all %d baked" % (keys.size() - shipped.size()) if built.is_empty()
+			else "built at boot: " + str(built)))
+
+	# The bake is current. Compared against the source WAV, sample for sample,
+	# because the imported stream is QOA.
+	_am.call("_build_library")
+	var fresh: Dictionary = _am.get("_streams")
+	var made: Array = []
+	for k in fresh:
+		var w := fresh[k] as AudioStreamWAV
+		if w != null and w.format == AudioStreamWAV.FORMAT_16_BITS:
+			made.append(str(k))
+	made.sort()
+	var listed: Array = keys.duplicate()
+	listed.sort()
+	_ok(made == listed, "synth_keys() names exactly what _build_library() makes (%d / %d)"
+		% [listed.size(), made.size()])
+
+	var stale: Array = []
+	for k in keys:
+		var disk := _read_wav(dir + str(k) + ".wav")
+		var want := _pcm(fresh.get(k) as AudioStreamWAV)
+		var have: PackedFloat32Array = disk.get("pcm", PackedFloat32Array())
+		if want.is_empty() or have != want:
+			stale.append(k)
+	_ok(stale.is_empty(), "every baked file is sample-identical to what the code makes now (%s)"
+		% ("all %d" % keys.size() if stale.is_empty()
+			else "STALE, re-run scripts/audio/gen/bake_synth.gd: " + str(stale)))
 	_am.call("_load_sfx_files")
 
 
@@ -1429,8 +1483,8 @@ func _check_determinism() -> void:
 		"the noise-based fallbacks (_rumble / _whoosh) are seeded too — they used "
 			+ "the global generator and were a different waveform on every boot")
 	_ok(build_ms < 900.0,
-		"the whole library, roar and twenty-one material voices included, costs "
-			+ "%.0f ms of boot" % build_ms)
+		"the whole library, roar and twenty-one material voices included, synthesises "
+			+ "in %.0f ms — the fallback cost if the bake is missing; boot loads the bake" % build_ms)
 
 	_am.call("_load_sfx_files")
 

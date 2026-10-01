@@ -28,6 +28,11 @@ extends Node
 ##                   whistle, a hole, then the Douro taking it. See _fall().
 ##   the splash      the water on its own, for anything else that goes in.
 ##
+## All four are BAKED: `scripts/audio/gen/bake_synth.gd` runs this code once and
+## writes the results to SYNTH_DIR, and boot loads those files (7 ms) instead of
+## synthesising (about 550 ms on a desktop, several times that in the browser).
+## The code below is still the source of truth and still the fallback.
+##
 ## Everything else is a shipped sample, re-shaped at play time (gain, pitch) but
 ## not resynthesised.
 ##
@@ -75,6 +80,17 @@ var _play_rng := RandomNumberGenerator.new()
 # --- SFX ---------------------------------------------------------------------
 
 const SFX_DIR := "res://assets/audio/sfx/"
+
+## Where `scripts/audio/gen/bake_synth.gd` writes the procedural library (the
+## roar, the fall, the splash, the twenty-one material voices and the bare
+## fallbacks), one WAV per key of synth_keys(). Boot LOADS these instead of
+## running `_build_library()`, which is half a second of DSP on a desktop and
+## several times that on the web's single WASM thread. If any one file is
+## missing the whole library is synthesised exactly as before, so a bad bake
+## costs boot time, never a sound. `_audio_probe` rebuilds the library and
+## compares it with these files sample for sample, so a voice edited without
+## re-baking fails the build.
+const SYNTH_DIR := "res://assets/audio/sfx/synth/"
 
 ## Logical name -> file. Loaded over the synthesised library, so a name missing
 ## here (or whose file is absent) keeps its procedural fallback. `dino_fire` is
@@ -441,7 +457,8 @@ func _ready() -> void:
 	if sbus >= 0:
 		_sfx_mix_db = AudioServer.get_bus_volume_db(sbus)
 
-	_build_library()
+	if not _load_baked_library():
+		_build_library()
 	# After the synth pass, so a shipped sample wins and anything without one
 	# silently keeps its fallback.
 	_load_sfx_files()
@@ -1182,6 +1199,35 @@ static func _surface_key(role: String, surface: int) -> String:
 
 
 # --- Synthesis -------------------------------------------------------------
+
+## Every key `_build_library()` makes. The baker writes one file per key, the
+## loader wants exactly these, and `_audio_probe` asserts the three agree.
+static func synth_keys() -> Array:
+	var keys: Array = ["jump", "dino_fire", "dino_hit", "dash", "boss_slam", "boss_hit",
+		"hurt", "land", "rock_throw", "rock_impact", "super_boxy_hit", "victory", "defeat",
+		"boss_roar", "fall", "splash"]
+	for s in ToonFactory.Surface.size():
+		for role in ["prop_hit", "prop_break", "prop_debris"]:
+			keys.append(_surface_key(role, s))
+	return keys
+
+
+## The baked library, all or nothing: a half-loaded library would mix two
+## generations of the same voices.
+func _load_baked_library() -> bool:
+	var loaded: Dictionary = {}
+	for k in synth_keys():
+		var path: String = SYNTH_DIR + str(k) + ".wav"
+		if not ResourceLoader.exists(path):
+			return false
+		var s := load(path) as AudioStream
+		if s == null:
+			return false
+		loaded[k] = s
+	for k in loaded:
+		_streams[k] = loaded[k]
+	return true
+
 
 func _build_library() -> void:
 	_synth_rng.seed = SYNTH_SEED
