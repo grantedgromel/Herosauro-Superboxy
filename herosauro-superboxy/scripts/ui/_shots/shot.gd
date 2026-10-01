@@ -4,6 +4,7 @@ extends Node
 ##   xvfb-run -a -s "-screen 0 1280x720x24" godot --path . \
 ##       --rendering-method gl_compatibility scripts/ui/_shots/shot.tscn \
 ##       -- --screen=page:adamastor:intro:3 --out=/tmp/shot.png [--size=1024x768] [--lang=en]
+##       [--touch]   (hud/pause: the compact touch layout)
 ##
 ## Screens: title, shelf, who, who_hero, page:<chapter>:<part>:<index>,
 ## pages:<chapter> (a contact sheet of every page), settings, hud, pause,
@@ -25,6 +26,8 @@ func _ready() -> void:
 			get_window().size = Vector2i(int(p[0]), int(p[1]))
 		elif a.begins_with("--lang="):
 			GameManager.language = a.substr(7)
+		elif a == "--touch":
+			TouchControls.force = TouchControls.Force.ON
 	UIProgress.use_memory_only()
 	if _screen.contains("done"):
 		UIProgress.complete_chapter("adamastor")

@@ -506,12 +506,12 @@ func _check_hud() -> void:
 	_ok(not p1._combo_count.visible, "P1's combo clears when its window lapses")
 	_ok(not p2._combo_count.visible, "P2's combo clears when its window lapses")
 
-	# Low health drives the sustained edge glow, and only then. It reads the
-	# WORST-off living hero, so in co-op it is still telling you something the
-	# moment either player is in trouble.
+	# KID TUNING (deliberate change): low health no longer throbs a crimson
+	# heartbeat round the frame. Nobody can fail with Ajudas on, and a
+	# "someone is about to die" signal is the scary kind of feedback.
 	GameManager.damage_player(1, 60)
 	await get_tree().process_frame
-	_ok(hud._fx._sustain_level > 0.0, "danger vignette engages below the threshold")
+	_ok(hud._fx._sustain_level == 0.0, "no danger heartbeat at low health (kid rules)")
 
 	# Going over the side and coming back: the panel pops rather than silently
 	# reappearing, and it re-reads the authoritative health table on the way in.

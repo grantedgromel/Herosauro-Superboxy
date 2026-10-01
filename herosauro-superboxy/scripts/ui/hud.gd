@@ -37,9 +37,14 @@ const BOSS_ACTOR := UIStyle.Actor.ADAMASTOR
 
 # --- Grid ---------------------------------------------------------------------
 const M := UIStyle.SCREEN_MARGIN          # screen gutter
-const BOSS_PLATE := Vector2(600.0, 108.0)
-const BOSS_BAR_H := 30.0
-const BOSS_AVATAR := 68.0
+## Lean on purpose: the banner is the one HUD piece that stays up for a whole
+## fight, over the top of the play view, so it carries a face, a name and a
+## bar and nothing a 4-year-old cannot read (no epithet, no "PHASE 1").
+const BOSS_PLATE := Vector2(540.0, 84.0)
+const BOSS_BAR_H := 24.0
+const BOSS_AVATAR := 58.0
+## Vertical gap between stacked top-row widgets (banner -> toast).
+const STACK_GAP := 10.0
 const PAUSE_BUTTON := 88.0
 ## Hero panel scale in the touch layout, where they stack top-left under the
 ## pause button and leave both bottom corners to the thumbs.
@@ -50,10 +55,8 @@ const START_BEAT_DELAY := 5.0
 ## Boss health fraction under which the "low" beat shows.
 const LOW_BEAT_RATIO := 0.20
 
-## Fraction of hero health below which the screen edge starts glowing. Read from
-## the WORST-off living hero, not from player one: in co-op the danger signal
-## belongs to whoever is about to go down.
-const DANGER_RATIO := 0.30
+## The frame-edge bloom on a hero hit: warm, not alarm-red (see _on_player_damaged).
+const HIT_TINT := Color("ffb37a")
 
 ## Fixed seed for the damage-number scatter. Explicit because the capture gate
 ## compares frames pixel for pixel and `randf_range()` would put every floating
@@ -176,16 +179,18 @@ func _build_boss_banner() -> void:
 	_boss_face = PortraitFrame.new()
 	_boss_face.actor = BOSS_ACTOR
 	_boss_face.stamped = true
-	_place(_boss_face, Control.PRESET_CENTER_TOP, Vector2(-half + 16.0, 34.0),
+	_place(_boss_face, Control.PRESET_CENTER_TOP,
+		Vector2(-half + 14.0, 14.0 + (BOSS_PLATE.y - BOSS_AVATAR) * 0.5),
 		Vector2(BOSS_AVATAR, BOSS_AVATAR))
 
-	var text_x := -half + 16.0 + BOSS_AVATAR + 16.0
-	var text_w := BOSS_PLATE.x - 32.0 - BOSS_AVATAR - 16.0
+	var text_x := -half + 14.0 + BOSS_AVATAR + 14.0
+	var text_w := BOSS_PLATE.x - 28.0 - BOSS_AVATAR - 18.0
 
 	_boss_bar = StatBar.new()
 	_boss_bar.setup(StatBar.Variant.BOSS, float(GameManager.MAX_BOSS_HEALTH), UIStyle.BOSS_AMBER, 10)
 	_boss_bar.phase_marker = GameManager.BOSS_PHASE2_RATIO
-	_place(_boss_bar, Control.PRESET_CENTER_TOP, Vector2(text_x, 58.0), Vector2(text_w, BOSS_BAR_H))
+	_place(_boss_bar, Control.PRESET_CENTER_TOP, Vector2(text_x, 14.0 + BOSS_PLATE.y - 14.0 - BOSS_BAR_H),
+		Vector2(text_w, BOSS_BAR_H))
 
 	# The chip's keyline and white face, tinted per pip: ink times gold is
 	# still ink, so one stamp serves every state.
@@ -195,33 +200,36 @@ func _build_boss_banner() -> void:
 	for i in 2:
 		var pip := IconAtlas.tile(chip_box, UIStyle.GOLD if i == 0 else UIStyle.HAIRLINE_STRONG)
 		_place(pip, Control.PRESET_CENTER_TOP,
-			Vector2(text_x + text_w - 28.0 + i * 15.0, 95.0), Vector2(11, 11))
+			Vector2(text_x + text_w - 34.0 + i * 18.0, 30.0), Vector2(14, 14))
 		_phase_pips.append(pip)
 
 	_boss_name = UIStyle.ink(UIStyle.actor_name(BOSS_ACTOR), UIStyle.Scale.HEADING,
 		UIStyle.TEXT_PRIMARY, HORIZONTAL_ALIGNMENT_LEFT)
-	_place(_boss_name, Control.PRESET_CENTER_TOP, Vector2(text_x, 22.0), Vector2(text_w * 0.6, 34))
+	_place(_boss_name, Control.PRESET_CENTER_TOP, Vector2(text_x, 18.0), Vector2(text_w * 0.6, 32))
 
 	_boss_hp = UIStyle.ink("", UIStyle.Scale.LABEL, UIStyle.TEXT_SECONDARY,
 		HORIZONTAL_ALIGNMENT_RIGHT)
-	_place(_boss_hp, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w * 0.6, 26.0),
-		Vector2(text_w * 0.4, 26))
+	_place(_boss_hp, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w * 0.6, 20.0),
+		Vector2(text_w * 0.4 - 40.0, 26))
 
-	# Epithet and phase share the line under the bar. Their boxes are sized to
-	# butt up against each other without overlapping, so a long name can never
-	# draw over the phase readout.
+	# Epithet and phase are kept (live, translated, for anything that reads
+	# them) but not drawn: 12 px caps saying "THE GIANT OF THE DOURO" and
+	# "PHASE 1" are noise to a pre-reader, and the two pips carry the phase.
+	# Their boxes still butt up against each other on the plate.
 	_boss_epithet = UIStyle.ink(Loc.t("boss_epithet"), UIStyle.Scale.MICRO,
 		UIStyle.TEXT_SECONDARY, HORIZONTAL_ALIGNMENT_LEFT)
-	_place(_boss_epithet, Control.PRESET_CENTER_TOP, Vector2(text_x, 92.0),
+	_place(_boss_epithet, Control.PRESET_CENTER_TOP, Vector2(text_x, 30.0),
 		Vector2(text_w - 138.0, 16))
 
 	_phase_label = UIStyle.ink(Loc.f("phase", [1]), UIStyle.Scale.MICRO, UIStyle.GOLD,
 		HORIZONTAL_ALIGNMENT_RIGHT)
-	_place(_phase_label, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w - 106.0, 92.0),
+	_place(_phase_label, Control.PRESET_CENTER_TOP, Vector2(text_x + text_w - 106.0, 30.0),
 		Vector2(72, 16))
 	_building_boss = false
 	# Kids do not read "250 / 500"; the bar is the number.
 	_boss_hp.visible = false
+	_boss_epithet.visible = false
+	_phase_label.visible = false
 
 
 ## Bring the hero panels in line with the session's actual roster.
@@ -290,11 +298,14 @@ func _place_panels() -> void:
 			panel.base_scale = COMPACT
 			panel.scale = Vector2.ONE * COMPACT
 			panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+			# Laid out by where it is DRAWN: the panel scales about its centre
+			# pivot, so its box sits PANEL * 0.5 * (1 - COMPACT) inside its rect.
 			var top := _compact_top() + i * (HeroPanel.PANEL.y * COMPACT + COMPACT_GAP)
-			panel.offset_left = M
-			panel.offset_top = top
-			panel.offset_right = M + HeroPanel.PANEL.x
-			panel.offset_bottom = top + HeroPanel.PANEL.y
+			var inset := HeroPanel.PANEL * 0.5 * (1.0 - COMPACT)
+			panel.offset_left = M - inset.x
+			panel.offset_top = top - inset.y
+			panel.offset_right = panel.offset_left + HeroPanel.PANEL.x
+			panel.offset_bottom = panel.offset_top + HeroPanel.PANEL.y
 			continue
 		var right := i == 1
 		panel.base_scale = 1.0
@@ -391,19 +402,19 @@ func _build_pause() -> void:
 
 	_pause_title = BookKit.loud_label(Loc.t("paused"), 64, BookKit.SUN)
 	col.add_child(_pause_title)
-	_resume_btn = BookKit.button(Loc.t("resume"), KidIcon.Kind.PLAY, BookKit.LEAF, Vector2(440, 92))
+	_resume_btn = BookKit.button(Loc.t("resume"), KidIcon.Kind.PLAY, BookKit.LEAF, Vector2(440, 84))
 	_resume_btn.name = "Resume"
 	_resume_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_resume_btn.pressed.connect(func() -> void:
 		if GameManager.state == GameManager.State.PAUSED:
 			GameManager.toggle_pause())
 	col.add_child(_resume_btn)
-	_settings_btn = BookKit.button(Loc.t("settings"), KidIcon.Kind.GEAR, BookKit.SKY, Vector2(440, 92))
+	_settings_btn = BookKit.button(Loc.t("settings"), KidIcon.Kind.GEAR, BookKit.SKY, Vector2(440, 84))
 	_settings_btn.name = "SettingsButton"
 	_settings_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_settings_btn.pressed.connect(func() -> void: _settings.open())
 	col.add_child(_settings_btn)
-	_book_btn = BookKit.button(Loc.t("back_to_book"), KidIcon.Kind.BOOK, BookKit.PLUM, Vector2(440, 92))
+	_book_btn = BookKit.button(Loc.t("back_to_book"), KidIcon.Kind.BOOK, BookKit.PLUM, Vector2(440, 84))
 	_book_btn.name = "BackToBook"
 	_book_btn.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_book_btn.pressed.connect(func() -> void: GameManager.go_to_menu())
@@ -479,6 +490,19 @@ func _rebuild_pause_hints() -> void:
 	resume.add_theme_constant_override("separation", UIStyle.SPACE_MD)
 	resume.add_child(UIStyle.binding_pair(Loc.t("resume").to_upper(), UIStyle.binding_caps(1, ["ui_pause"], 2)))
 	_pause_hints.add_child(resume)
+	# The kit's hint rows are MICRO (12 px): fine on a console results card,
+	# too small for the grown-up reading this over a child's shoulder.
+	_grow_text(_pause_hints, PAUSE_HINT_PX)
+
+
+const PAUSE_HINT_PX := 17
+
+
+static func _grow_text(n: Node, px: int) -> void:
+	for c in n.get_children():
+		if c is Label:
+			(c as Label).add_theme_font_size_override("font_size", px)
+		_grow_text(c, px)
 
 
 ## Swap a BookKit button's live KidIcon for the same picture from the
@@ -528,17 +552,17 @@ func _tick_story(delta: float) -> void:
 	var shift := 0.0
 	var k := 1.0
 	if _boss_layer.visible:
-		_toast.offset_top = 14.0 + BOSS_PLATE.y + 14.0
+		_toast.offset_top = 14.0 + BOSS_PLATE.y + STACK_GAP
 	else:
 		_toast.offset_top = 14.0
-	if _compact or not _boss_layer.visible:
-		# Centred in the gap between the left column (the pause button, plus
-		# the compact hero panels in the touch layout) and the goal, and scaled
-		# down if the gap is narrower than the toast.
-		var gap_l := M + (HeroPanel.PANEL.x * COMPACT if _compact else PAUSE_BUTTON) + 12.0
-		var gap_r := size.x - M - ObjectiveWidget.W - 12.0
-		k = clampf((gap_r - gap_l) / StoryToast.W, 0.6, 1.0)
-		shift = (gap_l + gap_r) * 0.5 - size.x * 0.5
+	# Always centred in the gap between the left column (the pause button, plus
+	# the compact hero panels in the touch layout) and the goal, and scaled
+	# down if the gap is narrower than the toast: under the banner it sits
+	# higher than the goal's bottom edge, so it must clear the goal sideways.
+	var gap_l := M + (HeroPanel.PANEL.x * COMPACT if _compact else PAUSE_BUTTON) + 12.0
+	var gap_r := size.x - M - ObjectiveWidget.W - 12.0
+	k = clampf((gap_r - gap_l) / StoryToast.W, 0.6, 1.0)
+	shift = (gap_l + gap_r) * 0.5 - size.x * 0.5
 	_toast.scale = Vector2(k, k)
 	_toast.offset_bottom = _toast.offset_top + StoryToast.H
 	_toast.offset_left = -StoryToast.W * 0.5 * k + shift
@@ -605,38 +629,25 @@ func _on_player_damaged(player_id: int, amount: int, new_health: int) -> void:
 		return
 	panel.set_health(new_health, amount > 0)
 
-	# The edge glow belongs to the party, not to player one: it tracks whichever
-	# hero is closest to going down, so in co-op it is still telling you
-	# something the moment either of you is in trouble.
-	_fx.set_danger(_party_danger())
+	# KID TUNING. No sustained low-health throb: a crimson heartbeat round the
+	# frame is the "someone is about to die" signal, and in this game nobody
+	# can (a hero at zero floats in a bubble and pops back). No red "-20" over
+	# the hero either: progress only ever goes up, and a loss in red numerals
+	# is exactly the feedback the kid rules forbid. The hit is still
+	# acknowledged, softly: the panel recoils and the frame edge blooms once
+	# in warm peach, never with Menos movimento on.
+	_fx.set_danger(0.0)
 
 	if amount > 0:
 		panel.take_hit(amount)
-		# Bigger hits bloom harder. A 6 dmg graze and an 18 dmg slam should not
-		# look the same.
-		_fx.flash(clampf(0.35 + float(amount) / 28.0, 0.35, 1.0))
-		_spawn_player_damage_number(player_id, amount)
+		if not BookKit.reduce_motion():
+			_fx.flash(clampf(0.2 + float(amount) / 60.0, 0.2, 0.5), HIT_TINT)
 
 
 func _on_player_respawned(player_id: int) -> void:
 	var panel: HeroPanel = _heroes.get(player_id)
 	if panel != null:
 		panel.revive()
-
-
-## Worst living hero, as a 0..1 danger level. A hero already at zero is out of
-## the fight and stops driving the glow — otherwise the screen would sit at full
-## red for the whole of the survivor's comeback.
-func _party_danger() -> float:
-	var worst := 0.0
-	for pid: int in _heroes:
-		var hp := float(GameManager.player_health.get(pid, GameManager.MAX_PLAYER_HEALTH))
-		if hp <= 0.0:
-			continue
-		var ratio := hp / float(GameManager.MAX_PLAYER_HEALTH)
-		if ratio <= DANGER_RATIO:
-			worst = maxf(worst, 1.0 - ratio / DANGER_RATIO)
-	return worst
 
 
 func _on_boss_damaged(amount: int, new_health: int) -> void:
@@ -662,24 +673,6 @@ func _spawn_damage_number(amount: int) -> void:
 		_rng.randf_range(-1.0, 1.0))
 	var tint := UIStyle.GOLD if crit else UIStyle.TEXT_PRIMARY
 	_pops.pop_at_world(str(amount), head, tint, crit)
-
-
-## Damage TAKEN also gets a number, in the hero's danger colour and prefixed so it
-## can never be mistaken for damage dealt. The impact contract asks for a UI
-## acknowledgement on every hit, and until now a hit on a hero produced only a
-## bar move in the corner of the screen — which is precisely the feedback the
-## contract says is not enough on its own.
-func _spawn_player_damage_number(player_id: int, amount: int) -> void:
-	for p in get_tree().get_nodes_in_group("players"):
-		if not (p is Node3D):
-			continue
-		var pid := int(p.player_id) if "player_id" in p else 1
-		if pid != player_id:
-			continue
-		var at: Vector3 = (p as Node3D).global_position + Vector3(
-			_rng.randf_range(-0.5, 0.5), 2.4, _rng.randf_range(-0.4, 0.4))
-		_pops.pop_at_world("-%d" % amount, at, UIStyle.DANGER, false)
-		return
 
 
 ## Route a chain to the hero who owns it.

@@ -6,8 +6,11 @@ extends Control
 ## after ~6 s when Narração is off. Beats that arrive while one is showing
 ## wait their turn.
 
-const W := 720.0
-const H := 150.0
+## Kept small: it sits over the top of the play view while the narrator
+## reads it, and the face plus three short lines is all it needs.
+const W := 640.0
+const H := 112.0
+const FACE := 84.0
 const HOLD_SILENT := 6.0
 const HOLD_AFTER_VOICE := 1.2
 const HOLD_MAX := 14.0
@@ -39,13 +42,14 @@ func _ready() -> void:
 	# is up for a few seconds at a time, and three 112 px portraits would take a
 	# seventh of the atlas for two draw calls saved while one shows.
 	_face = PortraitFrame.new()
-	_face.custom_minimum_size = Vector2(112, 112)
-	_face.size = Vector2(112, 112)
-	_face.position = Vector2(18, (H - 112) * 0.5)
+	_face.custom_minimum_size = Vector2(FACE, FACE)
+	_face.size = Vector2(FACE, FACE)
+	_face.position = Vector2(14, (H - FACE) * 0.5)
 	add_child(_face)
-	_text = BookKit.print_label("", 26, true, BookKit.PRINT, HORIZONTAL_ALIGNMENT_LEFT)
+	_text = BookKit.print_label("", 24, true, BookKit.PRINT, HORIZONTAL_ALIGNMENT_LEFT)
 	_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	BookKit.place(_text, Vector2(146, 12), Vector2(W - 166, H - 24))
+	_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	BookKit.place(_text, Vector2(FACE + 30, 8), Vector2(W - FACE - 46, H - 16))
 	add_child(_text)
 	_voice = Narrator.new()
 	add_child(_voice)
@@ -104,7 +108,8 @@ func _refresh_text() -> void:
 	if has_meta("beat"):
 		_text.text = Loc.pick(get_meta("beat"))
 		var long := _text.text.length() > 120
-		_text.add_theme_font_size_override("font_size", 22 if long else 26)
+		# Never under 20 px at 720p (the kids' floor is 28 px at 1080p).
+		_text.add_theme_font_size_override("font_size", 20 if long else 24)
 
 
 func _slide(entering: bool) -> void:

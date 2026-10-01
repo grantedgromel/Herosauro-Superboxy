@@ -134,6 +134,9 @@ func _sync() -> void:
 		(pill.get_child(0) as Label).text = Loc.t("on") if on else Loc.t("off")
 		var sb := pill.get_theme_stylebox("panel") as StyleBoxFlat
 		sb.bg_color = BookKit.LEAF if on else Color("c9bba3")
+		# Ink on both fills: cream on green or on the pale "off" fill was
+		# under 2:1 and "Não"/"Off" all but vanished.
+		(pill.get_child(0) as Label).add_theme_color_override("font_color", BookKit.PRINT)
 		(b.get_meta("icon") as Control).modulate = Color.WHITE if on else Color(1, 1, 1, 0.45)
 	for key: String in _vol:
 		var row: Dictionary = _vol[key]
@@ -203,7 +206,7 @@ func _tile(key: String, icon: int, tint: Color) -> Button:
 	b.add_child(title)
 	var hint := BookKit.print_label(Loc.t(key + "_hint"), 20, false, BookKit.PRINT_SOFT)
 	b.add_child(hint)
-	var pill := UIStyle.pill("", BookKit.LEAF, UIStyle.TEXT_PRIMARY, 22)
+	var pill := UIStyle.pill("", BookKit.LEAF, BookKit.PRINT, 24)
 	b.add_child(pill)
 	b.set_meta("icon", ic)
 	b.set_meta("title", title)
