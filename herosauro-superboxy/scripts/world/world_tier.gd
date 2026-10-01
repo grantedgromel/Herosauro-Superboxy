@@ -247,8 +247,8 @@ static func plan_distance(pos: Vector3) -> float:
 ##                  whose job is a 1:1 close-up the chase camera never takes) and
 ##                  minus anisotropy (trilinear instead).
 ##   far_material   for chunks outside SHADOW_RADIUS, i.e. backdrop at 66 m and
-##                  beyond: lean, plus no normal/roughness/metal/AO maps and
-##                  per-vertex lighting. The bakes are flat-shaded (MeshBaker writes
+##                  beyond: lean, plus no normal/roughness/metal/AO maps, per-vertex
+##                  lighting, no specular and no shadow receiving. The bakes are flat-shaded (MeshBaker writes
 ##                  one normal per triangle), so per-vertex diffuse is the same
 ##                  number per face that per-pixel was; what goes is normal-mapped
 ##                  grain and a specular lobe on walls 70-300 m away. The albedo map
@@ -298,6 +298,16 @@ static func far_material(mat: Material) -> Material:
 	m.ao_enabled = false
 	m.ao_texture = null
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_VERTEX
+	# Per-vertex shading moves the light loop to the vertices but NOT the shadow
+	# lookup or the specular/reflection sampling, which stay per pixel. Measured on
+	# everything under SkyBackground, against far_material without these two lines:
+	# no shadow receiving ~85 ms, no specular ~180 ms more (single 5-frame samples,
+	# +-150 ms run to run). Neither is visible here: a chunk outside SHADOW_RADIUS is
+	# mostly outside the 60 m SHADOW_DISTANCE too, and a dielectric's F0 of 0.04 is a
+	# few percent of sky on a wall 70-300 m away.
+	m.disable_receive_shadows = true
+	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	m.metallic_specular = 0.0
 	_far[base] = m
 	_lean[m] = m      # the arena-wide lean pass must leave it alone
 	return m
