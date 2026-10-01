@@ -81,6 +81,9 @@ func _ready() -> void:
 func _run() -> void:
 	_check_library_integrity()
 	await _check_entry_points()
+	_check_story_files()
+	await _check_story_dispatch()
+	_check_kid_safe()
 	_check_roar()
 	_check_surface_table()
 	_check_surface_voices()
@@ -89,6 +92,8 @@ func _run() -> void:
 	await _check_distance()
 	_check_bus_layout()
 	await _check_music_ducking()
+	await _check_narration_duck()
+	_check_volume_offsets()
 	_check_determinism()
 
 
@@ -431,8 +436,287 @@ func _last_stream() -> AudioStream:
 	var players: Array = _am.get("_players")
 	if players.is_empty():
 		return null
-	var p: AudioStreamPlayer = players[(_cursor() - 1 + players.size()) % players.size()]
+	var p: AudioStreamPlayer = _last_player()
 	return p.stream if p != null else null
+
+
+func _last_player() -> AudioStreamPlayer:
+	var players: Array = _am.get("_players")
+	if players.is_empty():
+		return null
+	return players[(_cursor() - 1 + players.size()) % players.size()]
+
+
+# --- 2b. The storybook sounds ------------------------------------------------
+
+## The contract, copied from docs/story/ADAPTATION.md on purpose rather than read
+## back from AudioManager: a probe that asked the manager which ids it owes would
+## pass a manager that quietly dropped one.
+const RESERVED := ["ui_tap", "page_turn", "star", "objective_done", "bubble_pop",
+	"cup_collect", "goblin_hit", "goblin_giggle", "ball_kick", "rope_snap",
+	"dragon_roar", "dragon_fire", "magic_repair", "panda_cheer", "suitcase"]
+
+## The ids that fire in bursts (every rubbish pile, every goblin, every football,
+## every button) and so must not repeat themselves note for note.
+const FREQUENT := ["star", "goblin_hit", "goblin_giggle", "ball_kick", "ui_tap"]
+
+## What make_story_sfx.py promises for every file it writes.
+const STORY_MAX_BYTES := 60 * 1024
+const STORY_PEAK_LO_DB := -4.5
+const STORY_PEAK_HI_DB := -2.0
+const STORY_HF_HZ := 8000.0
+## Fraction of a file's energy allowed above 8 kHz. White noise at this rate puts
+## about 27% there; the generator's 4th-order low-pass leaves well under 0.1%.
+const STORY_HF_MAX := 0.005
+
+
+## Every reserved id resolves to a SHIPPED file, and every shipped storybook file
+## is what the generator promises: mono 22 050 Hz 16-bit, small, peaking near
+## -3 dBFS, nothing harsh above 8 kHz, and no click at the end. Read straight off
+## the source WAV, because the imported stream is QOA and cannot be decoded here.
+func _check_story_files() -> void:
+	print("\n=== storybook sounds: files ===")
+	var lib: Dictionary = _am.get("_streams")
+	var table: Dictionary = _am.get("STORY_SFX")
+	var dir: String = _am.get("SFX_DIR")
+
+	var unresolved: Array = []
+	for key in RESERVED:
+		var s: AudioStream = lib.get(key)
+		if not table.has(key) or s == null or s.get_length() <= 0.0 \
+				or not s.resource_path.begins_with(dir):
+			unresolved.append(key)
+	_ok(unresolved.is_empty(), "all %d reserved ids resolve to a shipped file (%s)"
+		% [RESERVED.size(), "all" if unresolved.is_empty() else "MISSING " + str(unresolved)])
+
+	var bad_format: Array = []
+	var too_big: Array = []
+	var bad_peak: Array = []
+	var harsh: Array = []
+	var clicky: Array = []
+	var files := 0
+	var total := 0
+	for key in table:
+		for file in table[key]:
+			var path: String = dir + str(file)
+			var w := _read_wav(path)
+			files += 1
+			total += int(w.get("size", 0))
+			var pcm: PackedFloat32Array = w.get("pcm", PackedFloat32Array())
+			if w.get("channels", 0) != 1 or w.get("rate", 0) != 22050 \
+					or w.get("bits", 0) != 16 or pcm.is_empty():
+				bad_format.append(file)
+				continue
+			if int(w["size"]) > STORY_MAX_BYTES:
+				too_big.append("%s %d KB" % [file, int(w["size"]) / 1024])
+			var pk_db := linear_to_db(maxf(1e-9, _peak(pcm)))
+			if pk_db < STORY_PEAK_LO_DB or pk_db > STORY_PEAK_HI_DB:
+				bad_peak.append("%s %.1f dB" % [file, pk_db])
+			var hf := _energy(_hp4(pcm, STORY_HF_HZ, 22050.0)) / maxf(1e-12, _energy(pcm))
+			if hf > STORY_HF_MAX:
+				harsh.append("%s %.2f%%" % [file, hf * 100.0])
+			if absf(pcm[pcm.size() - 1]) > 0.002:
+				clicky.append(file)
+			print("  -- %-22s %.2f s  %5.1f KB  peak %5.1f dBFS  above 8 kHz %.3f%%"
+				% [file, pcm.size() / 22050.0, int(w["size"]) / 1024.0, pk_db, hf * 100.0])
+	print("  -- %d files, %.0f KB of source WAV" % [files, total / 1024.0])
+
+	_ok(files >= RESERVED.size() and bad_format.is_empty(),
+		"every storybook file is a readable mono 22 050 Hz 16-bit WAV (%s)"
+			% ("all %d" % files if bad_format.is_empty() else str(bad_format)))
+	_ok(too_big.is_empty(), "every file is under %d KB (%s)"
+		% [STORY_MAX_BYTES / 1024, "all" if too_big.is_empty() else str(too_big)])
+	_ok(bad_peak.is_empty(), "every file peaks between %.1f and %.1f dBFS — normalised, never hot (%s)"
+		% [STORY_PEAK_LO_DB, STORY_PEAK_HI_DB, "all" if bad_peak.is_empty() else str(bad_peak)])
+	_ok(harsh.is_empty(), "nothing harsh above 8 kHz: under %.1f%% of any file's energy (%s)"
+		% [STORY_HF_MAX * 100.0, "all" if harsh.is_empty() else str(harsh)])
+	_ok(clicky.is_empty(), "every file fades to silence instead of ending on a click (%s)"
+		% ("all" if clicky.is_empty() else str(clicky)))
+
+
+## play_sfx for real: every reserved id puts exactly one shipped stream on a
+## voice, an unknown id puts nothing anywhere, and the frequent ones never play
+## the same thing twice running.
+func _check_story_dispatch() -> void:
+	print("\n=== storybook sounds: play_sfx ===")
+	var table: Dictionary = _am.get("STORY_SFX")
+	var dir: String = _am.get("SFX_DIR")
+
+	var silent: Array = []
+	for key in RESERVED:
+		_am.call("stop_all_sfx")
+		var before := _cursor()
+		_am.call("play_sfx", StringName(key))
+		var s := _last_stream()
+		if _dispatched(before) != 1 or s == null or not s.resource_path.begins_with(dir):
+			silent.append(key)
+	_ok(silent.is_empty(), "play_sfx(id) lands one shipped stream for every reserved id (%s)"
+		% ("all" if silent.is_empty() else str(silent)))
+
+	_am.call("stop_all_sfx")
+	var players: Array = _am.get("_players")
+	var streams_before: Array = []
+	for p in players:
+		streams_before.append((p as AudioStreamPlayer).stream)
+	var b := _cursor()
+	_am.call("play_sfx", &"no_such_sound")
+	_am.call("play_sfx", &"")
+	_am.call("play_sfx", &"Star")
+	var touched := 0
+	for i in players.size():
+		if (players[i] as AudioStreamPlayer).stream != streams_before[i] \
+				or (players[i] as AudioStreamPlayer).playing:
+			touched += 1
+	_ok(_dispatched(b) == 0 and touched == 0,
+		"play_sfx on an unknown id is silent: no voice taken, nothing playing (%d dispatched, %d touched)"
+			% [_dispatched(b), touched])
+
+	# Variation. Each of these fires in bursts, and the same sample at the same
+	# pitch three times in a row is the machine-gun this guards against.
+	var repeats: Array = []
+	var summary: Array = []
+	for key in FREQUENT:
+		var variants: int = (table.get(key, []) as Array).size()
+		var last_stream: AudioStream = null
+		var last_pitch := -1.0
+		var same_variant_twice := false
+		var identical_twice := false
+		var seen := {}
+		for k in 9:
+			_am.call("stop_all_sfx")
+			_am.call("play_sfx", StringName(key))
+			var p := _last_player()
+			if p == null:
+				continue
+			seen[p.stream] = true
+			if variants > 1 and p.stream == last_stream:
+				same_variant_twice = true
+			if p.stream == last_stream and is_equal_approx(p.pitch_scale, last_pitch):
+				identical_twice = true
+			last_stream = p.stream
+			last_pitch = p.pitch_scale
+		summary.append("%s %d/%d" % [key, seen.size(), variants])
+		if same_variant_twice or identical_twice or (variants > 1 and seen.size() < 2):
+			repeats.append(key)
+	print("  -- variants heard in nine plays: ", ", ".join(PackedStringArray(summary)))
+	_ok(repeats.is_empty(),
+		"the frequent ids never repeat the same variant (or the same sample at the same pitch) twice running (%s)"
+			% ("none do" if repeats.is_empty() else str(repeats)))
+	_am.call("stop_all_sfx")
+	await get_tree().process_frame
+
+
+## Kid rules 5 and 6 for the sounds that were already here. With Ajudas on a hurt
+## hero says "oof", not a cry; and the Douro only exists under the bridge.
+func _check_kid_safe() -> void:
+	print("\n=== kid-safe ===")
+	var gm := get_node_or_null("/root/GameManager")
+	var lib: Dictionary = _am.get("_streams")
+	if gm == null:
+		_ok(false, "GameManager is present")
+		return
+	var was_assists: bool = gm.get("assists")
+	var was_chapter: String = gm.get("chapter_id")
+
+	var heard := func(method: String) -> AudioStream:
+		_am.call("stop_all_sfx")
+		_am.call(method)
+		return _last_stream()
+
+	gm.set("assists", true)
+	var kid_hurt: AudioStream = heard.call("play_hurt")
+	gm.set("assists", false)
+	var big_hurt: AudioStream = heard.call("play_hurt")
+	_ok(kid_hurt != null and kid_hurt == lib.get("hurt_soft"),
+		"with Ajudas on a hurt hero plays the soft oof/boing (%s)"
+			% (kid_hurt.resource_path if kid_hurt != null else "nothing"))
+	_ok(big_hurt != null and big_hurt == lib.get("hurt") and big_hurt != kid_hurt,
+		"...and with Ajudas off the original hurt (%s)"
+			% (big_hurt.resource_path if big_hurt != null else "nothing"))
+
+	gm.set("assists", true)
+	gm.set("chapter_id", "adamastor")
+	var bridge: AudioStream = heard.call("play_fall")
+	var elsewhere: Array = []
+	for ch in ["dragao", "pandas"]:
+		gm.set("chapter_id", ch)
+		elsewhere.append(heard.call("play_fall"))
+	_ok(bridge != null and bridge == lib.get("fall"),
+		"falling off the BRIDGE still ends in the Douro splash")
+	var light := true
+	for s in elsewhere:
+		if s == null or s != lib.get("fall_whoosh") or s == bridge \
+				or s.get_length() >= (bridge.get_length() if bridge != null else 0.0):
+			light = false
+	_ok(light, "...and anywhere else it is a light whoosh, shorter and with no river in it (%s)"
+		% str(elsewhere.map(func(s: AudioStream) -> String:
+			return s.resource_path.get_file() if s != null else "nothing")))
+
+	gm.set("assists", was_assists)
+	gm.set("chapter_id", was_chapter)
+	_am.call("stop_all_sfx")
+
+
+## A minimal RIFF reader: the fmt fields and the PCM, or as much as is there.
+func _read_wav(path: String) -> Dictionary:
+	var out := {}
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f == null:
+		return out
+	var bytes := f.get_buffer(f.get_length())
+	out["size"] = bytes.size()
+	if bytes.size() < 12 or bytes.slice(0, 4).get_string_from_ascii() != "RIFF" \
+			or bytes.slice(8, 12).get_string_from_ascii() != "WAVE":
+		return out
+	var p := 12
+	while p + 8 <= bytes.size():
+		var id := bytes.slice(p, p + 4).get_string_from_ascii()
+		var n: int = bytes.decode_u32(p + 4)
+		var body := p + 8
+		if id == "fmt " and body + 16 <= bytes.size():
+			out["channels"] = bytes.decode_u16(body + 2)
+			out["rate"] = bytes.decode_u32(body + 4)
+			out["bits"] = bytes.decode_u16(body + 14)
+		elif id == "data":
+			var count: int = mini(n, bytes.size() - body) / 2
+			var pcm := PackedFloat32Array()
+			pcm.resize(count)
+			for i in count:
+				pcm[i] = float(bytes.decode_s16(body + i * 2)) / 32768.0
+			out["pcm"] = pcm
+		p = body + n + (n & 1)
+	return out
+
+
+## 4th-order Butterworth high-pass (two RBJ biquads), for "how much is up there".
+func _hp4(pcm: PackedFloat32Array, hz: float, rate: float) -> PackedFloat32Array:
+	return _biquad_hp(_biquad_hp(pcm, hz, 0.5412, rate), hz, 1.3066, rate)
+
+
+func _biquad_hp(x: PackedFloat32Array, hz: float, q: float, rate: float) -> PackedFloat32Array:
+	var w := TAU * hz / rate
+	var cw := cos(w)
+	var alpha := sin(w) / (2.0 * q)
+	var a0 := 1.0 + alpha
+	var b0 := (1.0 + cw) / 2.0 / a0
+	var b1 := -(1.0 + cw) / a0
+	var b2 := b0
+	var a1 := -2.0 * cw / a0
+	var a2 := (1.0 - alpha) / a0
+	var out := PackedFloat32Array()
+	out.resize(x.size())
+	var x1 := 0.0
+	var x2 := 0.0
+	var y1 := 0.0
+	var y2 := 0.0
+	for i in x.size():
+		var y := b0 * x[i] + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+		x2 = x1
+		x1 = x[i]
+		y2 = y1
+		y1 = y
+		out[i] = y
+	return out
 
 
 # --- 3. The roar -------------------------------------------------------------
@@ -979,10 +1263,10 @@ func _check_music_ducking() -> void:
 
 	# Now pause on top of it. The two used to write the bus directly and erase
 	# each other; unpausing mid-roar lifted the roar's duck with it.
-	_am.call("duck_music", true)
+	_am.call("_duck_pause", true)
 	await _wait(0.45)
 	var both := AudioServer.get_bus_volume_db(bus)
-	_am.call("duck_music", false)
+	_am.call("_duck_pause", false)
 	await _wait(0.45)
 	var after_resume := AudioServer.get_bus_volume_db(bus)
 
@@ -1011,6 +1295,86 @@ func _check_music_ducking() -> void:
 	_ok(absf(AudioServer.get_bus_volume_db(bus) - flat) < 0.5,
 		"the duck releases fully rather than leaving the soundtrack quiet for the "
 			+ "rest of the fight")
+
+
+## Narration first. duck_music(true/false) is what the Narrator calls around a
+## spoken page; it must pull the soundtrack well down, survive the pause menu
+## opening and closing over it, and give everything back afterwards.
+func _check_narration_duck() -> void:
+	print("\n=== narration ===")
+	var bus := AudioServer.get_bus_index("Music")
+	_am.call("duck_music", false)
+	_am.call("_duck_pause", false)
+	await _wait(1.0)
+	_am.call("_set_event_duck", 0.0)
+	_am.call("_set_pause_duck", 0.0)
+	_am.call("_set_voice_duck", 0.0)
+	var flat := AudioServer.get_bus_volume_db(bus)
+
+	_am.call("duck_music", true)
+	await _wait(0.35)
+	var spoken := AudioServer.get_bus_volume_db(bus)
+	_am.call("duck_music", true)   # said twice: still one duck
+	await _wait(0.1)
+	var twice := AudioServer.get_bus_volume_db(bus)
+	_am.call("_duck_pause", true)
+	await _wait(0.45)
+	var paused := AudioServer.get_bus_volume_db(bus)
+	_am.call("_duck_pause", false)
+	await _wait(0.45)
+	var resumed := AudioServer.get_bus_volume_db(bus)
+	_am.call("duck_music", false)
+	await _wait(1.0)
+	var after := AudioServer.get_bus_volume_db(bus)
+	print("  -- Music bus: flat %.1f, speaking %.1f, said twice %.1f, +pause %.1f, resumed %.1f, after %.1f dB"
+		% [flat, spoken, twice, paused, resumed, after])
+
+	_ok(spoken <= flat - 6.0, "narration ducks the soundtrack %.1f dB within 350 ms" % (spoken - flat))
+	_ok(absf(twice - spoken) < 0.5, "duck_music(true) twice is still one duck (%.1f dB)" % (twice - flat))
+	_ok(paused < spoken - 4.0 and absf(resumed - spoken) < 1.0,
+		"the pause menu over a voice ducks further (%.1f) and un-pausing leaves the voice's duck alone (%.1f)"
+			% [paused - flat, resumed - flat])
+	_ok(absf(after - flat) < 0.5, "duck_music(false) gives the soundtrack back fully (%.1f dB)"
+		% (after - flat))
+
+
+## The player's volume settings are offsets from the mix, not replacements for it:
+## GameManager hands over 0 dB for "full", and that must still leave the music
+## UNDER the effects.
+func _check_volume_offsets() -> void:
+	print("\n=== volume settings ===")
+	var music := AudioServer.get_bus_index("Music")
+	var sfx := AudioServer.get_bus_index("SFX")
+	var music_mix: float = float(_am.get("_music_mix_db"))
+	var sfx_mix: float = float(_am.get("_sfx_mix_db"))
+	var gm := get_node_or_null("/root/GameManager")
+	_am.call("_set_event_duck", 0.0)
+	_am.call("_set_pause_duck", 0.0)
+	_am.call("_set_voice_duck", 0.0)
+
+	_am.call("set_music_volume_db", 0.0)
+	_am.call("set_sfx_volume_db", 0.0)
+	var m_full := AudioServer.get_bus_volume_db(music)
+	var s_full := AudioServer.get_bus_volume_db(sfx)
+	_am.call("set_music_volume_db", -6.0)
+	_am.call("set_sfx_volume_db", -6.0)
+	var m_half := AudioServer.get_bus_volume_db(music)
+	var s_half := AudioServer.get_bus_volume_db(sfx)
+	print("  -- mix trims: Music %.1f, SFX %.1f dB. Full: %.1f / %.1f. Slider -6: %.1f / %.1f"
+		% [music_mix, sfx_mix, m_full, s_full, m_half, s_half])
+
+	_ok(absf(m_full - music_mix) < 0.01 and absf(s_full - sfx_mix) < 0.01,
+		"full volume (0 dB from GameManager) keeps the mix's own bus trims")
+	_ok(absf(m_half - (music_mix - 6.0)) < 0.01 and absf(s_half - (sfx_mix - 6.0)) < 0.01,
+		"the sliders move the buses from those trims, dB for dB")
+	_ok(music_mix <= sfx_mix - 5.0,
+		"music sits under the effects: Music bus %.1f dB against SFX %.1f dB"
+			% [music_mix, sfx_mix])
+
+	var mdb: float = float(gm.get("music_volume_db")) if gm != null else 0.0
+	var sdb: float = float(gm.get("sfx_volume_db")) if gm != null else 0.0
+	_am.call("set_music_volume_db", mdb)
+	_am.call("set_sfx_volume_db", sdb)
 
 
 # --- 9. Determinism ----------------------------------------------------------
