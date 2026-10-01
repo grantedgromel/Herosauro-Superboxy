@@ -66,6 +66,10 @@ var _chapter: String = "dragao"
 var _seed: int = 1
 var _cap_frames: int = int(15.0 * 60.0 * FPS)
 var _log_every: int = int(30.0 * FPS)
+## --clumsy=<k>: scales every kind of clumsiness (heading noise, drift, slower
+## re-reads, over-steer spread, wander and jump rates). 1 = a five-year-old,
+## 2 = a distracted four-year-old. 1.0 leaves the RNG sequence untouched.
+var _clumsy: float = 1.0
 
 var _main: Node = null
 var _frame: int = 0
@@ -115,6 +119,8 @@ func _ready() -> void:
 			_cap_frames = int(float(arg.substr(10)) * 60.0 * FPS)
 		elif arg.begins_with("--diag="):
 			_diag_from = int(float(arg.substr(7)) * FPS)
+		elif arg.begins_with("--clumsy="):
+			_clumsy = maxf(0.0, float(arg.substr(9)))
 		elif arg.begins_with("--log="):
 			_log_every = maxi(1, int(float(arg.substr(6)) * FPS))
 	_rng.seed = hash("kidbot:%s:%d" % [_chapter, _seed])
@@ -143,8 +149,8 @@ func _ready() -> void:
 	if h != null:
 		_anchor = h.global_position
 	_running = true
-	print("kidbot: chapter=%s seed=%d cap=%.1f min, heroes=%s, ai2=%s"
-		% [_chapter, _seed, _cap_frames / FPS / 60.0, str(_hero_ids()), str(GameManager.is_ai(2))])
+	print("kidbot: chapter=%s seed=%d clumsy=%.2f cap=%.1f min, heroes=%s, ai2=%s"
+		% [_chapter, _seed, _clumsy, _cap_frames / FPS / 60.0, str(_hero_ids()), str(GameManager.is_ai(2))])
 
 
 func _physics_process(delta: float) -> void:
@@ -182,21 +188,21 @@ func _drive(h: PlayerBase, delta: float) -> void:
 	# Stop-and-wander spells.
 	if _wander_left > 0.0:
 		_wander_left -= delta
-	elif _rng.randf() < WANDER_RATE * delta:
+	elif _rng.randf() < WANDER_RATE * _clumsy * delta:
 		_wander_left = _rng.randf_range(WANDER_MIN, WANDER_MAX)
 		_wander_still = _rng.randf() < 0.5
 		_wander_dir = _rng.randf_range(-PI, PI)
 
 	# Steering: re-read the goal only now and then, over-steer, drift.
-	_drift += (-_drift * DRIFT_PULL) * delta + _rng.randfn(0.0, DRIFT_SIGMA) * sqrt(delta)
+	_drift += (-_drift * DRIFT_PULL) * delta + _rng.randfn(0.0, DRIFT_SIGMA * _clumsy) * sqrt(delta)
 	_reread -= delta
 	if _reread <= 0.0:
-		_reread = _rng.randf_range(REREAD_MIN, REREAD_MAX)
+		_reread = _rng.randf_range(REREAD_MIN, REREAD_MAX) * maxf(1.0, _clumsy)
 		if to_goal.length() > 0.05:
 			var want := atan2(to_goal.x, to_goal.z)
 			var err := wrapf(want - _heading, -PI, PI)
-			_heading = wrapf(_heading + err * _rng.randf_range(OVERSTEER_MIN, OVERSTEER_MAX)
-				+ _rng.randfn(0.0, JITTER), -PI, PI)
+			var gain := _rng.randf_range(1.0 - (1.0 - OVERSTEER_MIN) * _clumsy, 1.0 + (OVERSTEER_MAX - 1.0) * _clumsy)
+			_heading = wrapf(_heading + err * gain + _rng.randfn(0.0, JITTER * _clumsy), -PI, PI)
 		else:
 			_heading = wrapf(_heading + _rng.randfn(0.0, 1.0), -PI, PI)
 		_push = _rng.randf_range(0.7, 1.0)
@@ -232,7 +238,7 @@ func _drive(h: PlayerBase, delta: float) -> void:
 			if _burst_left <= 0:
 				_burst_rest = _rng.randf_range(BURST_REST_MIN, BURST_REST_MAX)
 
-	if _rng.randf() < JUMP_RATE * delta:
+	if _rng.randf() < JUMP_RATE * _clumsy * delta:
 		InputManager.press_virtual(1, &"jump")
 		_presses_jump += 1
 	if _rng.randf() < POWER_RATE * delta:
@@ -387,8 +393,8 @@ func _finish() -> void:
 	print("kidbot: stuck spots (min@pos, ! = nothing to hit nearby): %s" % ", ".join(_stuck_spots))
 	print("kidbot: presses attack=%d power=%d jump=%d, bubbles=%d, companion presses=%s"
 		% [_presses_attack, _presses_power, _presses_jump, _bubbles, str(_companion_presses())])
-	print("KIDBOT chapter=%s seed=%d completed=%d minutes=%.2f stuck=%d stuck_idle=%d obj=%s"
-		% [_chapter, _seed, 1 if completed else 0, minutes, _stuck, _stuck_idle, _progress()])
+	print("KIDBOT chapter=%s seed=%d clumsy=%.1f completed=%d minutes=%.2f stuck=%d stuck_idle=%d obj=%s"
+		% [_chapter, _seed, _clumsy, 1 if completed else 0, minutes, _stuck, _stuck_idle, _progress()])
 	get_tree().quit(0 if completed else 1)
 
 
