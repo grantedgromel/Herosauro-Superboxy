@@ -266,6 +266,10 @@ func _ready() -> void:
 	IronworkScript.attach(self)
 	_build_lamps()
 	_build_deck_dressing()
+	if WorldTier.is_reduced():
+		# Deferred so it also catches what the children finish building in their own
+		# deferred calls. See WorldTier.lean_material for the measurement.
+		_lean_web_materials.call_deferred()
 
 
 # --- Web tier ----------------------------------------------------------------
@@ -308,11 +312,25 @@ func _apply_web_tier() -> void:
 		lean.subdivide_width = WorldTier.RIVER_SUBDIVISIONS
 		lean.subdivide_depth = WorldTier.RIVER_SUBDIVISIONS
 		river.mesh = lean
+	if river != null:
+		# duplicate() for the same reason as the mesh: Mat_river is a sub-resource.
+		var water := river.get_surface_override_material(0) as ShaderMaterial
+		if water != null:
+			water = water.duplicate()
+			water.set_shader_parameter("web_lean", true)
+			river.set_surface_override_material(0, water)
 
 	var sun := get_node_or_null("SunLight") as DirectionalLight3D
 	if sun != null:
 		sun.directional_shadow_max_distance = WorldTier.SHADOW_DISTANCE
 		sun.directional_shadow_mode = WorldTier.SHADOW_SPLITS
+
+
+## Every surface material in the arena, swapped for its reduced-tier copy: no
+## detail layer, no anisotropic filtering. Measured as the largest single cost of
+## this scene on a software rasteriser — see WorldTier's material header.
+func _lean_web_materials() -> void:
+	WorldTier.lean_tree(self)
 
 
 # --- Roadway -----------------------------------------------------------------

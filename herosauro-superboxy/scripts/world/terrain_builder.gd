@@ -485,7 +485,15 @@ static func _wall_run(near: TerrainBatch, far: TerrainBatch, side: float, level:
 		var fb := front_x(side, level, b)
 		var ya := terrace_top(side, level, a)
 		var yb := terrace_top(side, level, b)
-		if is_near:
+		# On the reduced tier a wall run outside SHADOW_RADIUS is laid in bands, not
+		# blocks: it is drawn per-vertex with no normal map there (WorldTier's
+		# far_material), so a 3.5 cm joint and a 2 cm proud stone are lit exactly
+		# like the band they sit in. Measured on the reduced tier: the hillside goes
+		# from 135,575 triangles to 108,695. banded_wall() is the kit's own
+		# far-reach form for exactly this.
+		# Asked at the level's own front at z = 0, the same point build() locates
+		# the level's cell at, so "coarse" and "far material" are one decision.
+		if is_near and not WorldTier.coarse_at(Vector3(front_x(side, level, 0.0), 0.0, 0.0)):
 			# Heavier courses and bigger stones on the quay wall than on a garden
 			# retaining wall, which is how they are actually built: the river face
 			# takes the tide and the boats.
