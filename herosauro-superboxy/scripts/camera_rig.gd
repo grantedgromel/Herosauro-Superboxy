@@ -179,6 +179,7 @@ func _notification(what: int) -> void:
 ## camera position and the arm a full tick out of step with each other.
 func _physics_process(delta: float) -> void:
 	var heroes := _heroes()
+	_heal_non_finite(heroes)
 	var was_group := _group_mode
 	_group_mode = heroes.size() > 1
 	if _group_mode != was_group:
@@ -360,10 +361,34 @@ func _update_shake(delta: float) -> void:
 
 ## Every live hero, in a stable order. Sorted by player_id rather than by tree
 ## order so the centroid and the fit are the same however main.gd spawned them.
+## Every value below is smoothed toward its last value, so one non-finite frame
+## upstream (a hero that blinked to NaN, a focus point computed from one) would
+## stay NaN in every lerp forever and the screen would show nothing. Heal it.
+func _heal_non_finite(heroes: Array[Node3D]) -> void:
+	if _focus.is_finite() and is_finite(_yaw) and is_finite(_pitch) and is_finite(_dist_extra) \
+			and is_finite(_dist_extra_target) and is_finite(_group_distance) \
+			and _shake_offset.is_finite() and is_finite(_shake_roll):
+		return
+	push_warning("CameraRig: non-finite state, re-framing")
+	_focus = heroes[0].global_position if not heroes.is_empty() else Vector3(0.0, 2.0, 0.0)
+	if not is_finite(_yaw):
+		_yaw = 0.0
+	if not is_finite(_pitch):
+		_pitch = deg_to_rad(start_pitch_deg)
+	_dist_extra = 0.0 if not is_finite(_dist_extra) else _dist_extra
+	_dist_extra_target = 0.0 if not is_finite(_dist_extra_target) else _dist_extra_target
+	_group_distance = distance if not is_finite(_group_distance) else _group_distance
+	_shake_offset = Vector3.ZERO
+	_shake_roll = 0.0
+
+
 func _heroes() -> Array[Node3D]:
 	var out: Array[Node3D] = []
 	for p in get_tree().get_nodes_in_group("players"):
-		if p is Node3D and is_instance_valid(p):
+		# A hero whose transform went non-finite restores itself on its next tick
+		# (PlayerBase._guard_finite). Framing it would poison _focus with NaN for
+		# good and leave the screen showing nothing (kidbot dragao seed 2).
+		if p is Node3D and is_instance_valid(p) and (p as Node3D).global_transform.is_finite():
 			out.append(p as Node3D)
 	out.sort_custom(func(a: Node3D, b: Node3D) -> bool: return _pid(a) < _pid(b))
 	return out

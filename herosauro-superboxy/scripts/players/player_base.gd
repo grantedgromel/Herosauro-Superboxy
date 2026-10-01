@@ -400,7 +400,8 @@ func _physics_process(delta: float) -> void:
 	_impact_speed = maxf(0.0, -velocity.y)
 	_guard_finite()
 	move_and_slide()
-	_last_finite_xform = global_transform
+	if global_transform.is_finite():
+		_last_finite_xform = global_transform
 	_clamp_separation(delta)
 	_handle_landing(delta)
 	_face_movement(delta)
@@ -1143,6 +1144,17 @@ func reset_state() -> void:
 ## on both bodies and a group scan per tick to find one node is waste; re-resolved
 ## whenever the cache goes stale (world rebuild, hero swap).
 func _partner() -> PlayerBase:
+	var mate := _partner_cached()
+	# A partner whose transform went non-finite restores itself on its own next
+	# tick; until then it must not be leashed to, kept apart from or bubbled
+	# toward. Following it is how one NaN hero dragged the other down with it, and
+	# then each kept re-poisoning the other forever (kidbot dragao seed 2).
+	if mate != null and not mate.global_transform.is_finite():
+		return null
+	return mate
+
+
+func _partner_cached() -> PlayerBase:
 	if _partner_ref != null and is_instance_valid(_partner_ref) and _partner_ref.is_inside_tree():
 		return _partner_ref
 	_partner_ref = null
