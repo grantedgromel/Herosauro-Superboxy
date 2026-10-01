@@ -143,6 +143,17 @@ uniform float shore_z_max = 46.0;
 uniform float shore_band : hint_range(0.0, 12.0) = 2.6;
 uniform float shore_foam : hint_range(0.0, 2.0) = 0.85;
 
+// The web tier's river. Set true ONLY by bridge_arena.gd's _apply_web_tier, behind
+// WorldTier.is_reduced(); false is the desktop river and runs exactly the code it
+// always ran. True skips the two terms that cost the most per fragment for the
+// least on a 960x540 frame rasterised on the CPU: the three-wave chop (three more
+// cosines per pixel, whose job is breaking the glint into glitter) and the
+// open-water foam patches (two value-noise lookups, four hashes each). The swell,
+// the warp, the Fresnel mirror, the glint and the foam against the quays all stay,
+// so it is still the same green-grey Douro with a sun on it and a white line where
+// it meets the granite.
+uniform bool web_lean = false;
+
 varying vec3 world_pos;
 
 
@@ -298,7 +309,9 @@ void fragment() {
 	vec2 grad = vec2(0.0);
 	float h = swell(p, t, grad);
 	grad *= wave_height;    // swell() is unit-amplitude; put the gradient in metres
-	chop(p, t, grad);       // chop amplitudes are already metres
+	if (!web_lean) {
+		chop(p, t, grad);   // chop amplitudes are already metres
+	}
 
 	// Horizontal plane, so the tangent frame is trivially world XYZ and the
 	// normal falls straight out of the height gradient.
@@ -330,7 +343,10 @@ void fragment() {
 	float lap = shore * shore * surge * shore_foam;
 
 	float slope = length(grad);
-	float open_foam = foam_mask(p, h, slope) * foam_strength;
+	float open_foam = 0.0;
+	if (!web_lean) {
+		open_foam = foam_mask(p, h, slope) * foam_strength;
+	}
 	float foam = clamp(open_foam + lap, 0.0, 1.0);
 
 	// Sun glitter: a tight Blinn lobe against the perturbed normal. Written as

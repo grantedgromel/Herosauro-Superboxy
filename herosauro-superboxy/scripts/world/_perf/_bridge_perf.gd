@@ -37,6 +37,10 @@ var _census := false
 var _hide_list: Array[String] = ["BridgeArena", "SkyBackground", "Clouds", "River", "Terrain",
 	"Ribeira", "PortoLandmarks", "Ironwork", "DeckDressing", "Lamps", "Rabelos", "RiverLife"]
 var _skip_mats := false
+var _far_test := false
+## Shot ids from tools/shots.json (prefix match, e.g. "06,07"): each is rendered
+## from a fixed camera with the tree paused, timed, and saved next to --out.
+var _views: Array[String] = []
 
 
 func _ready() -> void:
@@ -51,6 +55,10 @@ func _ready() -> void:
 			_experiments = true
 		elif a.begins_with("--hide="):
 			_hide_list.assign(a.substr(7).split(","))
+		elif a.begins_with("--views="):
+			_views.assign(a.substr(8).split(","))
+		elif a == "--far-test":
+			_far_test = true
 		elif a == "--skip-mats":
 			_skip_mats = true
 		elif a == "--census":
@@ -98,6 +106,8 @@ func _ready() -> void:
 		print("[perf] saved %s" % _out)
 	if _ablate:
 		await _run_ablation(base)
+	if not _views.is_empty():
+		await _run_views()
 	if _experiments:
 		await _run_experiments()
 	if _census:
@@ -283,6 +293,13 @@ func _run_experiments() -> void:
 		await _wait(1)
 		_print_row("X sun orthogonal", await _sample(n), base)
 		sun.directional_shadow_mode = mode
+	if _far_test:
+		var swapped := _swap_far_except(["Roadway", "Footways", "Tramway", "Bridge", "DeckDressing",
+			"Lamps", "ParapetIron", "Fascia", "Abutments"])
+		await _wait(1)
+		_print_row("X far_material except deck (%d)" % swapped.size(), await _sample(n), base)
+		for mi in swapped:
+			mi.material_override = swapped[mi]
 	if _skip_mats:
 		_print_row("X baseline again", await _sample(n), base)
 		get_tree().paused = false
@@ -348,6 +365,9 @@ func _swap_materials(variant: String) -> Dictionary:
 
 
 func _find(nm: String) -> Node:
+	if nm.contains("/"):
+		var head := _find(nm.get_slice("/", 0))
+		return head.get_node_or_null(nm.substr(nm.find("/") + 1)) if head != null else null
 	for node in _all(get_tree().root):
 		if String(node.name) == nm:
 			return node
@@ -386,3 +406,63 @@ func _surface_tris(mesh: Mesh, si: int) -> int:
 	if idx != null and idx.size() > 0:
 		return idx.size() / 3
 	return (arr[Mesh.ARRAY_VERTEX] as PackedVector3Array).size() / 3
+
+
+# --- Fixed vantages -----------------------------------------------------------
+
+func _run_views() -> void:
+	var f := FileAccess.open("res://tools/shots.json", FileAccess.READ)
+	var data = JSON.parse_string(f.get_as_text())
+	var shots: Array = data["shots"] if data is Dictionary else data
+	get_tree().paused = true
+	var prev := get_viewport().get_camera_3d()
+	var cam := Camera3D.new()
+	add_child(cam)
+	for v in _views:
+		for s in shots:
+			if not String(s.get("name", "")).begins_with(v):
+				continue
+			var pos: Array = s["pos"]
+			var look: Array = s["look"]
+			cam.fov = float(s.get("fov", 55))
+			cam.global_position = Vector3(pos[0], pos[1], pos[2])
+			cam.look_at(Vector3(look[0], look[1], look[2]))
+			cam.make_current()
+			await _wait(3)
+			_print_row("V %s" % s["name"], await _sample(_abl_frames))
+			if _out != "":
+				await RenderingServer.frame_post_draw
+				var path := _out.replace(".png", "_%s.png" % s["name"])
+				get_viewport().get_texture().get_image().save_png(path)
+				print("[perf] saved %s" % path)
+	if prev != null:
+		prev.make_current()
+	cam.queue_free()
+	get_tree().paused = false
+	await _wait(2)
+
+
+## Every arena MeshInstance3D outside the named subtrees, drawn with
+## WorldTier.far_material. The question it answers: what would the rest of the
+## near field save if it were lit like the backdrop.
+func _swap_far_except(keep: Array) -> Dictionary:
+	var out := {}
+	var arena := _find("BridgeArena")
+	for node in _all(arena):
+		var mi := node as MeshInstance3D
+		if mi == null or not (mi.material_override is BaseMaterial3D):
+			continue
+		var skip := false
+		var p: Node = mi
+		while p != null and p != arena:
+			if String(p.name) in keep or (String(p.name) == "Ironwork" and p.get_parent() == arena):
+				# The Ironwork NODE holds ParapetIron; only its arch meshes are fair game.
+				if String(p.name) != "Ironwork" or String(mi.name) == "ParapetIron":
+					skip = true
+					break
+			p = p.get_parent()
+		if skip:
+			continue
+		out[mi] = mi.material_override
+		mi.material_override = WorldTier.far_material(mi.material_override)
+	return out

@@ -261,6 +261,15 @@ func rebuild() -> void:
 		print("BridgeIronwork: %d triangles, %d draw calls" % [_tri_total, _draw_calls])
 
 
+## The bakes that leave the shadow pass on the reduced tier: the arch, its lattice,
+## the spandrels and the road deck. All of it hangs BELOW the playable deck, so its
+## shadow lands on the river and the low quays, never on anything the chase camera
+## is looking at; and it is 24k triangles re-rendered into the shadow map every
+## frame. The parapet ironwork and the granite keep casting: the railing's shadow
+## across the footway is the deck's own contact shading.
+const WEB_SHADOWLESS: Array[String] = ["Ironwork", "IronLattice"]
+
+
 ## LOD generation is deliberately OFF for every bake.
 ##
 ## meshoptimizer simplifies by collapsing edges, and a lattice is thousands of
@@ -274,6 +283,8 @@ func _commit(baker: MeshBaker, mat: Material, mesh_name: String, gi: bool) -> vo
 	var mi := baker.commit(mat, mesh_name, false)
 	if not gi:
 		mi.gi_mode = GeometryInstance3D.GI_MODE_DISABLED
+	if WorldTier.is_reduced() and mesh_name in WEB_SHADOWLESS:
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	_tri_total += baker.triangle_count()
 	_draw_calls += 1

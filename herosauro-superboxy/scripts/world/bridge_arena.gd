@@ -312,6 +312,13 @@ func _apply_web_tier() -> void:
 		lean.subdivide_width = WorldTier.RIVER_SUBDIVISIONS
 		lean.subdivide_depth = WorldTier.RIVER_SUBDIVISIONS
 		river.mesh = lean
+	if river != null:
+		# duplicate() for the same reason as the mesh: Mat_river is a sub-resource.
+		var water := river.get_surface_override_material(0) as ShaderMaterial
+		if water != null:
+			water = water.duplicate()
+			water.set_shader_parameter("web_lean", true)
+			river.set_surface_override_material(0, water)
 
 	var sun := get_node_or_null("SunLight") as DirectionalLight3D
 	if sun != null:

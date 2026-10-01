@@ -121,14 +121,20 @@ const FACADE_RETURN_RANGE := 90.0
 ## Directional shadow reach on the reduced tier, metres. Desktop keeps the 260 in
 ## bridge_arena.tscn, which reaches the Ribeira stack.
 ##
-## With the chunking above in place this is a real lever again, and 96 is where it
-## stops paying: it covers the whole deck, both abutments and the near quay, which
-## with SHADOW_RADIUS is everything still casting.
-const SHADOW_DISTANCE := 96.0
-## Cascades on the reduced tier. Four splits over 96 m is four full geometry
-## passes to resolve a range the first two already cover; PARALLEL_2_SPLITS halves
-## the shadow pass outright.
-const SHADOW_SPLITS := DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+## 96 -> 60, together with the single map below. 96 was chosen when the cost model
+## was vertices; on a software rasteriser the shadow pass measured ~420 ms of a
+## ~1,850 ms frame (sun shadows off, `_bridge_perf.tscn -- --experiments`), and it
+## is paid once per cascade because every ring-0 chunk's AABB reaches into every
+## cascade. 60 m still covers the whole deck ahead of the chase camera, which looks
+## down the deck from ~10 m behind the hero; what falls out is the far abutment's
+## contact shadow seen from the other end of the bridge.
+const SHADOW_DISTANCE := 60.0
+## ONE map on the reduced tier, not two. PARALLEL_2_SPLITS with split_1 = 0.06 spent
+## a whole geometry pass on a 5.8 m cascade around the camera, and every caster in
+## ring 0 is submitted to both. A single 2048 map over 60 m is ~3 cm a texel at the
+## near end, which is still sharper than the 0.53-degree penumbra the sun is
+## authored with resolves at the hero's feet.
+const SHADOW_SPLITS := DirectionalLight3D.SHADOW_ORTHOGONAL
 
 ## River plane subdivisions on the reduced tier, against the .tscn's 178.
 ##
@@ -299,6 +305,14 @@ static func chunk_material(mat: Material, cell: Vector2i) -> Material:
 	if split_bakes() and not cell_casts_shadow(cell):
 		return far_material(mat)
 	return mat
+
+
+## Should geometry at `pos` be built in its coarse, far-reach form? Only ever on
+## the reduced tier, and only outside SHADOW_RADIUS, which is exactly where
+## chunk_material() hands out far_material: per-vertex, no normal map, so the
+## detail a coarse form drops is detail that tier no longer draws anyway.
+static func coarse_at(pos: Vector3) -> bool:
+	return is_reduced() and plan_distance(pos) > SHADOW_RADIUS
 
 
 ## Swap every BaseMaterial3D under `root` for its lean copy and return how many
