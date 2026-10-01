@@ -18,6 +18,7 @@ var _tap: PanelContainer
 var _tap_label: Label
 var _clock := 0.0
 var _armed := false
+var _pressing := false
 
 
 func _ready() -> void:
@@ -55,6 +56,7 @@ func _ready() -> void:
 
 func enter() -> void:
 	_armed = false
+	_pressing = false
 	_clock = 0.0
 	_refresh_text()
 	_layout()
@@ -102,10 +104,20 @@ func _go() -> void:
 	started.emit()
 
 
+## On the RELEASE of a press that began here. A tap on a tablet is two events
+## (the engine's emulated click, then the touch itself), and Godot 4.7 buttons
+## answer touches too: going on the press showed the bookshelf under the
+## finger and the same tap's touch then opened the book under it, skipping the
+## shelf. The release goes to whoever took the press, so nothing leaks through.
 func _gui_input(event: InputEvent) -> void:
 	var mb := event as InputEventMouseButton
-	if mb != null and mb.pressed:
-		_go()
+	var st := event as InputEventScreenTouch
+	if (mb != null and mb.button_index == MOUSE_BUTTON_LEFT) or st != null:
+		if event.is_pressed():
+			_pressing = true
+		elif _pressing:
+			_pressing = false
+			_go()
 		accept_event()
 
 
