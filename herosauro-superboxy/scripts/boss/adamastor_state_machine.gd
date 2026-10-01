@@ -102,6 +102,12 @@ const DECIDE_BASE := 3.4
 const DECIDE_MIN := 1.6
 const DECIDE_MAX := 4.4
 
+## Kid tuning (GameManager.assists, "Ajudas"; docs/story/ADAPTATION.md). The
+## tells get longer and he thinks for longer between attacks; nothing he does
+## changes shape, so the fight is the same fight, slower to read.
+const KID_WINDUP := 1.35
+const KID_DECIDE := 1.3
+
 # --- Roster scaling ---------------------------------------------------------
 ## Cadence each hero beyond the first adds. See the ROSTER TUNING note above.
 const ROSTER_CADENCE := 0.45
@@ -205,6 +211,8 @@ var _slam_gap: float = SLAM_GAP
 var _retreat_time: float = RETREAT_TIME
 var _pressure: float = 1.0                 # roster cadence multiplier
 var _escalated: bool = false               # phase two: faster, angrier, wider volley
+var _kid: bool = false                     # Ajudas on at reset: longer tells, slower decisions
+var _humans: int = 1                       # heroes driven by a person (the companion is not)
 
 # Busy flag: while an attack tween chain runs we don't pick a new action.
 var _busy: bool = false
@@ -233,8 +241,16 @@ func reset() -> void:
 	var ds: float = GameManager.difficulty_scalar()
 	# THE roster authority. Never range(1, player_count + 1): a solo run driven as
 	# hero 2 has a roster of [2], and counting a hero who does not exist would
-	# tune the giant for a fight nobody is having.
-	var n: float = float(maxi(1, GameManager.active_player_ids().size()))
+	# tune the giant for a fight nobody is having. The companion brother is in
+	# the roster but is not a person at the machine, so he does not count: a
+	# child playing alone gets the solo giant, with a helper on top.
+	var humans := 0
+	for pid in GameManager.active_player_ids():
+		if not GameManager.is_ai(pid):
+			humans += 1
+	_humans = maxi(1, humans)
+	var n: float = float(_humans)
+	_kid = GameManager.assists
 
 	_pressure = 1.0 + ROSTER_CADENCE * (n - 1.0)
 	_move_speed = minf(SPEED_CAP, BASE_SPEED * ds * (1.0 + ROSTER_SPEED * (n - 1.0)))
@@ -242,6 +258,8 @@ func reset() -> void:
 	_melee_range = MELEE_RANGE
 	_rock_range = ROCK_RANGE
 	_decide_interval = clampf(DECIDE_BASE / (ds * _pressure), DECIDE_MIN, DECIDE_MAX)
+	if _kid:
+		_decide_interval *= KID_DECIDE
 	_decide_timer = _decide_interval
 	_slam_gap = SLAM_GAP / _pressure
 	# NOT divided by _pressure. See the ROSTER TUNING note: the retreat is the
@@ -270,8 +288,11 @@ func tuning() -> Dictionary:
 		"decide_interval": _decide_interval,
 		"slam_gap": _slam_gap,
 		"retreat_time": _retreat_time,
-		"slam_windup": _recovery(SLAM_WINDUP),
+		"slam_windup": _windup(SLAM_WINDUP),
+		"rock_windup": _windup(ROCK_WINDUP),
 		"escalated": _escalated,
+		"kid": _kid,
+		"humans": _humans,
 	}
 
 
@@ -358,6 +379,11 @@ func _apply_escalation() -> void:
 ## Wind-ups and recoveries shorten in phase two; gaps are handled separately.
 func _recovery(seconds: float) -> float:
 	return seconds * (PHASE2_RECOVERY if _escalated else 1.0)
+
+
+## A telegraph's wind-up: phase two shortens it, kid tuning lengthens it.
+func _windup(seconds: float) -> float:
+	return _recovery(seconds) * (KID_WINDUP if _kid else 1.0)
 
 
 # --- IDLE ------------------------------------------------------------------
@@ -474,7 +500,7 @@ func _start_slam() -> void:
 	# it tracks his feet through the lunge and marks where the blast WILL be
 	# rather than where he was when he started winding up. lead == the wind-up, so
 	# the disc arriving at the ring IS the impact frame.
-	var windup := _recovery(SLAM_WINDUP)
+	var windup := _windup(SLAM_WINDUP)
 	_plant_aoe(boss.slam_radius(), windup, BossTelegraph.SLAM_TINT,
 		Vector3(boss.slam_offset().x, 0.0, boss.slam_offset().z), &"slam")
 
@@ -529,18 +555,27 @@ func _start_roar() -> void:
 	if target:
 		boss.face_toward(target.global_position, 1.0)
 
-	_plant_aoe(ROAR_RADIUS, ROAR_WINDUP, BossTelegraph.ROAR_TINT, Vector3.ZERO, &"roar")
-	boss.roar_coil(ROAR_WINDUP)
+	# Not _windup(): the roar is the fixed-length phase-two entrance (its sample's
+	# crest is sized to ROAR_WINDUP); kid tuning only stretches it.
+	var roar_windup := ROAR_WINDUP * (KID_WINDUP if _kid else 1.0)
+	_plant_aoe(ROAR_RADIUS, roar_windup, BossTelegraph.ROAR_TINT, Vector3.ZERO, &"roar")
+	boss.roar_coil(roar_windup)
 	# Fired at the WIND-UP, not at the release: the roar is a 2.45 s stream whose
 	# crest lands at 0.86 s, sized against ROAR_WINDUP's 0.85. Starting it here
 	# means the giant's voice peaks on the frame the coil releases, instead of
 	# beginning there. play_boss_slam() still fires in _do_roar() and the layering
 	# is deliberate — the roar's blast is sub-80 Hz and the slam's energy sits at
 	# 1.2 kHz, so they occupy different bands rather than competing.
-	AudioManager.play_boss_roar()
+	if roar_windup <= ROAR_WINDUP:
+		AudioManager.play_boss_roar()
 
 	_attack_tween = boss.create_tween()
 	_attack_tween.tween_callback(func() -> void: boss.raise_arms(true))
+	if roar_windup > ROAR_WINDUP:
+		# Kid tuning: the voice waits out the extra wind-up, so its crest still
+		# lands on the release.
+		_attack_tween.tween_interval(roar_windup - ROAR_WINDUP)
+		_attack_tween.tween_callback(AudioManager.play_boss_roar)
 	_attack_tween.tween_interval(ROAR_WINDUP)
 	_attack_tween.tween_callback(_do_roar)
 	_attack_tween.tween_interval(ROAR_RECOVER)
@@ -585,7 +620,7 @@ func _start_rock_throw() -> void:
 	# stepping off a mark beats it — which is only true because the target is
 	# resolved once, here, and never re-read.
 	_volley = _rock_volley()
-	var windup := _recovery(ROCK_WINDUP)
+	var windup := _windup(ROCK_WINDUP)
 	for t in _volley:
 		_plant_marker(t, windup + _rock_flight_time(t))
 

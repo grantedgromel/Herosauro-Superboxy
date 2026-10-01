@@ -20,15 +20,15 @@ extends Node
 ##
 ## ## Which hardware drives which hero
 ##
-## Slot 1: keyboard + mouse. WASD, Space, Shift, LMB/Q, RMB/E, arrows to orbit.
-## Slot 2: any gamepad (left stick, right stick, A/X/Y/L3), OR the right-hand
-##         keyboard cluster IJKL + M/U/O/RShift for a pad-less couch.
+## Slot 1: WASD or the arrow keys, Space, Shift, J/Q/LMB attack, K/E/RMB power,
+##         and gamepad device 0.
+## Slot 2: the numeric keypad (8 4 5 6, 0 jump, 7 attack, 9 power, right Shift)
+##         and gamepad device 1. (docs/story/ADAPTATION.md, "Input".)
 ##
-## No joypad event is bound to slot 1 at all. The common co-op rig is one shared
-## keyboard plus one pad, and the pad is the guest's seat — so the FIRST pad
-## plugged in has to be player two, not player one. A pad that could also nudge
-## player one would make both heroes walk on one stick, which is exactly the bug
-## this file exists to prevent.
+## Pads are bound by DEVICE, never device -1: a binding on every device would
+## put both heroes on one stick, which is exactly the bug this file exists to
+## prevent. The camera drives itself, so the arrows are movement, not look; the
+## mouse and the right stick still orbit the solo camera.
 ##
 ## ## Solo
 ##

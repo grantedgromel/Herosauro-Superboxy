@@ -57,6 +57,12 @@ var _damage_by_hero: Dictionary = {}
 
 func _ready() -> void:
 	await get_tree().process_frame
+	# The ladder, aggro and telegraph checks measure the classic giant: no
+	# Ajudas (kid tuning off) and no companion (solo really is one hero). Both
+	# default ON since the storybook contract; _check_kid_tuning covers them.
+	# Assigned, not set through the setters, which persist to user://.
+	GameManager.assists = false
+	GameManager.companion = false
 	await _run()
 	print("\nboss probe: %d passed, %d failed" % [_pass, _fail])
 	get_tree().quit(1 if _fail > 0 else 0)
@@ -78,6 +84,7 @@ func _run() -> void:
 	await _check_rock_telegraph_and_volley()
 	await _check_roar()
 	await _check_damage_share()
+	await _check_kid_tuning()
 
 
 # --- Tuning ladder ----------------------------------------------------------
@@ -508,6 +515,37 @@ func _on_player_damaged(pid: int, amount: int, _health: int) -> void:
 	if amount <= 0:
 		return
 	_damage_by_hero[pid] = int(_damage_by_hero.get(pid, 0)) + amount
+
+
+# --- Kid tuning (Ajudas on) -------------------------------------------------
+
+## With Ajudas on the giant reads slower: every telegraph's wind-up x1.35 and
+## the decision interval x1.3, and his roster scaling counts the people at the
+## machine, so a child alone with the robot brother faces the SOLO giant.
+## Compared against the classic solo numbers measured the same way.
+func _check_kid_tuning() -> void:
+	var classic: Dictionary = await _tuning_for(1, GameManager.Difficulty.NORMAL)
+	GameManager.assists = true
+	GameManager.companion = true
+	var kid: Dictionary = await _tuning_for(1, GameManager.Difficulty.NORMAL)
+	var roster := GameManager.active_player_ids()
+	GameManager.assists = false
+	GameManager.companion = false
+	print("  -- kid tuning: decide %.2f s (classic %.2f), slam wind-up %.3f s (classic %.3f), "
+		% [kid["decide_interval"], classic["decide_interval"], kid["slam_windup"], classic["slam_windup"]]
+		+ "rock wind-up %.3f s (classic %.3f), humans %d of roster %s"
+			% [kid["rock_windup"], classic["rock_windup"], kid["humans"], str(roster)])
+	_ok(bool(kid["kid"]) and not bool(classic["kid"]), "Ajudas switch the kid tuning on")
+	_ok(is_equal_approx(float(kid["slam_windup"]), float(classic["slam_windup"]) * 1.35),
+		"kid tuning: the slam wind-up is x1.35")
+	_ok(is_equal_approx(float(kid["rock_windup"]), float(classic["rock_windup"]) * 1.35),
+		"kid tuning: the rock wind-up is x1.35")
+	_ok(is_equal_approx(float(kid["decide_interval"]), float(classic["decide_interval"]) * 1.3),
+		"kid tuning: the decision interval is x1.3")
+	_ok(roster.size() == 2 and int(kid["humans"]) == 1
+		and is_equal_approx(float(kid["pressure"]), float(classic["pressure"])),
+		"the companion is in the roster but not in the giant's roster scaling (pressure %.2f)"
+			% float(kid["pressure"]))
 
 
 # --- Telegraph bookkeeping --------------------------------------------------

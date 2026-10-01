@@ -260,6 +260,28 @@ const DOWN_FX_POWER := 1.3
 const UP_FX_RADIUS := 1.4
 const UP_FX_POWER := 0.9
 
+# --- Kid mode (GameManager.assists, "Ajudas") --------------------------------
+## docs/story/ADAPTATION.md, kid rule 1: never fail. With Ajudas on, a hero at
+## zero health, or one who falls out of the level, floats in a bubble for
+## BUBBLE_TIME, drifting to the partner (or their own spawn point), and pops
+## back at FULL health. No knockdown timer, no fall penalty, no defeat. With
+## Ajudas off every line below is skipped and the hero behaves as it always did.
+const BUBBLE_TIME := 2.0
+const BUBBLE_RADIUS := 1.25
+## How far above the recovery point the bubble floats before it pops.
+const BUBBLE_RISE := 1.4
+const BUBBLE_BOB := 0.12
+const BUBBLE_SWAY := 0.22   # radians of gentle rocking inside the bubble
+const BUBBLE_POP_POWER := 1.2
+## Health comes back on its own once the hero has not been hit for a while.
+const REGEN_DELAY := 3.0
+const REGEN_PER_SECOND := 10.0
+## Auto-aim (kid rule 3): when an attack or a special starts, the hero snaps to
+## the nearest "targets" / "boss" node within this range and this angle of the
+## stick (or, with the stick idle, the camera) direction.
+const AUTO_AIM_RANGE := 5.0
+const AUTO_AIM_MAX_ANGLE := deg_to_rad(100.0)
+
 var spawn_position: Vector3 = Vector3.ZERO
 var facing_dir: Vector3 = Vector3(1, 0, 0)
 
@@ -282,6 +304,14 @@ var _partner_ref: PlayerBase = null     # the other hero, re-resolved when it go
 
 var _downed: bool = false
 var _down_timer: float = 0.0
+## Kid mode: the downed state is a bubble rather than a knockdown.
+var _bubbled: bool = false
+var _bubble_timer: float = 0.0
+var _bubble_from: Vector3 = Vector3.ZERO
+var _bubble_clock: float = 0.0
+var _bubble_mesh: MeshInstance3D = null
+var _since_hit: float = 0.0
+var _regen_accum: float = 0.0
 
 var _feet_drop: float = 1.0             # body origin -> soles, measured from the collider
 
@@ -332,6 +362,7 @@ func _ready() -> void:
 		add_child(_model_root)
 	_build_visuals()
 	_build_swing_box()
+	_build_bubble()
 	# One handler for every route to zero health — boss hitbox, shockwave, rock,
 	# fall penalty — so the knockdown can never be missed by a damage source that
 	# forgot to call it. GameManager.revive_player re-emits the same signal with
@@ -344,9 +375,13 @@ func _physics_process(delta: float) -> void:
 	if GameManager.state != GameManager.State.PLAYING:
 		return
 	if _downed:
-		_process_downed(delta)
+		if _bubbled:
+			_process_bubble(delta)
+		else:
+			_process_downed(delta)
 		return
 	_update_timers(delta)
+	_regenerate(delta)
 	_handle_jump(delta)
 	# A subclass move (e.g. Boxy Dash) can take over locomotion for its duration.
 	if not _custom_locomotion(delta):
@@ -545,7 +580,7 @@ func _handle_landing(delta: float) -> void:
 				# anything lands on it, and it is what makes a hero landing on
 				# the bridge look different from one landing on a granite kerb.
 				# Thrown from the SOLES, not the body origin — see foot_position().
-				ImpactFX.ground(self, foot_position(), ToonFactory.Surface.COBBLE,
+				ImpactFX.ground(self, foot_position(), _ground_surface(),
 					LAND_FX_RADIUS, force)
 		_air_time = 0.0
 	else:
@@ -601,12 +636,28 @@ func _handle_fall() -> void:
 	if is_on_floor():
 		_ground_y = global_position.y
 		return
+	# A level names its own floor of the world; the bridge keeps the rule it
+	# always had (deep below the last ground with nothing under you).
+	var level := LevelBase.current(get_tree())
+	if level != null:
+		if global_position.y < level.kill_y():
+			_went_over()
+		return
 	if global_position.y < ABSOLUTE_KILL_Y:
-		_respawn()
+		_went_over()
 		return
 	if velocity.y > 0.0 or global_position.y > _ground_y - fall_kill_depth:
 		return   # still rising, or this is just a drop we will survive
 	if not _ground_below():
+		_went_over()
+
+
+## Out of the play space: a bubble ride back with Ajudas on, the classic
+## penalised respawn without.
+func _went_over() -> void:
+	if GameManager.assists:
+		_fall_into_bubble()
+	else:
 		_respawn()
 
 
@@ -668,7 +719,7 @@ func _respawn() -> void:
 	# hero in from a metre up, so the burst goes on the deck under them rather
 	# than at the height they materialise at.
 	ImpactFX.ground(self, foot_position() - Vector3.UP * RECOVERY_DROP,
-		ToonFactory.Surface.COBBLE, RECOVER_FX_RADIUS, RECOVER_FX_POWER)
+		_ground_surface(), RECOVER_FX_RADIUS, RECOVER_FX_POWER)
 	GameManager.request_shake(RECOVER_SHAKE, RECOVER_SHAKE_TIME)
 	AudioManager.play_land()
 	# Flattened, then sprung: the kick has to go through the spring rather than be
@@ -707,15 +758,23 @@ func _recovery_position() -> Vector3:
 		return spawn_position
 
 	var away := Vector3.ZERO
+	var level := LevelBase.current(get_tree())
 	var boss := get_tree().get_first_node_in_group("boss") as Node3D
 	if boss and is_instance_valid(boss):
 		away = mate.global_position - boss.global_position
 		away.y = 0.0
+	elif level != null:
+		# No giant: step back from whatever the level says the play is about.
+		var focus := level.camera_focus()
+		if focus.is_finite():
+			away = mate.global_position - focus
+			away.y = 0.0
 	if away.length() < 0.1:
 		away = Vector3(-1.0, 0.0, 0.0)   # default: back down the bridge, away from +X
 
 	var pos: Vector3 = mate.global_position + away.normalized() * RECOVERY_GAP
-	pos.z = clampf(pos.z, -RECOVERY_HALF_WIDTH, RECOVERY_HALF_WIDTH)
+	if level == null:
+		pos.z = clampf(pos.z, -RECOVERY_HALF_WIDTH, RECOVERY_HALF_WIDTH)
 	pos.y = mate.global_position.y + RECOVERY_DROP   # just above the deck, not inside it
 	if not _ground_below(pos):
 		return spawn_position
@@ -743,6 +802,12 @@ func _recovery_position() -> Vector3:
 func take_hit(amount: int, knockback: Vector3 = Vector3.ZERO) -> bool:
 	if _downed or _invuln > 0.0 or GameManager.state != GameManager.State.PLAYING:
 		return false
+	if GameManager.assists:
+		# Kid mode halves what reaches the bar (GameManager.hero_damage_scale), and
+		# everything below — burst, shake, freeze — follows the smaller number.
+		amount = maxi(1, int(round(float(amount) * GameManager.hero_damage_scale())))
+	_since_hit = 0.0
+	_regen_accum = 0.0
 	apply_knockback(knockback)
 	_start_iframes()
 	# 3. the audio transient.
@@ -812,7 +877,7 @@ func _handle_ability() -> void:
 		return
 	if InputManager.is_ability_just_pressed(player_id):
 		_ability_timer = ability_cooldown
-		_aim_at_camera(ABILITY_AIM_HOLD)
+		_aim_for_action(ABILITY_AIM_HOLD)
 		# Anticipation before the special, same as the basic swing: the body coils
 		# a frame before the effect leaves it.
 		_kick_squash(ATTACK_ANTICIPATION)
@@ -830,7 +895,7 @@ func _handle_attack() -> void:
 	if InputManager.is_attack_just_pressed(player_id):
 		_attack_timer = attack_cooldown
 		_attack_swing = 0.14
-		_aim_at_camera(attack_hold)
+		_aim_for_action(attack_hold)
 		play_action_anim("attack", attack_hold)
 		# Anticipation now, follow-through a third of the way through the hold.
 		# Both are required: a swing with neither reads as the arm teleporting.
@@ -867,7 +932,7 @@ func _build_swing_box() -> void:
 	var depth: float = maxf(attack_range - near, 1.0)
 	_swing = Hitbox.box(self, Vector3(depth, 2.0, 2.4),
 		Vector3(near + depth * 0.5, 0.2, 0.0),
-		PhysicsLayers.BOSS | PhysicsLayers.PROPS, "SwingVolume")
+		PhysicsLayers.BOSS | PhysicsLayers.PROPS | PhysicsLayers.TARGETS, "SwingVolume")
 	_swing.damage = attack_damage
 	_swing.knockback = 4.0
 	_swing.lift = 0.0
@@ -907,6 +972,13 @@ func _on_swing_landed(target: Node3D) -> void:
 		GameManager.request_shake(0.16, 0.12)
 		if target.has_method("nudge"):
 			target.nudge(facing_dir, 0.4)
+	elif target is Hurtbox:
+		# A level's target (TARGETS layer). The target plays its own sound and
+		# reports its own progress; the jab adds the freeze and the camera.
+		if player_id == 2:
+			AudioManager.play_super_boxy_hit()
+		GameManager.hit_stop(0.03)
+		GameManager.request_shake(0.12, 0.1)
 	else:
 		# Props: a lighter tick, so smashing a barrel still registers in the frame.
 		GameManager.request_shake(0.07, 0.09)
@@ -1034,6 +1106,13 @@ func reset_state() -> void:
 	_impact_speed = 0.0
 	_downed = false
 	_down_timer = 0.0
+	_bubbled = false
+	_bubble_timer = 0.0
+	_bubble_clock = 0.0
+	_since_hit = 0.0
+	_regen_accum = 0.0
+	if _bubble_mesh:
+		_bubble_mesh.visible = false
 	_partner_ref = null       # the world is rebuilt around us; re-resolve on demand
 	_cancel_actions()
 	_stretch = 0.0
@@ -1125,9 +1204,15 @@ func _on_health_changed(id: int, _amount: int, new_health: int) -> void:
 	if id != player_id:
 		return
 	if new_health <= 0 and not _downed:
-		_go_down()
+		if GameManager.assists:
+			_enter_bubble()
+		else:
+			_go_down()
 	elif new_health > 0 and _downed:
-		_get_up()
+		if _bubbled:
+			_pop_bubble()
+		else:
+			_get_up()
 
 
 func _go_down() -> void:
@@ -1151,7 +1236,7 @@ func _go_down() -> void:
 	_stretch = DOWN_SQUASH
 	_stretch_vel = 0.0
 	# Leg one: the deck taking the weight of a hero who has stopped standing on it.
-	ImpactFX.ground(self, foot_position(), ToonFactory.Surface.COBBLE,
+	ImpactFX.ground(self, foot_position(), _ground_surface(),
 		DOWN_FX_RADIUS, DOWN_FX_POWER)
 	AudioManager.play_hurt()
 	GameManager.request_shake(0.35, 0.3)
@@ -1172,10 +1257,206 @@ func _get_up() -> void:
 	_kick_squash(JUMP_STRETCH * 1.4)
 	# Leg one, on the recovery point rather than where they fell: `_get_up` moves
 	# the body first, exactly as `_respawn` does, so the dust has to follow it.
-	ImpactFX.ground(self, foot_position(), ToonFactory.Surface.COBBLE,
+	ImpactFX.ground(self, foot_position(), _ground_surface(),
 		UP_FX_RADIUS, UP_FX_POWER)
 	AudioManager.play_land()
 	GameManager.request_shake(0.18, 0.2)
+
+
+# --- Kid mode: bubble, regeneration, auto-aim ------------------------------
+
+## Calçada on the bridge; whatever the level says elsewhere.
+func _ground_surface() -> int:
+	var level := LevelBase.current(get_tree())
+	return level.ground_surface() if level != null else ToonFactory.Surface.COBBLE
+
+
+func is_bubbled() -> bool:
+	return _bubbled
+
+
+## Float this hero home in a bubble right now (the companion AI uses it when it
+## has strayed or fallen). Health is untouched; the pop refills it.
+func bubble_home() -> void:
+	if _downed or GameManager.state != GameManager.State.PLAYING:
+		return
+	_enter_bubble()
+
+
+## The bubble: a translucent sphere around the hero. One mesh per hero, built
+## once; the glass material comes from ToonFactory's cache by parameter set and
+## is never mutated, so nothing needs duplicating.
+func _build_bubble() -> void:
+	_bubble_mesh = MeshInstance3D.new()
+	_bubble_mesh.name = "Bubble"
+	var sphere := SphereMesh.new()
+	sphere.radius = BUBBLE_RADIUS
+	sphere.height = BUBBLE_RADIUS * 2.0
+	sphere.radial_segments = 24
+	sphere.rings = 12
+	_bubble_mesh.mesh = sphere
+	var tint := Color(0.62, 0.95, 0.7) if player_id == 1 else Color(1.0, 0.72, 0.68)
+	_bubble_mesh.material_override = ToonFactory.glass(tint, 0.32)
+	_bubble_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_bubble_mesh.visible = false
+	add_child(_bubble_mesh)
+
+
+func _enter_bubble() -> void:
+	_downed = true
+	_bubbled = true
+	_bubble_timer = BUBBLE_TIME
+	_bubble_clock = 0.0
+	_bubble_from = global_position
+	_jump_buffer = 0.0
+	_attack_swing = 0.0
+	_action_timer = 0.0
+	_follow_timer = 0.0
+	_aim_lock = 0.0
+	_invuln = 0.0
+	_flicker = 0.0
+	velocity = Vector3.ZERO
+	_knockback = Vector3.ZERO
+	if _swing:
+		_swing.disarm()
+	_cancel_actions()
+	_end_action_anim()
+	if _model_root:
+		_model_root.visible = true
+	if _bubble_mesh:
+		_bubble_mesh.visible = true
+	_kick_squash(HURT_SQUASH)
+	AudioManager.play_sfx(&"bubble_pop", global_position)
+	GameManager.request_shake(0.12, 0.16)
+
+
+## Falling out of the level with Ajudas on: the loss beat where they went over
+## (no penalty, no freeze), then the same bubble ride home.
+func _fall_into_bubble() -> void:
+	ImpactFX.spark(self, global_position, Vector3.UP, ToonFactory.Surface.FLAT, FALL_FX_POWER)
+	_play_fall_sfx()
+	GameManager.request_shake(RECOVER_SHAKE, RECOVER_SHAKE_TIME)
+	_enter_bubble()
+
+
+## Where the bubble is heading: beside the partner, or home if the partner is
+## out of play too.
+func _bubble_goal() -> Vector3:
+	var mate := _partner()
+	if mate == null or mate.is_downed():
+		return spawn_position + Vector3.UP * BUBBLE_RISE
+	return _recovery_position() + Vector3.UP * BUBBLE_RISE
+
+
+## Moved positionally (the bubble ignores collision), eased so it leaves slowly,
+## travels, and settles before the pop. Delta-accumulated, never the wall clock.
+func _process_bubble(delta: float) -> void:
+	_bubble_timer = maxf(0.0, _bubble_timer - delta)
+	_bubble_clock += delta
+	var t := clampf(1.0 - _bubble_timer / BUBBLE_TIME, 0.0, 1.0)
+	var eased := t * t * (3.0 - 2.0 * t)
+	var bob := Vector3.UP * sin(_bubble_clock * TAU * 0.9) * BUBBLE_BOB
+	global_position = _bubble_from.lerp(_bubble_goal(), eased) + bob
+	velocity = Vector3.ZERO
+	_wish_dir = Vector3.ZERO
+	if _bubble_mesh:
+		var wobble := 1.0 + 0.05 * sin(_bubble_clock * TAU * 1.7)
+		_bubble_mesh.scale = Vector3(wobble, 2.0 - wobble, wobble)
+	_drive_anim(delta)
+	_drive_squash(delta)
+	if _bubble_timer <= 0.0:
+		# Full health. revive_player re-emits player_damaged, which lands in
+		# _on_health_changed and pops the bubble (and tells the HUD).
+		GameManager.revive_player(player_id, GameManager.MAX_PLAYER_HEALTH)
+		if _bubbled:
+			_pop_bubble()   # not PLAYING any more, or the table refused: pop anyway
+
+
+func _pop_bubble() -> void:
+	_downed = false
+	_bubbled = false
+	_bubble_timer = 0.0
+	if _bubble_mesh:
+		_bubble_mesh.visible = false
+	velocity = Vector3.ZERO
+	_knockback = Vector3.ZERO
+	_ground_y = global_position.y
+	_since_hit = 0.0
+	_regen_accum = 0.0
+	_start_iframes()
+	# The burst, the camera, the pop, the spring, and the HUD's revive (it rides
+	# the player_respawned that revive_player emitted).
+	ImpactFX.spark(self, global_position + Vector3.UP * 0.4, Vector3.UP,
+		ToonFactory.Surface.FLAT, BUBBLE_POP_POWER)
+	AudioManager.play_sfx(&"bubble_pop", global_position)
+	GameManager.request_shake(0.14, 0.16)
+	_stretch = RECOVER_SQUASH
+	_stretch_vel = 0.0
+	_kick_squash(JUMP_STRETCH * 1.4)
+
+
+## 10 health a second once REGEN_DELAY has passed without a hit, in whole
+## points through GameManager.heal_player.
+func _regenerate(delta: float) -> void:
+	if not GameManager.assists:
+		return
+	_since_hit += delta
+	if _since_hit < REGEN_DELAY:
+		return
+	var hp := int(GameManager.player_health.get(player_id, 0))
+	if hp <= 0 or hp >= GameManager.MAX_PLAYER_HEALTH:
+		_regen_accum = 0.0
+		return
+	_regen_accum += REGEN_PER_SECOND * delta
+	var whole := int(_regen_accum)
+	if whole > 0:
+		_regen_accum -= float(whole)
+		GameManager.heal_player(player_id, whole)
+
+
+## Face where an attack or special should go. Without Ajudas this is exactly
+## the camera line. With them, a held stick wins over the camera, and then the
+## nearest target inside AUTO_AIM_RANGE / AUTO_AIM_MAX_ANGLE of that direction
+## wins over both.
+func _aim_for_action(hold: float) -> void:
+	_aim_at_camera(hold)
+	if not GameManager.assists:
+		return
+	var ref := _wish_direction()
+	ref.y = 0.0
+	if ref.length_squared() > 0.0001:
+		face_toward(global_position + ref.normalized())
+	else:
+		ref = facing_dir
+	var t := auto_aim_target(ref)
+	if t != null:
+		face_toward(t.global_position)
+
+
+## Nearest "targets" or "boss" node within AUTO_AIM_RANGE whose bearing is
+## within AUTO_AIM_MAX_ANGLE of `ref`, or null. Public for the companion AI.
+func auto_aim_target(ref: Vector3) -> Node3D:
+	ref.y = 0.0
+	if ref.length_squared() < 0.0001:
+		ref = facing_dir
+	ref = ref.normalized()
+	var best: Node3D = null
+	var best_d := AUTO_AIM_RANGE
+	for group in [&"targets", &"boss"]:
+		for n in get_tree().get_nodes_in_group(group):
+			var node := n as Node3D
+			if node == null or not is_instance_valid(node):
+				continue
+			var to := node.global_position - global_position
+			to.y = 0.0
+			var d := to.length()
+			if d > best_d:
+				continue
+			if d > 0.05 and ref.angle_to(to / d) > AUTO_AIM_MAX_ANGLE:
+				continue
+			best = node
+			best_d = d
+	return best
 
 
 # --- Squash and stretch ----------------------------------------------------
@@ -1186,7 +1467,7 @@ func _get_up() -> void:
 ## impulse landing on it (the body touching the deck after the knockdown) would
 ## never be integrated away and the hero would come back the wrong shape.
 func _kick_squash(amount: float) -> void:
-	if _downed:
+	if _downed and not _bubbled:
 		return
 	_stretch = clampf(_stretch + amount, -SQUASH_LIMIT, SQUASH_LIMIT)
 
@@ -1211,11 +1492,14 @@ func body_lag() -> BodyLag:
 func _drive_squash(delta: float) -> void:
 	if _model_root == null:
 		return
-	if _downed:
+	if _downed and not _bubbled:
 		# Held, not sprung: a downed hero stays flat until they are helped up.
 		_tilt = lerpf(_tilt, DOWN_TILT, clampf(1.0 - exp(-TILT_LAMBDA * delta), 0.0, 1.0))
 	else:
-		_tilt = lerpf(_tilt, 0.0, clampf(1.0 - exp(-TILT_LAMBDA * delta), 0.0, 1.0))
+		# Upright, or (in a bubble) rocking gently: kid rule 6, a hero in a
+		# bubble is having a ride, not lying knocked out.
+		var sway := sin(_bubble_clock * TAU * 0.6) * BUBBLE_SWAY if _bubbled else 0.0
+		_tilt = lerpf(_tilt, sway, clampf(1.0 - exp(-TILT_LAMBDA * delta), 0.0, 1.0))
 		# Semi-implicit Euler on a damped spring toward zero. Stable at the 90 Hz
 		# tick this project runs (dt * sqrt(stiffness) is ~0.15) and, because it
 		# integrates delta rather than reading a clock, identical on every run.

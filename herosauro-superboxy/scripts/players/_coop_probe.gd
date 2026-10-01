@@ -20,6 +20,13 @@ var _main: Node = null
 
 func _ready() -> void:
 	await get_tree().process_frame
+	# Everything up to _check_kid_mode measures the classic game: no Ajudas (so
+	# zero health is a knockdown, a fall costs health and all-down is DEFEAT)
+	# and no companion (so solo is one hero). Both default ON since the
+	# storybook contract. Assigned, not set through the setters, which would
+	# persist to user://settings.cfg and change the next run's defaults.
+	GameManager.assists = false
+	GameManager.companion = false
 	await _run()
 	print("\ncoop probe: %d passed, %d failed" % [_pass, _fail])
 	get_tree().quit(1 if _fail > 0 else 0)
@@ -38,6 +45,7 @@ func _run() -> void:
 	await _check_downed_knockback()
 	await _check_knockdown_and_revive()
 	await _check_solo_roster()
+	await _check_kid_mode()
 
 
 # --- Input map -------------------------------------------------------------
@@ -54,14 +62,43 @@ func _check_input_map() -> void:
 				missing.append(full)
 	_ok(missing.is_empty(), "both action sets exist (missing: %s)" % str(missing))
 
-	# The whole point of the split: no pad event may sit on slot 1, or one stick
-	# would drive both heroes.
-	var pad_on_p1: Array[String] = []
+	# The whole point of the split: a pad drives exactly one slot. Slot 1 is pad
+	# DEVICE 0 and slot 2 is device 1 (docs/story/ADAPTATION.md, "Input"); a pad
+	# event on device -1 (every pad) would put both heroes on one stick.
+	var wrong_device: Array[String] = []
+	for a in actions:
+		for slot in [1, 2]:
+			var full := InputManager.action_name(slot, StringName(a))
+			for ev in InputMap.action_get_events(full):
+				if (ev is InputEventJoypadMotion or ev is InputEventJoypadButton) \
+						and ev.device != slot - 1:
+					wrong_device.append("%s@%d" % [full, ev.device])
+	_ok(wrong_device.is_empty(),
+		"each slot's pad bindings are its own device only (wrong: %s)" % str(wrong_device))
+	_ok(_bound(&"move_up", KEY_W) and _bound(&"move_up", KEY_UP)
+		and _bound(&"move_left", KEY_A) and _bound(&"move_left", KEY_LEFT),
+		"player one moves with WASD and the arrow keys")
+	_ok(_bound(&"attack", KEY_J) and _bound(&"attack", KEY_Q)
+		and _bound(&"ability", KEY_K) and _bound(&"ability", KEY_E) and _bound(&"jump", KEY_SPACE),
+		"player one attacks on J/Q, powers on K/E, jumps on Space")
+	var look_keys: Array[String] = []
+	for a in ["look_left", "look_right", "look_up", "look_down"]:
+		for ev in InputMap.action_get_events(StringName(a)):
+			if ev is InputEventKey:
+				look_keys.append(a)
+	_ok(look_keys.is_empty(), "the arrows are no longer camera look (found: %s)" % str(look_keys))
+	_ok(_bound(&"p2_move_up", KEY_KP_8) and _bound(&"p2_move_down", KEY_KP_5)
+		and _bound(&"p2_jump", KEY_KP_0) and _bound(&"p2_attack", KEY_KP_7)
+		and _bound(&"p2_ability", KEY_KP_9),
+		"player two's keyboard cluster is the numpad")
+	var clash: Array[String] = []
 	for a in actions:
 		for ev in InputMap.action_get_events(StringName(a)):
-			if ev is InputEventJoypadMotion or ev is InputEventJoypadButton:
-				pad_on_p1.append(a)
-	_ok(pad_on_p1.is_empty(), "no joypad binding on slot 1 (found: %s)" % str(pad_on_p1))
+			if ev is InputEventKey:
+				for b in actions:
+					if InputMap.action_has_event(InputManager.action_name(2, StringName(b)), ev):
+						clash.append("%s/%s" % [a, b])
+	_ok(clash.is_empty(), "no key drives both players (clashes: %s)" % str(clash))
 
 	# ...and slot 2 must be reachable from a pad AND from the keyboard, or a
 	# pad-less couch cannot play co-op at all.
@@ -71,6 +108,13 @@ func _check_input_map() -> void:
 		p2_pad = p2_pad or ev is InputEventJoypadMotion
 		p2_key = p2_key or ev is InputEventKey
 	_ok(p2_pad and p2_key, "slot 2 reachable from a pad and from the keyboard")
+
+
+func _bound(action: StringName, keycode: int) -> bool:
+	for ev in InputMap.action_get_events(action):
+		if ev is InputEventKey and (ev as InputEventKey).physical_keycode == keycode:
+			return true
+	return false
 
 
 # --- Roster ----------------------------------------------------------------
@@ -1149,6 +1193,76 @@ func _check_knockdown_and_revive() -> void:
 	await get_tree().physics_frame
 	_ok(GameManager.state == GameManager.State.DEFEAT,
 		"both heroes down ends the run (state %d)" % GameManager.state)
+
+
+# --- Kid mode (Ajudas and the companion, the storybook defaults) -------------
+
+## The same bridge with the contract's defaults back on. The sandbox level has
+## its own end-to-end probe (scripts/levels/_chapter_probe); this is the bridge
+## side of the same rules: its own fall line, its own giant.
+func _check_kid_mode() -> void:
+	GameManager.assists = true
+	GameManager.companion = true
+	await _to_menu()
+	await _start(1, 1)
+	_ok(_hero_ids() == [1, 2], "solo with the companion on fields both brothers, got %s"
+		% str(_hero_ids()))
+	_ok(GameManager.is_ai(2) and _main.get_node_or_null("World/CompanionAI2") != null,
+		"hero 2 is the robot, driven by a CompanionAI")
+	await _settle(60)
+	await _send_boss_away()
+	var hero: PlayerBase = _hero(1)
+	var mate: PlayerBase = _hero(2)
+	mate.global_position = Vector3(-20.0, 3.0, 0.0)
+	hero.global_position = Vector3(-20.0, 3.0, 2.0)
+	await _settle(int((hero.invuln_time + 0.3) * 90.0))
+
+	# Over the side: a bubble, no penalty, home to the partner at full health.
+	var hp_before := int(GameManager.player_health[1])
+	hero.global_position = Vector3(-20.0, -6.0, 46.0)
+	hero.velocity = Vector3(0.0, -4.0, 0.0)
+	await _settle(4)
+	_ok(hero.is_bubbled(), "kid mode: going over the side floats the hero in a bubble")
+	_ok(int(GameManager.player_health[1]) == hp_before,
+		"kid mode: ...with no fall penalty (%d -> %d)" % [hp_before, int(GameManager.player_health[1])])
+	await _settle(int((PlayerBase.BUBBLE_TIME + 0.8) * 90.0))
+	_ok(not hero.is_downed() and hero.global_position.y > 1.5,
+		"kid mode: ...and pops back onto the deck (y %.2f)" % hero.global_position.y)
+	var apart := Vector2(hero.global_position.x - mate.global_position.x,
+		hero.global_position.z - mate.global_position.z).length()
+	_ok(apart < 8.0, "kid mode: ...beside the partner (%.1f m)" % apart)
+
+	# Zero health: a bubble, not a knockdown, and never DEFEAT.
+	GameManager.damage_player(1, GameManager.MAX_PLAYER_HEALTH)
+	GameManager.damage_player(2, GameManager.MAX_PLAYER_HEALTH)
+	await get_tree().physics_frame
+	_ok(GameManager.state == GameManager.State.PLAYING,
+		"kid mode: both heroes at zero is not DEFEAT (state %d)" % GameManager.state)
+	_ok(hero.is_bubbled() and mate.is_bubbled(), "kid mode: both float in bubbles")
+	await _settle(int((PlayerBase.BUBBLE_TIME + 0.5) * 90.0))
+	_ok(int(GameManager.player_health[1]) == GameManager.MAX_PLAYER_HEALTH
+		and int(GameManager.player_health[2]) == GameManager.MAX_PLAYER_HEALTH,
+		"kid mode: both pop back at full health (%d / %d)"
+			% [GameManager.player_health[1], GameManager.player_health[2]])
+
+	# Auto-aim: stick held hard sideways, 90 degrees off the giant, attack. The
+	# swing has to come out facing him, not the stick.
+	var boss := get_tree().get_first_node_in_group("boss") as Node3D
+	boss.global_position = Vector3(-10.0, boss.global_position.y, 0.0)
+	hero.global_position = boss.global_position + Vector3(-4.3, 1.0, 0.0)
+	await _settle(int((hero.invuln_time + 0.2) * 90.0))
+	hero.global_position = boss.global_position + Vector3(-4.3, 1.0, 0.0)
+	InputManager.set_virtual_move(1, Vector2(1.0, 0.0))
+	InputManager.press_virtual(1, &"attack")
+	await _settle(2)
+	InputManager.set_virtual_move(1, Vector2.ZERO)
+	var to_boss := boss.global_position - hero.global_position
+	to_boss.y = 0.0
+	var aim_dot := hero.facing_dir.normalized().dot(to_boss.normalized())
+	_ok(aim_dot > 0.95, "kid mode: an attack auto-aims at the giant within 5 m (dot %.2f)" % aim_dot)
+
+	GameManager.assists = false
+	GameManager.companion = false
 
 
 # --- Harness ---------------------------------------------------------------

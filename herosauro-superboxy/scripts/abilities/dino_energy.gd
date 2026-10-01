@@ -30,9 +30,13 @@ var _spent: bool = false
 
 func _ready() -> void:
 	add_to_group("projectiles")
-	collision_mask = PhysicsLayers.WORLD | PhysicsLayers.BOSS | PhysicsLayers.PROPS
+	# TARGETS are Hurtbox AREAS, so areas are on. Any other area the sweep meets
+	# (an Area3D left on its default layer 1 = WORLD, a shockwave) is excepted on
+	# contact in _first_real_hit, so turning areas on adds targets and nothing else.
+	collision_mask = (PhysicsLayers.WORLD | PhysicsLayers.BOSS | PhysicsLayers.PROPS
+		| PhysicsLayers.TARGETS)
 	collide_with_bodies = true
-	collide_with_areas = false
+	collide_with_areas = true
 	enabled = true
 	target_position = Vector3.ZERO
 	_life = lifetime
@@ -56,17 +60,51 @@ func _physics_process(delta: float) -> void:
 	var step := direction * speed * delta
 	target_position = step
 	force_shapecast_update()
-	if is_colliding():
-		_impact(get_collider(0) as Node3D)
+	var hit := _first_real_hit()
+	if hit != null:
+		_impact(hit)
 		return
 	global_position += step
+
+
+## The collider this frame's sweep should stop on, or null. An Area3D that is
+## not a TARGETS Hurtbox is excepted and the sweep re-run, so it can neither
+## stop the orb nor hide what is behind it. A Hurtbox is preferred over a body
+## met in the same sweep (a target's own solid collider).
+func _first_real_hit() -> Node3D:
+	for attempt in 4:
+		if not is_colliding():
+			return null
+		var retry := false
+		var body: Node3D = null
+		for i in get_collision_count():
+			var c := get_collider(i) as Node3D
+			if c == null:
+				continue
+			if c is Area3D:
+				if c is Hurtbox and ((c as Area3D).collision_layer & PhysicsLayers.TARGETS) != 0:
+					return c
+				add_exception(c as Area3D)
+				retry = true
+			elif body == null:
+				body = c
+		if not retry:
+			return body
+		force_shapecast_update()
+	return null
 
 
 func _impact(body: Node3D) -> void:
 	if body == null:
 		_finish()
 		return
-	if body.is_in_group("boss"):
+	var hurtbox := Hurtbox.resolve(body)
+	if hurtbox != null:
+		# A level's target. take_hit with the orb's full damage, a freeze a touch
+		# shorter than the giant's, and the shake below.
+		hurtbox.receive(damage, direction * 8.0 + Vector3.UP * 3.0, source_player)
+		GameManager.hit_stop(0.05)
+	elif body.is_in_group("boss"):
 		# damage_boss makes Adamastor play its own hit reaction, and the shipped
 		# dino_hit / boss_hit samples are the same file - playing both stacked two
 		# identical buffers in one frame.
