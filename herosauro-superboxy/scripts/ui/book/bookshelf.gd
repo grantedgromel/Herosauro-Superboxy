@@ -12,6 +12,11 @@ signal chapter_chosen(chapter_id: String)
 signal settings_requested()
 
 var covers: Array[BookCover] = []
+## The book to focus the next time the shelf comes on screen, instead of the
+## suggested one. Set when a book is opened, so backing out of "who's playing"
+## lands on the book the child picked; cleared when a run starts (coming back
+## from a story, the next unfinished book is the one to offer).
+var return_focus: String = ""
 
 var _wall: PaperWall
 var _title: Label
@@ -42,7 +47,9 @@ func _ready() -> void:
 		var cover := BookCover.new()
 		_row.add_child(cover)
 		cover.setup(id)
-		cover.pressed.connect(func() -> void: chapter_chosen.emit(id))
+		cover.pressed.connect(func() -> void:
+			return_focus = id
+			chapter_chosen.emit(id))
 		covers.append(cover)
 
 	_gear = BookKit.round_button(KidIcon.Kind.GEAR, BookKit.SKY, 96.0)
@@ -86,7 +93,9 @@ func enter() -> void:
 		if c != null:
 			c.play_sticker()
 		UIProgress.fresh_sticker = ""
-	var focus := cover_for(suggested_chapter())
+	var focus := cover_for(return_focus) if not return_focus.is_empty() else null
+	if focus == null:
+		focus = cover_for(suggested_chapter())
 	if focus != null:
 		focus.call_deferred("grab_focus")
 

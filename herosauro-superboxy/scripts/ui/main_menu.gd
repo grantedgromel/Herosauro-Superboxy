@@ -176,6 +176,7 @@ func start_chapter() -> void:
 	reader.close()
 	if chapter_id.is_empty():
 		chapter_id = shelf.suggested_chapter()
+	shelf.return_focus = ""
 	var tw := create_tween()
 	tw.tween_property(_curtain, "modulate:a", 1.0, CURTAIN_TIME)
 	tw.tween_callback(func() -> void:
