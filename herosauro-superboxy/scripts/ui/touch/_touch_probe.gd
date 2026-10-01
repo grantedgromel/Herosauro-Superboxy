@@ -256,7 +256,10 @@ func _check_layout(view: Vector2i) -> void:
 	GameManager.combo_changed.emit(1, 6)
 	GameManager.combo_changed.emit(2, 3)
 	GameManager.request_story_beat("a09")
-	await _frames(4)
+	# A hit recoils the panel about its centre; the scaled-down compact panel
+	# must still land where the layout put it.
+	GameManager.damage_player(1, 20)
+	await _seconds(0.6)
 	var tag := "%dx%d" % [view.x, view.y]
 	var touch: TouchControls = hud._touch
 	_ok(hud._compact and touch.is_shown(), "%s: touch layout is on" % tag)
@@ -276,11 +279,12 @@ func _check_layout(view: Vector2i) -> void:
 	var widgets := {}
 	for pid: int in hud._heroes:
 		var p: HeroPanel = hud._heroes[pid]
-		var pr := Rect2(p.position, p.size * p.scale)
+		# Where it is DRAWN: scale applies about the pivot.
+		var pr := Rect2(p.position + p.pivot_offset * (Vector2.ONE - p.scale), p.size * p.scale)
 		widgets["hero %d" % pid] = pr
 		# Compact panels carry their combo on the plate (no overhang).
 		var cr := p.combo_rect()
-		var combo := Rect2(p.position + (cr.position - p.position) * p.scale, cr.size * p.scale)
+		var combo := Rect2(pr.position + (cr.position - p.position) * p.scale, cr.size * p.scale)
 		_ok(p._combo_count.visible and pr.grow(0.5).encloses(combo),
 			"%s: hero %d's combo sits on its compact plate %s" % [tag, pid, combo])
 		_ok(not p._dial.visible, "%s: hero %d's dial gives way to the Power button" % [tag, pid])
