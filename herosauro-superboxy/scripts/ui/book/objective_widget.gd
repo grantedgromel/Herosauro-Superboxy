@@ -126,7 +126,24 @@ func label_text() -> String:
 
 func _refresh_text() -> void:
 	_text.text = Loc.pick(label_entry)
+	_fit()
 	_paint()
+
+
+## Long goals ("Liberta o dragão e recupera as taças!") step the type down and
+## grow the plate, so the sentence never runs under the stars.
+func _fit() -> void:
+	var px := 22 if _text.text.length() <= 24 else 19
+	_text.add_theme_font_size_override("font_size", px)
+	BookKit.place(_text, Vector2(76, 10), Vector2(W - 90, 30))
+	var text_h := float(maxi(1, _text.get_line_count())) * (px + 5.0)
+	_text.size.y = text_h
+	var pips_y := maxf(66.0, 12.0 + text_h + 6.0)
+	_pips.position = Vector2(16, pips_y)
+	_count.position = Vector2(W - 70, pips_y)
+	var h := maxf(82.0, text_h + 26.0) if total <= 0 else pips_y + PIP + 14.0
+	size = Vector2(W, h)
+	custom_minimum_size = size
 
 
 func _rebuild_pips() -> void:
@@ -137,9 +154,7 @@ func _rebuild_pips() -> void:
 	for i in shown:
 		var ic := KidIcon.make(KidIcon.Kind.STAR_EMPTY, PIP)
 		_pips.add_child(ic)
-	var h := 82.0 if total <= 0 else 120.0
-	size = Vector2(W, h)
-	custom_minimum_size = size
+	_fit()
 	_paint()
 
 

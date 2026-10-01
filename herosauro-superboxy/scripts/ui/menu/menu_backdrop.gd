@@ -147,9 +147,8 @@ func relayout() -> void:
 	_bottom.offset_top = -size.y * BOTTOM_SCRIM
 
 
-## True when the key art file exists and is what is on screen. `hero_stage.gd`'s
-## visibility hangs off this — see main_menu.gd — because the key art already has
-## the cast in it and staging the cut-outs on top would draw Adamastor twice.
+## True when the key art file exists and is what is on screen (the title
+## screen, scripts/ui/book/title_screen.gd, stands on it).
 func has_key_art() -> bool:
 	return _key_art != null
 

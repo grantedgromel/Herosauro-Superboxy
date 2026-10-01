@@ -207,7 +207,7 @@ func _layout() -> void:
 
 
 func _process(delta: float) -> void:
-	if not suggested or BookKit.reduce_motion():
+	if not suggested or BookKit.reduce_motion() or not is_visible_in_tree():
 		return
 	_clock += delta
 	# A slow breath, so the eye goes to the next story without being told.

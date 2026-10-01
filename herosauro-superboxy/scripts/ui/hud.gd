@@ -429,8 +429,19 @@ func _process(delta: float) -> void:
 ## giant's face over the football stadium).
 func _tick_story(delta: float) -> void:
 	_boss_layer.visible = get_tree().get_first_node_in_group("boss") != null
-	_toast.offset_top = (14.0 + BOSS_PLATE.y + 14.0) if _boss_layer.visible else 14.0
+	# Under the giant's banner when there is one; otherwise in the top row,
+	# centred in the gap between the pause button and the goal.
+	var shift := 0.0
+	if _boss_layer.visible:
+		_toast.offset_top = 14.0 + BOSS_PLATE.y + 14.0
+	else:
+		_toast.offset_top = 14.0
+		var gap_l := M + PAUSE_BUTTON + 12.0
+		var gap_r := size.x - M - ObjectiveWidget.W - 12.0
+		shift = (gap_l + gap_r) * 0.5 - size.x * 0.5
 	_toast.offset_bottom = _toast.offset_top + StoryToast.H
+	_toast.offset_left = -StoryToast.W * 0.5 + shift
+	_toast.offset_right = StoryToast.W * 0.5 + shift
 	if GameManager.state != GameManager.State.PLAYING:
 		return
 	var was := _run_clock

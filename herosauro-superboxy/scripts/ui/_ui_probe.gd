@@ -713,6 +713,8 @@ func _check_bounds(hud: Control) -> void:
 	_ok(not pause.intersects(boss), "pause button clears the boss banner")
 	_ok(pause.size.y >= 76.0, "pause button is a kid-sized target (%.0f px)" % pause.size.y)
 	var toast := Rect2(hud._toast.position, hud._toast.size)
+	_ok(not toast.intersects(read) and not toast.intersects(boss),
+		"the story toast clears the goal and the boss banner")
 
 	for pid: int in hud._heroes:
 		var panel: HeroPanel = hud._heroes[pid]
