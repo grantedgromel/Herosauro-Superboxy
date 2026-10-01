@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/levels/pandas/pandas_level.gd" id="1_pandas"]
+
+[node name="PandasLevel" type="Node3D"]
+script = ExtResource("1_pandas")
