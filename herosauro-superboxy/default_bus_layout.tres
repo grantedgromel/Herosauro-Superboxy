@@ -27,6 +27,15 @@
 ;
 ; 40 ms release on both: fast enough not to hold the tail of a shockwave down
 ; under the hit that caused it, slow enough not to modulate a 60 Hz sub.
+;
+;   Music   -7 dB, so the soundtrack sits UNDER the effects and under the
+;           narration (storybook build; it was -4). Measured with ffmpeg's
+;           EBU R128 meter: the tracks are mastered hot, -12.8 (title) to
+;           -15.8 LUFS integrated with 400 ms peaks of -9.8 to -12.2 LUFS, so at
+;           -7 dB the loudest moment of the loudest track is about -17 LUFS and
+;           the average about -20, against the storybook effects levelled to
+;           about -15. The player's music slider and every duck (pause,
+;           phase two, narration) are offsets from this, in AudioManager.
 
 [sub_resource type="AudioEffectHardLimiter" id="HardLimiter_sfx"]
 ceiling_db = -1.0
@@ -49,7 +58,7 @@ bus/1/name = &"Music"
 bus/1/solo = false
 bus/1/mute = false
 bus/1/bypass_fx = false
-bus/1/volume_db = -4.0
+bus/1/volume_db = -7.0
 bus/1/send = &"Master"
 bus/2/name = &"SFX"
 bus/2/solo = false

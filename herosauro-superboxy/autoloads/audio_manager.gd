@@ -28,8 +28,24 @@ extends Node
 ##                   whistle, a hole, then the Douro taking it. See _fall().
 ##   the splash      the water on its own, for anything else that goes in.
 ##
+## All four are BAKED: `scripts/audio/gen/bake_synth.gd` runs this code once and
+## writes the results to SYNTH_DIR, and boot loads those files (7 ms) instead of
+## synthesising (about 550 ms on a desktop, several times that in the browser).
+## The code below is still the source of truth and still the fallback.
+##
 ## Everything else is a shipped sample, re-shaped at play time (gain, pitch) but
 ## not resynthesised.
+##
+## THE STORYBOOK SOUNDS (STORY_SFX: the `play_sfx` ids ADAPTATION.md reserves,
+## plus a kid-mode hurt and an off-bridge fall) are shipped samples too, but
+## ones this stream made: `scripts/audio/gen/make_story_sfx.py` designs them
+## offline and they are committed as WAVs, so they cost nothing at boot. The
+## frequent ones come in variants. With Ajudas on, play_hurt() is an "oof", and
+## play_fall() only splashes on the bridge, where the Douro is.
+##
+## THE MIX: music sits under effects (the Music bus trim in
+## default_bus_layout.tres), the player's volume sliders are offsets from the
+## bus trims, and duck_music() pulls the soundtrack under narration.
 
 ## Sample rate of everything synthesised here. 22 050 puts Nyquist at 11 kHz,
 ## which is above the top partial of every voice in this file (the brightest is
@@ -65,6 +81,17 @@ var _play_rng := RandomNumberGenerator.new()
 
 const SFX_DIR := "res://assets/audio/sfx/"
 
+## Where `scripts/audio/gen/bake_synth.gd` writes the procedural library (the
+## roar, the fall, the splash, the twenty-one material voices and the bare
+## fallbacks), one WAV per key of synth_keys(). Boot LOADS these instead of
+## running `_build_library()`, which is half a second of DSP on a desktop and
+## several times that on the web's single WASM thread. If any one file is
+## missing the whole library is synthesised exactly as before, so a bad bake
+## costs boot time, never a sound. `_audio_probe` rebuilds the library and
+## compares it with these files sample for sample, so a voice edited without
+## re-baking fails the build.
+const SYNTH_DIR := "res://assets/audio/sfx/synth/"
+
 ## Logical name -> file. Loaded over the synthesised library, so a name missing
 ## here (or whose file is absent) keeps its procedural fallback. `dino_fire` is
 ## deliberately absent: its upload was a corrupt MP3 and it rides the synth. So
@@ -82,6 +109,51 @@ const SFX_FILES := {
 	"rock_impact": "rock_impact.wav",
 	"super_boxy_hit": "super_boxy_hit.wav",
 }
+
+## The storybook sounds (docs/story/ADAPTATION.md's reserved `play_sfx` ids,
+## plus the two kid-mode replacements below). Id -> its files; more than one
+## file is a set of VARIANTS, and `_play` never picks the same one twice running.
+##
+## Every one of these was made OFFLINE by `scripts/audio/gen/make_story_sfx.py`
+## and is committed as a mono 22 050 Hz 16-bit WAV: peak -3 dBFS, gently
+## compressed, low-passed under 8 kHz. Nothing here is synthesised at boot —
+## the web build runs on one WASM thread and the existing procedural library
+## already costs half a second there. So, unlike SFX_FILES, there is NO
+## procedural fallback: a missing file is silence, which the play_sfx contract
+## already allows ("unknown id = silent").
+##
+##   hurt_soft    what play_hurt() plays with Ajudas on: an "oof" and a boing.
+##   fall_whoosh  what play_fall() plays off the bridge: air, no river.
+const STORY_SFX := {
+	"ui_tap": ["ui_tap_1.wav", "ui_tap_2.wav", "ui_tap_3.wav"],
+	"page_turn": ["page_turn.wav"],
+	"star": ["star_1.wav", "star_2.wav", "star_3.wav"],
+	"objective_done": ["objective_done.wav"],
+	"bubble_pop": ["bubble_pop.wav"],
+	"cup_collect": ["cup_collect.wav"],
+	"goblin_hit": ["goblin_hit_1.wav", "goblin_hit_2.wav", "goblin_hit_3.wav"],
+	"goblin_giggle": ["goblin_giggle_1.wav", "goblin_giggle_2.wav", "goblin_giggle_3.wav"],
+	"ball_kick": ["ball_kick_1.wav", "ball_kick_2.wav", "ball_kick_3.wav"],
+	"rope_snap": ["rope_snap.wav"],
+	"dragon_roar": ["dragon_roar.wav"],
+	"dragon_fire": ["dragon_fire.wav"],
+	"magic_repair": ["magic_repair.wav"],
+	"panda_cheer": ["panda_cheer.wav"],
+	"suitcase": ["suitcase.wav"],
+	"hurt_soft": ["hurt_soft.wav"],
+	"fall_whoosh": ["fall_whoosh.wav"],
+}
+
+## The ids ADAPTATION.md reserves. `_audio_probe` asserts every one resolves to a
+## shipped file, so a typo in STORY_SFX fails the build instead of going quiet.
+const RESERVED_SFX := [&"ui_tap", &"page_turn", &"star", &"objective_done",
+	&"bubble_pop", &"cup_collect", &"goblin_hit", &"goblin_giggle", &"ball_kick",
+	&"rope_snap", &"dragon_roar", &"dragon_fire", &"magic_repair", &"panda_cheer",
+	&"suitcase"]
+
+## The chapter whose fall ends in the Douro. Everywhere else a hero who falls
+## out of the level gets a light whoosh and the bubble, not a splash.
+const RIVER_CHAPTER := "adamastor"
 
 ## Per-sound headroom. The shipped samples are peak-normalised to -1 dBFS, while
 ## the synthesis they replace baked its level into the generator calls. These
@@ -103,6 +175,30 @@ const SFX_GAIN_DB := {
 	"prop_hit": -7.0,
 	"prop_break": -3.0,
 	"prop_debris": -8.0,
+	# Storybook. The files all peak at -3 dBFS, so these level them by how loud
+	# each one FEELS — its loudest 100 ms, which the generator prints — to about
+	# -15 dB, a couple of dB over the soundtrack's own loudest moments once the
+	# Music bus trim is applied (default_bus_layout.tres has the numbers). A
+	# pure-tone bloop or hop is far denser than a woodblock tap at the same
+	# peak, hence the spread. The soft ones (the kid-mode hurt, the fall
+	# whoosh) sit deliberately under the rest.
+	"ui_tap": 0.0,
+	"page_turn": -2.0,
+	"star": -1.5,
+	"objective_done": -2.0,
+	"bubble_pop": -7.0,
+	"cup_collect": -2.0,
+	"goblin_hit": 0.0,
+	"goblin_giggle": -0.5,
+	"ball_kick": 0.0,
+	"rope_snap": 0.0,
+	"dragon_roar": -3.0,
+	"dragon_fire": -2.5,
+	"magic_repair": -1.0,
+	"panda_cheer": -3.5,
+	"suitcase": -6.5,
+	"hurt_soft": -3.0,
+	"fall_whoosh": -3.5,
 }
 
 ## Permanent pitch offset applied before the per-shot jitter.
@@ -143,6 +239,27 @@ const SFX_PITCH_VAR := {
 	"prop_hit": 0.10,
 	"prop_break": 0.08,
 	"prop_debris": 0.10,
+	# Storybook. Every id is listed, because `_row_for` falls back to the text
+	# before the last underscore: an unlisted `fall_whoosh` would inherit `fall`
+	# and `hurt_soft` would inherit `hurt`. The musical ones (chimes, the
+	# fanfare, the coin) stay nearly in tune; star varies by shape instead.
+	"ui_tap": 0.04,
+	"page_turn": 0.06,
+	"star": 0.012,
+	"objective_done": 0.0,
+	"bubble_pop": 0.08,
+	"cup_collect": 0.0,
+	"goblin_hit": 0.08,
+	"goblin_giggle": 0.07,
+	"ball_kick": 0.08,
+	"rope_snap": 0.05,
+	"dragon_roar": 0.03,
+	"dragon_fire": 0.04,
+	"magic_repair": 0.0,
+	"panda_cheer": 0.04,
+	"suitcase": 0.06,
+	"hurt_soft": 0.06,
+	"fall_whoosh": 0.05,
 }
 
 
@@ -181,6 +298,9 @@ const SFX_STACK_DB := -4.0
 const SFX_SOLO := {
 	"boss_roar": true,
 	"fall": true,
+	"fall_whoosh": true,
+	"dragon_roar": true,
+	"objective_done": true,
 }
 
 ## Distance attenuation for the entry points that are handed a world position.
@@ -212,6 +332,15 @@ const MUSIC_TRACKS := {
 const MUSIC_FADE := 1.6          ## default crossfade, seconds
 const MUSIC_DUCK_DB := -12.0     ## how far the Music bus drops while paused
 const MUSIC_DUCK_TIME := 0.35
+
+## Narration first. While a page or an objective is being read aloud the Music
+## bus drops this far, so the voice is never fighting the soundtrack for a
+## four-year-old's attention. Quick to go down (the first word must be clear),
+## slow to come back (so it breathes back in rather than jumping). Driven by
+## duck_music(), which the Narrator calls; see that function.
+const NARRATION_DUCK_DB := -9.0
+const NARRATION_DUCK_IN := 0.15
+const NARRATION_DUCK_OUT := 0.8
 
 ## The phase-two moment, timed against the roar rather than across it.
 ##
@@ -269,13 +398,30 @@ var _music_base_db: float = 0.0             ## the Music bus level before duckin
 var _music_tween: Tween
 var _duck_tween: Tween
 var _event_tween: Tween
+var _voice_tween: Tween
 
-## The two independent reasons the Music bus is turned down, kept apart and
-## SUMMED rather than fought over. Both used to write the bus level directly, so
+## The bus levels `default_bus_layout.tres` ships, read once at boot. They are
+## the MIX (music sits under effects), and the player's volume settings are
+## offsets from them: GameManager hands over 0 dB for "full", and writing that
+## straight onto the Music bus used to throw the mix's trim away the first time
+## a settings file existed.
+var _music_mix_db: float = 0.0
+var _sfx_mix_db: float = 0.0
+
+## The three independent reasons the Music bus is turned down, kept apart and
+## SUMMED rather than fought over. They used to write the bus level directly, so
 ## unpausing during the phase-two duck lifted the phase-two duck too, and ducking
-## for the roar while paused erased the pause duck.
+## for the roar while paused erased the pause duck. Narration is the third: a
+## pause menu opening or closing must not lift the duck under a voice.
 var _pause_duck_db: float = 0.0
 var _event_duck_db: float = 0.0
+var _voice_duck_db: float = 0.0
+var _voice_ducked: bool = false
+
+## Variant streams per STORY_SFX id that has more than one file, and the index
+## each one played last, so a run of stars never repeats the same shape.
+var _variants: Dictionary = {}
+var _last_variant: Dictionary = {}
 
 
 func _ready() -> void:
@@ -305,9 +451,14 @@ func _ready() -> void:
 
 	var bus := AudioServer.get_bus_index(MUSIC_BUS)
 	if bus >= 0:
-		_music_base_db = AudioServer.get_bus_volume_db(bus)
+		_music_mix_db = AudioServer.get_bus_volume_db(bus)
+		_music_base_db = _music_mix_db
+	var sbus := AudioServer.get_bus_index(SFX_BUS)
+	if sbus >= 0:
+		_sfx_mix_db = AudioServer.get_bus_volume_db(sbus)
 
-	_build_library()
+	if not _load_baked_library():
+		_build_library()
 	# After the synth pass, so a shipped sample wins and anything without one
 	# silently keeps its fallback.
 	_load_sfx_files()
@@ -328,7 +479,6 @@ func play_boss_slam() -> void: _play("boss_slam")
 func play_boss_hit() -> void: _play("boss_hit")
 func play_victory() -> void: _play("victory")
 func play_defeat() -> void: _play("defeat")
-func play_hurt() -> void: _play("hurt")
 func play_land() -> void: _play("land")
 func play_rock_throw() -> void: _play("rock_throw")
 func play_rock_impact() -> void: _play("rock_impact")
@@ -340,6 +490,27 @@ func play_super_boxy_hit() -> void: _play("super_boxy_hit")
 ## key it has no stream for, so a level can ship its calls ahead of the audio.
 func play_sfx(id: StringName, at: Vector3 = Vector3.INF) -> void:
 	_play(String(id), 0.0, at)
+
+
+## A hero taking a hit. With Ajudas on (the default, and the children's game)
+## it is a soft "oof" and a boing — surprised, never in pain (kid rule 6); the
+## shipped `hurt.wav` is a real cry and stays for the grown-up difficulty.
+func play_hurt() -> void:
+	_play("hurt_soft" if _kid_mode() else "hurt")
+
+
+func _kid_mode() -> bool:
+	var gm := get_node_or_null("/root/GameManager")
+	return gm != null and bool(gm.get("assists")) and _streams.has("hurt_soft")
+
+
+## The chapter being played, or the bridge when GameManager is absent (a tool
+## scene), because the bridge is the default chapter everywhere else too.
+func _chapter() -> String:
+	var gm := get_node_or_null("/root/GameManager")
+	if gm == null:
+		return RIVER_CHAPTER
+	return str(gm.get("chapter_id"))
 
 
 ## Adamastor's phase-two bellow — the biggest single moment in the fight, and
@@ -394,8 +565,15 @@ func play_prop_break(surface: int, at: Vector3 = Vector3.INF) -> void:
 ##
 ## Call it from the top of `_respawn()` in `player_base.gd`, alongside the
 ## `damage_player(FALL_PENALTY)` that is currently the only thing that happens.
+##
+## The Douro is only under the BRIDGE. A hero who tumbles out of the stadium or
+## off the panda street gets a light whoosh (and the bubble ride home), because
+## a splash there is a river that is not in the picture.
 func play_fall() -> void:
-	_play("fall")
+	if _chapter() != RIVER_CHAPTER and _streams.has("fall_whoosh"):
+		_play("fall_whoosh")
+	else:
+		_play("fall")
 
 
 ## The water on its own, for anything that goes into the Douro without falling
@@ -442,7 +620,7 @@ func _play(key: String, volume_db: float = 0.0, at: Vector3 = Vector3.INF) -> vo
 	_stack[key] = stack
 	_last_at[key] = _clock
 
-	var stream: AudioStream = _streams[key]
+	var stream: AudioStream = _pick_variant(key)
 	var idx := _take_voice(key, stream)
 	var p := _players[idx]
 	_next_player = (idx + 1) % _players.size()
@@ -471,6 +649,22 @@ func _play(key: String, volume_db: float = 0.0, at: Vector3 = Vector3.INF) -> vo
 	_voice_until[idx] = _clock + maxf(0.02, stream.get_length() / maxf(0.05, pitch))
 	if SFX_SOLO.has(key):
 		_solo_voice[key] = idx
+
+
+## The stream to play for `key`: the only one, or — for a STORY_SFX id with
+## variants — any variant except the one that played last. Drawn from the seeded
+## `_play_rng`, so a run sounds the same twice.
+func _pick_variant(key: String) -> AudioStream:
+	if not _variants.has(key):
+		return _streams[key]
+	var options: Array = _variants[key]
+	var n: int = options.size()
+	var last: int = int(_last_variant.get(key, -1))
+	var i: int = _play_rng.randi_range(0, n - 1)
+	if n > 1 and last >= 0:
+		i = (last + 1 + _play_rng.randi_range(0, n - 2)) % n
+	_last_variant[key] = i
+	return options[i]
 
 
 ## Which pooled voice `key` should use.
@@ -524,7 +718,8 @@ func stop_all_sfx() -> void:
 	_solo_voice.clear()
 
 
-## Overlay the shipped samples on top of the synthesised library.
+## Overlay the shipped samples on top of the synthesised library, then add the
+## storybook files (which have no synthesised version under them at all).
 func _load_sfx_files() -> void:
 	for key in SFX_FILES:
 		var path: String = SFX_DIR + SFX_FILES[key]
@@ -533,6 +728,21 @@ func _load_sfx_files() -> void:
 		var s := load(path) as AudioStream
 		if s != null:
 			_streams[key] = s
+
+	for key in STORY_SFX:
+		var found: Array[AudioStream] = []
+		for file in STORY_SFX[key]:
+			var path: String = SFX_DIR + str(file)
+			if not ResourceLoader.exists(path):
+				continue
+			var s := load(path) as AudioStream
+			if s != null:
+				found.append(s)
+		if found.is_empty():
+			continue
+		_streams[key] = found[0]
+		if found.size() > 1:
+			_variants[key] = found
 
 
 # --- Music API ---------------------------------------------------------------
@@ -617,30 +827,57 @@ func stop_music(fade: float = MUSIC_FADE) -> void:
 			m.stop())
 
 
-## Music bus level in dB, for an options screen.
+## The player's music volume, in dB from "full" (0 dB, GameManager's default;
+## the settings panel goes down from there). An OFFSET from the mix's own Music
+## trim, so full volume is still music sitting under the effects.
 func set_music_volume_db(db: float) -> void:
-	_music_base_db = db
+	_music_base_db = _music_mix_db + db
 	_apply_music_bus()
 
 
+## The player's effects volume, in dB from "full", on top of the SFX bus trim.
 func set_sfx_volume_db(db: float) -> void:
 	var bus := AudioServer.get_bus_index(SFX_BUS)
 	if bus >= 0:
-		AudioServer.set_bus_volume_db(bus, db)
+		AudioServer.set_bus_volume_db(bus, _sfx_mix_db + db)
 
 
-## The one place the Music bus level is written. Both ducks are offsets from the
-## user's own level and they SUM, so the pause duck and a one-shot event duck can
-## be in flight at the same time without either erasing the other.
+## The one place the Music bus level is written. All three ducks are offsets
+## from the user's own level and they SUM, so the pause duck, a one-shot event
+## duck and the narration duck can be in flight together without any of them
+## erasing another.
 func _apply_music_bus() -> void:
 	var bus := AudioServer.get_bus_index(MUSIC_BUS)
 	if bus >= 0:
-		AudioServer.set_bus_volume_db(bus, _music_base_db + _pause_duck_db + _event_duck_db)
+		AudioServer.set_bus_volume_db(bus,
+			_music_base_db + _pause_duck_db + _event_duck_db + _voice_duck_db)
+
+
+## Duck the soundtrack under NARRATION: true when a page or an objective starts
+## being read aloud, false when the reading stops or finishes. Idempotent, so
+## calling it twice either way is harmless — and a plain flag rather than a
+## count on purpose, because a count that misses one `false` leaves the music
+## quiet for the rest of the session, while a flag can at worst let it back a
+## sentence early.
+##
+## Its own channel: the pause menu opening or closing over a voice does not lift
+## this, and this does not lift the pause duck.
+func duck_music(ducked: bool) -> void:
+	if ducked == _voice_ducked:
+		return
+	_voice_ducked = ducked
+	if _voice_tween and _voice_tween.is_valid():
+		_voice_tween.kill()
+	_voice_tween = create_tween()
+	_voice_tween.tween_method(_set_voice_duck, _voice_duck_db,
+		NARRATION_DUCK_DB if ducked else 0.0,
+		NARRATION_DUCK_IN if ducked else NARRATION_DUCK_OUT)
 
 
 ## Drop the whole Music bus while paused, and lift it again on resume. Done on
 ## the bus rather than the players so a crossfade in flight is unaffected.
-func duck_music(ducked: bool) -> void:
+## Driven by GameManager.state_changed; nothing else should call it.
+func _duck_pause(ducked: bool) -> void:
 	if _duck_tween and _duck_tween.is_valid():
 		_duck_tween.kill()
 	var target: float = MUSIC_DUCK_DB if ducked else 0.0
@@ -669,6 +906,11 @@ func _set_pause_duck(db: float) -> void:
 
 func _set_event_duck(db: float) -> void:
 	_event_duck_db = db
+	_apply_music_bus()
+
+
+func _set_voice_duck(db: float) -> void:
+	_voice_duck_db = db
 	_apply_music_bus()
 
 
@@ -727,21 +969,22 @@ func _on_state_changed(state: int) -> void:
 		return
 	match state:
 		gm.State.MENU:
-			duck_music(false)
+			_duck_pause(false)
 			play_music("title")
 		gm.State.PAUSED:
-			duck_music(true)
+			_duck_pause(true)
 		gm.State.PLAYING:
 			# Covers resuming from pause; the opening track is started by
 			# game_started so a fresh match always restarts phase 1.
-			duck_music(false)
+			_duck_pause(false)
 
 
 func _on_game_started() -> void:
-	duck_music(false)
+	_duck_pause(false)
 	# A fight is the unit of reproducibility: the same run must sound the same
 	# twice, so the play-time jitter starts from the same place every time.
 	_play_rng.seed = PLAY_SEED
+	_last_variant.clear()
 	stop_all_sfx()
 	if _event_tween and _event_tween.is_valid():
 		_event_tween.kill()
@@ -956,6 +1199,35 @@ static func _surface_key(role: String, surface: int) -> String:
 
 
 # --- Synthesis -------------------------------------------------------------
+
+## Every key `_build_library()` makes. The baker writes one file per key, the
+## loader wants exactly these, and `_audio_probe` asserts the three agree.
+static func synth_keys() -> Array:
+	var keys: Array = ["jump", "dino_fire", "dino_hit", "dash", "boss_slam", "boss_hit",
+		"hurt", "land", "rock_throw", "rock_impact", "super_boxy_hit", "victory", "defeat",
+		"boss_roar", "fall", "splash"]
+	for s in ToonFactory.Surface.size():
+		for role in ["prop_hit", "prop_break", "prop_debris"]:
+			keys.append(_surface_key(role, s))
+	return keys
+
+
+## The baked library, all or nothing: a half-loaded library would mix two
+## generations of the same voices.
+func _load_baked_library() -> bool:
+	var loaded: Dictionary = {}
+	for k in synth_keys():
+		var path: String = SYNTH_DIR + str(k) + ".wav"
+		if not ResourceLoader.exists(path):
+			return false
+		var s := load(path) as AudioStream
+		if s == null:
+			return false
+		loaded[k] = s
+	for k in loaded:
+		_streams[k] = loaded[k]
+	return true
+
 
 func _build_library() -> void:
 	_synth_rng.seed = SYNTH_SEED
