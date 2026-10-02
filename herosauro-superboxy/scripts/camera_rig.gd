@@ -131,6 +131,8 @@ var _arm: SpringArm3D
 var _yaw: float = 0.0
 var _pitch: float = 0.0
 var _focus: Vector3 = Vector3(0.0, 2.0, 0.0)
+## The last _focus that was finite; _heal_non_finite restores it.
+var _good_focus: Vector3 = Vector3(0.0, 2.0, 0.0)
 var _arm_length: float = 0.0
 var _dist_extra: float = 0.0
 var _dist_extra_target: float = 0.0
@@ -368,9 +370,14 @@ func _heal_non_finite(heroes: Array[Node3D]) -> void:
 	if _focus.is_finite() and is_finite(_yaw) and is_finite(_pitch) and is_finite(_dist_extra) \
 			and is_finite(_dist_extra_target) and is_finite(_group_distance) \
 			and _shake_offset.is_finite() and is_finite(_shake_roll):
+		_good_focus = _focus
 		return
 	push_warning("CameraRig: non-finite state, re-framing")
-	_focus = heroes[0].global_position if not heroes.is_empty() else Vector3(0.0, 2.0, 0.0)
+	# Back to where it last looked, not a jump cut to whichever hero is listed first.
+	if _good_focus.is_finite():
+		_focus = _good_focus
+	else:
+		_focus = heroes[0].global_position if not heroes.is_empty() else Vector3(0.0, 2.0, 0.0)
 	if not is_finite(_yaw):
 		_yaw = 0.0
 	if not is_finite(_pitch):
