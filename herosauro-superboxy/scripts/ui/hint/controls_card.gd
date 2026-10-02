@@ -58,6 +58,9 @@ var done: Array[bool] = [false, false, false, false]
 var spoken_line: String = ""
 
 var _open := false
+## The humans at the machine, cached on begin() so the per-frame input read
+## allocates nothing.
+var _humans := PackedInt32Array()
 var _clock := 0.0
 var _dismiss_at := -1.0
 var _spoke := false
@@ -113,6 +116,10 @@ func begin() -> void:
 	if bool(UIProgress.get_pref(key, false)):
 		return
 	UIProgress.set_pref(key, true)
+	_humans.clear()
+	for pid in GameManager.active_player_ids():
+		if not GameManager.is_ai(pid):
+			_humans.append(pid)
 	_open = true
 	visible = true
 	modulate.a = 0.0
@@ -184,9 +191,7 @@ func _physics_process(_delta: float) -> void:
 	if not _open or GameManager.state != GameManager.State.PLAYING:
 		return
 	var changed := false
-	for pid in GameManager.active_player_ids():
-		if GameManager.is_ai(pid):
-			continue
+	for pid in _humans:
 		changed = _mark(Act.MOVE, InputManager.get_move_vector(pid) != Vector2.ZERO) or changed
 		changed = _mark(Act.JUMP, InputManager.is_jump_just_pressed(pid)) or changed
 		changed = _mark(Act.HIT, InputManager.is_attack_just_pressed(pid)) or changed

@@ -31,6 +31,7 @@ const BOSS_LIFT := Vector3(0.0, 5.5, 0.0)
 ## The edge arrows keep clear of the HUD chrome: the goal and banner on top,
 ## the hero panels underneath.
 const INSET := Vector2(96.0, 176.0)
+const TOUCH_BOTTOM := 290.0
 const HOP := 16.0
 ## The arrow's resting size: big enough to read from the sofa.
 const SIZE := 1.2
@@ -54,6 +55,7 @@ var _moved := false
 var _ground := Vector2.ZERO
 var _ring := false
 var _lift := Vector3.ZERO
+var _humans := PackedInt32Array()
 var _arrow: HintArrow
 var _pop: Tween
 var _voice: Narrator
@@ -88,6 +90,7 @@ func _on_state(_s: int) -> void:
 
 ## Back to the bottom of the ladder.
 func reset() -> void:
+	_cache_humans()
 	_idle = 0.0
 	_spoke = false
 	_hide()
@@ -128,11 +131,18 @@ func _hide() -> void:
 
 func _physics_process(_delta: float) -> void:
 	# Read here, not in _process: a virtual press is a one-physics-frame event.
-	for pid in GameManager.active_player_ids():
-		if GameManager.is_ai(pid):
-			continue
+	# The human roster is cached (reset() runs on every game_started), so this
+	# allocates nothing per frame.
+	for pid in _humans:
 		if InputManager.get_move_vector(pid) != Vector2.ZERO:
 			_moved = true
+
+
+func _cache_humans() -> void:
+	_humans.clear()
+	for pid in GameManager.active_player_ids():
+		if not GameManager.is_ai(pid):
+			_humans.append(pid)
 
 
 func _process(delta: float) -> void:
@@ -151,6 +161,9 @@ func step(delta: float) -> void:
 		return
 	_idle += delta
 	if _idle < SHOW_AT:
+		return
+	if _bubbled():
+		_hide()
 		return
 	var goal := _goal()
 	if not goal.is_finite():
@@ -173,13 +186,19 @@ func _eligible() -> bool:
 		return false
 	if toast != null and toast.is_speaking():
 		return false
+	return true
+
+
+## A human hero floating in a bubble cannot go anywhere: no arrow. Asked only
+## once the arrow is due, so the idle frames never walk the players group.
+func _bubbled() -> bool:
 	for p in get_tree().get_nodes_in_group("players"):
 		var pid := int(p.get("player_id")) if "player_id" in p else 1
 		if GameManager.is_ai(pid):
 			continue
 		if p.has_method("is_bubbled") and bool(p.is_bubbled()):
-			return false
-	return true
+			return true
+	return false
 
 
 func _goal() -> Vector3:
@@ -228,7 +247,11 @@ func _place(goal: Vector3) -> void:
 	var behind := cam.is_position_behind(goal)
 	if behind:
 		p = centre - (p - centre)
-	var box := Rect2(INSET, view - INSET * 2.0)
+	# With the touch overlay up, the bottom band belongs to the thumbs.
+	var bottom := INSET.y
+	if card != null and card.touch != null and card.touch.is_shown():
+		bottom = TOUCH_BOTTOM
+	var box := Rect2(INSET, view - Vector2(INSET.x * 2.0, INSET.y + bottom))
 	var hop := 0.0 if GameManager.reduce_motion else absf(sin(_t * PI * HOP_HZ)) * HOP
 	_on_screen = not behind and box.grow(40.0).has_point(p)
 	var ring := _on_screen and _lift != Vector3.ZERO
@@ -245,8 +268,11 @@ func _place(goal: Vector3) -> void:
 	if d.length_squared() < 1.0:
 		d = Vector2.DOWN
 	d = d.normalized()
-	var half := box.size * 0.5
-	var t := minf(half.x / maxf(absf(d.x), 0.0001), half.y / maxf(absf(d.y), 0.0001))
+	# Where the ray from the screen centre leaves the box (the box need not be
+	# centred on it once the touch band is reserved).
+	var tx := ((box.end.x if d.x > 0.0 else box.position.x) - centre.x) / d.x if absf(d.x) > 0.0001 else INF
+	var ty := ((box.end.y if d.y > 0.0 else box.position.y) - centre.y) / d.y if absf(d.y) > 0.0001 else INF
+	var t := maxf(minf(tx, ty), 0.0)
 	_arrow.rotation = d.angle()
 	_arrow.position = centre + d * (t - hop)
 
