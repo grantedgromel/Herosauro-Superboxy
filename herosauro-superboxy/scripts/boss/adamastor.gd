@@ -19,6 +19,10 @@ signal attack_telegraphed(kind: StringName, lead: float)
 ## and the matching attack_telegraphed IS the honesty of the tell, and the probe
 ## fails the build when it drifts.
 signal attack_impact(kind: StringName)
+## Fired once, on the frame the beaten giant hits the Douro, with the point on
+## the water where he went in. Node-local like the two above: the boss probe and
+## the splash shot are the only listeners.
+signal splashed(at: Vector3)
 
 const GRAVITY := 30.0
 
@@ -53,7 +57,7 @@ const SLAM_OFFSET := Vector3(-4.2, 1.2, 0.0)
 ## that requests it — both are impacts, only one of them is a hit.
 const SLAM_HIT_STOP := 0.09
 ## The killing blow. A boss death is the biggest impact in the run and it gets
-## the biggest freeze; the corpse supplies the audio transient when it lands.
+## the biggest freeze; the splash brings the second transient when he lands.
 const DEATH_HIT_STOP := 0.16
 
 # --- Push-out ---------------------------------------------------------------
@@ -77,18 +81,62 @@ const THREAT_REACH := 5.0
 ## score term reads as "who has hurt me most this fight".
 const THREAT_COMBO_FULL := 6.0
 
-# --- Death ------------------------------------------------------------------
-const CORPSE_MASS := 900.0
-## The corpse is NARROWER than the gameplay volume, and it has to be. Toppling a
-## box means pivoting on its bottom edge, which costs m*g*dh where dh is how far
-## the centre of mass has to climb to get over that edge. At the full 5 m width
-## that is 0.65 m — about 17.5 kJ — and measured headless, a body spun at
-## 4 rad/s reaches 11 degrees, rocks, and stands back up. Narrowing to 2.8 m
-## (which is closer to what the model actually occupies anyway) drops the barrier
-## to ~6 kJ and the same spin clears it three times over.
+# --- Death: over the parapet and into the Douro ------------------------------
+## The book ends the fight "o Adamastor perdeu o equilíbrio e caiu de volta no rio
+## Douro com um 'SPLASH' monumental!", so that is what the killing blow does: he
+## staggers back, dizzy (never hurt), teeters on the rail, goes over it in a
+## cartoon arc and vanishes into the river under a column of white water. There
+## is no body: a felled giant lying on the deck reads, to a four-year-old, as a
+## body lying there. Scripted rather than simulated, so the beat lands on time
+## (the outro waits game_over.gd's POSE_WAIT, 2 s, then turns the page).
+##
+## The River plane in bridge_arena.tscn (river_life.gd WATER_Y).
+const WATER_Y := -15.0
+## Which parapet. Both overlook open water here: the boss arena (x -14..24) sits
+## well inside the channel between the quay walls (river_life.gd CHANNEL_HALF,
+## |x| < 44) and the River plane runs hundreds of metres past either rail. +Z is
+## bridge_arena.gd's WRECK_HANG_SIDE, the side the signature deck view puts on
+## the right of frame and the one with nothing modelled behind it, so it is the
+## default; he goes over the -Z rail only when the blow clearly came from the +Z
+## side, so he always falls AWAY from the punch.
+const RIVER_SIDE := 1.0
+## Where his shins catch the iron parapet: just inboard of bridge_arena.gd's
+## WALKWAY_OUTER (6.55), a hair above its HANDRAIL_TOP (3.50) once he stands on
+## the footway (WALKWAY_TOP 2.13). He pivots over the rail on that point.
+const RAIL_Z := 6.4
+const WALKWAY_Y := 2.13
+const SHIN_HEIGHT := 1.5
+## The beats, in seconds of game time after the killing blow (the 0.16 s
+## hit-stop comes on top). Splash at 1.28 s, so its column is up before the
+## outro turns the page.
+const STAGGER_TIME := 0.36
+const TEETER_TIME := 0.20
+const TIP_TIME := 0.18
+const FLIGHT_TIME := 0.54
+const SINK_TIME := 0.50
+## Over the rail he is lying back at this angle; he lands a little past flat, a
+## back-flop, which is the biggest splash there is.
+const TIP_ANGLE := deg_to_rad(95.0)
+const LAND_ANGLE := deg_to_rad(112.0)
+## The cartoon arc: how far out past the rail he travels and how high he pops
+## before the drop. 5 m of pop carries his feet ~2 m over the handrail.
+const FALL_OUT := 7.0
+const FALL_HOP := 5.0
+## How much deeper his centre goes after the splash before he is gone.
+const SINK_DEPTH := 10.0
+const SPLASH_SHAKE := 0.8
+const SPLASH_SHAKE_TIME := 0.7
+## "a beat later": the chapter's done-chime after the water.
+const CHIME_BEAT := 0.35
+## Kept for the wreck geometry sized against it (bridge_arena.gd GIANT_HALF_WIDTH,
+## _wreck_probe.gd): what the model actually occupies, standing.
 const CORPSE_SIZE := Vector3(2.8, 8.6, 2.4)
-const CORPSE_CENTRE_Y := 4.3
-const TOPPLE_SPIN := 5.0
+## Dizzy stars over his head while he staggers.
+const STAR_COUNT := 5
+const STAR_RING := 1.7
+const STAR_HEIGHT := 9.4
+
+enum Fall { NONE, STAGGER, TEETER, TIP, FLIGHT, SINK, GONE }
 
 # Compact arena (single source of truth — main.gd's BOSS_SPAWN matches SPAWN).
 const SPAWN := Vector3(16.0, 2.0, 0.0)
@@ -124,7 +172,19 @@ var _right_arm: Node3D = null
 var _arm_base_y: float = 0.0
 
 var _dead: bool = false
-var _corpse: AdamastorCorpse = null
+# The fall into the river (see the Death constants).
+var _fall: Fall = Fall.NONE
+var _fall_t: float = 0.0
+var _fall_side: float = RIVER_SIDE
+var _fall_from := Vector3.ZERO
+var _fall_rail := Vector3.ZERO
+var _fall_yaw0: float = 0.0
+var _fall_yaw1: float = 0.0
+var _fall_centre := Vector3.ZERO
+var _fall_since_splash: float = -1.0
+var _chimed: bool = false
+var _stars: MultiMeshInstance3D = null
+var _star_t: float = 0.0
 var _nudge: Vector3 = Vector3.ZERO
 ## Whole-body squash and stretch, used by the phase-two roar. Held separately
 ## from the attack tween so killing one never leaves the giant the wrong shape.
@@ -159,6 +219,9 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	var active := not _dead and GameManager.state == GameManager.State.PLAYING
 	_sync_hitboxes(active)
+	if _fall != Fall.NONE:
+		_tick_fall(delta)
+		return
 
 	if not is_on_floor():
 		velocity.y -= GRAVITY * delta
@@ -541,12 +604,13 @@ func nudge(world_dir: Vector3, amount: float) -> void:
 
 func reset_boss() -> void:
 	_dead = false
-	# Hand the model back before anything else touches it: after a death it is
-	# parented to the corpse, not to us.
-	if _corpse and is_instance_valid(_corpse):
-		_corpse.dismiss()
-	_corpse = null
-	collision_layer = PhysicsLayers.BOSS   # a previous _die() zeroed it
+	_fall = Fall.NONE
+	_fall_since_splash = -1.0
+	visible = true
+	if _stars:
+		_stars.visible = false
+	collision_layer = PhysicsLayers.BOSS   # a previous _die() zeroed both
+	collision_mask = PhysicsLayers.WORLD
 	global_position = SPAWN
 	rotation = Vector3.ZERO
 	velocity = Vector3.ZERO
@@ -555,7 +619,8 @@ func reset_boss() -> void:
 	if _model:
 		_model.position = Vector3.ZERO
 		_model.rotation = Vector3.ZERO
-		_model.scale = Vector3.ONE     # a roar interrupted by a restart left him coiled
+		_model.scale = Vector3.ONE     # a roar, or a dizzy wobble, left him squashed
+		_model.visible = true
 	if _anim:
 		_anim.active = true
 	if _contact_box:
@@ -622,32 +687,29 @@ func _on_phase_changed(phase: int) -> void:
 		_fsm.enter_phase_two()
 
 
-## Hand the body to physics and let it fall. See adamastor_corpse.gd for why
-## this is a whole-body topple and not a skeletal ragdoll.
+## Beaten: stagger back, lose his balance over the rail, fall into the Douro.
+## See the Death constants for the beats and for why there is no corpse.
 func _die() -> void:
 	_dead = true
 	if _fsm:
 		_fsm.stop()
-	if _anim:
-		# active = false, not pause(): the mixer must stop writing bone poses
-		# entirely, or it keeps re-posing the mesh inside the falling corpse.
-		_anim.active = false
-	# The five parts for the last hit of the fight: the corpse carries the FX and
-	# the audio transient when it lands, GameManager.game_over drives the UI, and
-	# these two are the camera and the freeze.
+	# The camera and the freeze for the last hit of the fight; the splash brings
+	# the second punctuation and GameManager.game_over drives the UI.
 	GameManager.request_shake(0.5, 0.5)
 	GameManager.hit_stop(DEATH_HIT_STOP)
+	# Nothing on him can touch a hero from here on: no layer (heroes stop
+	# colliding with him), no mask (he moves by script, not by the solver), every
+	# hitbox disarmed, and _physics_process never reaches _shove_players again.
 	collision_layer = 0
+	collision_mask = 0
 	_sync_hitboxes(false)
 	_kill_pose_tween()
-	if _model == null:
-		return
+	velocity = Vector3.ZERO
+	_nudge = Vector3.ZERO
 
-	# Fall away from whoever landed the killing blow, carrying whatever
-	# horizontal momentum it already had. A downed hero cannot have thrown it, so
-	# a standing hero is preferred; the include_downed fallback only matters if
-	# the last blow and the last knockdown landed in the same frame.
-	var away := Vector3.LEFT
+	# Backwards is away from whoever landed the killing blow. A downed hero
+	# cannot have thrown it, so a standing hero is preferred.
+	var away := Vector3.RIGHT
 	var killer := nearest_player()
 	if killer == null:
 		killer = nearest_player(true)
@@ -656,13 +718,194 @@ func _die() -> void:
 		to.y = 0.0
 		if to.length() > 0.01:
 			away = to.normalized()
+	_fall_side = RIVER_SIDE
+	if absf(away.z) > 0.35:
+		_fall_side = signf(away.z)
 
-	# Angular velocity w satisfying w x UP = away, so the giant's head goes over
-	# in the direction it is falling instead of spinning on the spot.
-	var spin := Vector3.UP.cross(away) * TOPPLE_SPIN
-	_corpse = AdamastorCorpse.topple(self, _model, CORPSE_SIZE, CORPSE_CENTRE_Y,
-		Vector3(velocity.x, 0.0, velocity.z), away * 1.8 + Vector3.UP * 1.5,
-		spin, CORPSE_MASS)
+	_fall_from = global_position
+	_fall_rail = Vector3(
+		clampf(global_position.x + away.x * 2.5, ARENA_X_MIN, ARENA_X_MAX),
+		WALKWAY_Y + SHIN_HEIGHT, _fall_side * RAIL_Z)
+	# Back to the river, face to the heroes: the model faces -X at yaw 0 and
+	# face_toward()'s atan2(dir.z, -dir.x) aims it along dir = (0, 0, -side).
+	_fall_yaw0 = rotation.y
+	_fall_yaw1 = atan2(-_fall_side, 0.0)
+	_fall = Fall.STAGGER
+	_fall_t = 0.0
+	_fall_since_splash = -1.0
+	_chimed = false
+	if _anim and _clip_walk != "":
+		# His own walk, run backwards and quick: the stumbling steps of a dizzy
+		# giant backing into the rail.
+		_anim.active = true
+		_anim.play(_clip_walk, 0.15, -1.35)
+	_show_stars()
+
+
+## Which parapet the beaten giant goes over: +1 (+Z) or -1 (-Z).
+func fall_side() -> float:
+	return _fall_side
+
+
+func is_falling() -> bool:
+	return _fall != Fall.NONE and _fall != Fall.GONE
+
+
+func _tick_fall(delta: float) -> void:
+	_fall_t += delta
+	var side := _fall_side
+	var yaw := _fall_yaw1
+	match _fall:
+		Fall.STAGGER:
+			var u := clampf(_fall_t / STAGGER_TIME, 0.0, 1.0)
+			var e := u * u * (3.0 - 2.0 * u)
+			var origin := _fall_from.lerp(_fall_rail - Vector3(0.0, SHIN_HEIGHT, 0.0), e)
+			# Three stumbling steps.
+			origin.y += 0.35 * absf(sin(3.0 * PI * u))
+			yaw = lerp_angle(_fall_yaw0, _fall_yaw1, minf(1.0, u * 1.6))
+			var sway := 0.20 * sin(TAU * 2.4 * _fall_t) * (0.4 + 0.6 * u)
+			_wobble(_fall_t, 1.0)
+			_set_pose(origin, yaw, 0.0, sway)
+			if u >= 1.0:
+				_next_beat(Fall.TEETER)
+		Fall.TEETER:
+			# Rocking on the rail: back, forward, further back...
+			var u := clampf(_fall_t / TEETER_TIME, 0.0, 1.0)
+			var tilt := 0.42 * u + 0.18 * sin(TAU * u)
+			var sway := 0.20 * sin(TAU * 2.4 * (_fall_t + STAGGER_TIME))
+			_wobble(_fall_t + STAGGER_TIME, 1.4)
+			_set_pose(_over_rail(tilt, side, yaw, sway), yaw, side * tilt, sway)
+			if u >= 1.0:
+				_next_beat(Fall.TIP)
+		Fall.TIP:
+			# ...and over: accelerating, pivoting on his shins at the handrail.
+			var u := clampf(_fall_t / TIP_TIME, 0.0, 1.0)
+			var tilt := lerpf(0.42, TIP_ANGLE, u * u)
+			var sway := 0.20 * sin(TAU * 2.4 * (_fall_t + STAGGER_TIME + TEETER_TIME)) * (1.0 - u)
+			_wobble(_fall_t + STAGGER_TIME + TEETER_TIME, 1.8)
+			_set_pose(_over_rail(tilt, side, yaw, sway), yaw, side * tilt, sway)
+			if u >= 1.0:
+				_fall_centre = global_transform * Vector3(0.0, BODY_CENTRE_Y, 0.0)
+				if _anim:
+					_anim.pause()
+				if _stars:
+					_stars.visible = false
+				_next_beat(Fall.FLIGHT)
+		Fall.FLIGHT:
+			# Out and up off the rail, then down into the Douro: fast out, a
+			# little cartoon pop, and the plunge, inside the time the beat has.
+			var u := clampf(_fall_t / FLIGHT_TIME, 0.0, 1.0)
+			var tilt := lerpf(TIP_ANGLE, LAND_ANGLE, u)
+			var drop := _fall_centre.y - (WATER_Y + 0.5)
+			var c := _fall_centre
+			c.z += side * FALL_OUT * (1.0 - (1.0 - u) * (1.0 - u))
+			c.y += FALL_HOP * sin(PI * u) - drop * u * u
+			_wobble(_fall_t, 2.2)
+			_set_pose(_centred_at(c, yaw, side * tilt), yaw, side * tilt, 0.0)
+			if u >= 1.0:
+				_fall_centre = c
+				_splash(c)
+				_next_beat(Fall.SINK)
+		Fall.SINK:
+			var u := clampf(_fall_t / SINK_TIME, 0.0, 1.0)
+			var tilt := lerpf(LAND_ANGLE, LAND_ANGLE + 0.35, u)
+			var c := _fall_centre + Vector3.DOWN * SINK_DEPTH * u * u
+			_set_pose(_centred_at(c, yaw, side * tilt), yaw, side * tilt, 0.0)
+			if u >= 1.0:
+				# Under the water and gone: no body anywhere.
+				visible = false
+				_next_beat(Fall.GONE)
+		Fall.GONE:
+			pass
+	_spin_stars(delta)
+	if _fall_since_splash >= 0.0:
+		_fall_since_splash += delta
+		if not _chimed and _fall_since_splash >= CHIME_BEAT:
+			_chimed = true
+			AudioManager.play_sfx(&"objective_done")
+
+
+func _next_beat(beat: Fall) -> void:
+	_fall = beat
+	_fall_t = 0.0
+
+
+## Feet such that his shin sits on the rail point while he leans `tilt` back.
+func _over_rail(tilt: float, side: float, yaw: float, sway: float) -> Vector3:
+	return _fall_rail - _fall_basis(yaw, side * tilt, sway) * Vector3(0.0, SHIN_HEIGHT, 0.0)
+
+
+## Feet such that his body centre is at `centre`.
+func _centred_at(centre: Vector3, yaw: float, lean: float) -> Vector3:
+	return centre - _fall_basis(yaw, lean, 0.0) * Vector3(0.0, BODY_CENTRE_Y, 0.0)
+
+
+## Lean is about world X (positive tips the head toward +Z, out over the +Z
+## rail), sway about world Z (a dizzy side-to-side roll), both on top of yaw.
+static func _fall_basis(yaw: float, lean: float, sway: float) -> Basis:
+	return Basis(Vector3.RIGHT, lean) * Basis(Vector3.BACK, sway) * Basis(Vector3.UP, yaw)
+
+
+func _set_pose(origin: Vector3, yaw: float, lean: float, sway: float) -> void:
+	global_transform = Transform3D(_fall_basis(yaw, lean, sway), origin)
+
+
+## Squash and stretch: a dazed, rubbery wobble, nothing that looks like pain.
+func _wobble(t: float, rate: float) -> void:
+	if _model == null:
+		return
+	var w := sin(TAU * 1.8 * rate * t)
+	_model.scale = Vector3(1.0 + 0.06 * w, 1.0 - 0.06 * w, 1.0 + 0.06 * w)
+
+
+func _splash(centre: Vector3) -> void:
+	var at := Vector3(centre.x, WATER_Y, centre.z)
+	WaterSplash.spawn(self, at, 1.0)
+	AudioManager.play_splash(at)
+	GameManager.request_shake(SPLASH_SHAKE, SPLASH_SHAKE_TIME)
+	_fall_since_splash = 0.0
+	splashed.emit(at)
+
+
+# --- Dizzy stars ----------------------------------------------------------------
+
+## A ring of little gold stars over his head while he staggers: the cartoon sign
+## for "dizzy". One MultiMesh draw call, built on the first death and reused.
+func _show_stars() -> void:
+	if _stars == null:
+		var mesh := SphereMesh.new()
+		mesh.radius = 0.32
+		mesh.height = 0.64
+		mesh.radial_segments = 8
+		mesh.rings = 4
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = mesh
+		mm.instance_count = STAR_COUNT
+		_stars = MultiMeshInstance3D.new()
+		_stars.name = "DizzyStars"
+		_stars.multimesh = mm
+		# Cached and shared; never mutated here.
+		_stars.material_override = ToonFactory.glow(Color(1.0, 0.85, 0.25), 1.6)
+		_stars.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_stars.custom_aabb = AABB(Vector3(-3.0, -1.0, -3.0), Vector3(6.0, 2.0, 6.0))
+		_stars.position = Vector3(0.0, STAR_HEIGHT, 0.0)
+		add_child(_stars)
+	_star_t = 0.0
+	_stars.visible = true
+	_spin_stars(0.0)
+
+
+func _spin_stars(delta: float) -> void:
+	if _stars == null or not _stars.visible:
+		return
+	_star_t += delta
+	var mm := _stars.multimesh
+	for i in STAR_COUNT:
+		var a := TAU * float(i) / float(STAR_COUNT) + _star_t * 5.0
+		var p := Vector3(cos(a) * STAR_RING, 0.25 * sin(a * 2.0 + _star_t * 3.0), sin(a) * STAR_RING)
+		var k := 0.8 + 0.25 * sin(_star_t * 9.0 + float(i))
+		mm.set_instance_transform(i, Transform3D(Basis.from_scale(Vector3.ONE * k), p))
 
 
 # --- Clamp -----------------------------------------------------------------

@@ -76,6 +76,11 @@ func _process(delta: float) -> void:
 
 
 func _run() -> void:
+	# `-- --only=river` runs just the finale, for iterating on it without the
+	# minutes of measured fighting the other checks need.
+	if OS.get_cmdline_user_args().has("--only=river"):
+		await _check_falls_into_the_river()
+		return
 	await _check_tuning_ladder()
 	await _check_downed_is_never_targeted()
 	await _check_threat_focus()
@@ -85,6 +90,7 @@ func _run() -> void:
 	await _check_roar()
 	await _check_damage_share()
 	await _check_kid_tuning()
+	await _check_falls_into_the_river()
 
 
 # --- Tuning ladder ----------------------------------------------------------
@@ -617,6 +623,85 @@ func _burst_sizes(kind: StringName) -> Array[int]:
 
 
 # --- Harness ---------------------------------------------------------------
+
+# --- The finale ---------------------------------------------------------------
+
+## The book's ending: "o Adamastor perdeu o equilíbrio e caiu de volta no rio
+## Douro com um 'SPLASH' monumental!" After the killing blow the giant has to end
+## up IN the river (the River plane is at y = -15), the splash has to have fired,
+## and nothing of him may be left lying on the deck. On the old corpse topple the
+## body node stayed on the deck and a felled AdamastorCorpse lay there, so all
+## three fail. Names, not class references, so this compiles against either.
+func _check_falls_into_the_river() -> void:
+	await _to_menu()
+	await _start(2, 1)
+	await _settle(30)
+	var boss := _boss()
+	var a := _hero(1)
+	var b := _hero(2)
+	if boss == null or a == null or b == null:
+		_ok(false, "finale: a co-op fight is running")
+		return
+	a.global_position = boss.global_position + Vector3(-5.0, 0.5, -1.0)
+	await _settle(2)
+	var splashes := [0]
+	var on_splash := func(_at: Vector3) -> void: splashes[0] += 1
+	if boss.has_signal(&"splashed"):
+		boss.connect(&"splashed", on_splash)
+	var hp_before := int(GameManager.player_health[2])
+	GameManager.damage_boss(int(GameManager.boss_health), 1)
+	await get_tree().physics_frame
+	# Stand the partner squarely on his way to the rail: the stagger and the fall
+	# must go through him without a shove or a scratch.
+	var side := float(boss.call(&"fall_side")) if boss.has_method(&"fall_side") else 1.0
+	b.global_position = Vector3(boss.global_position.x, boss.global_position.y + 0.5, side * 4.0)
+	var reached := -1.0
+	var harmless := true
+	var splash_node := false
+	var splash_z := 0.0
+	for i in int(3.0 * TICK):
+		await get_tree().physics_frame
+		for hb in boss.find_children("*", "Hitbox", true, false):
+			if hb.has_method("is_armed") and hb.is_armed():
+				harmless = false
+		if boss.collision_layer != 0 or boss.collision_mask != 0:
+			harmless = false
+		if reached < 0.0 and boss.global_position.y < -10.0:
+			reached = float(i) / TICK
+			splash_z = absf(boss.global_position.z)
+		var root := get_tree().get_first_node_in_group("spawn_root")
+		if root != null and not root.find_children("WaterSplash*", "", false, false).is_empty():
+			splash_node = true
+	if boss.has_signal(&"splashed"):
+		boss.disconnect(&"splashed", on_splash)
+	var corpse := get_tree().root.find_child("AdamastorCorpse", true, false)
+	print("  -- the fall: below y=-10 after %.2f s at |z| %.1f, %d splash(es), splash fx seen %s"
+		% [reached, splash_z, splashes[0], str(splash_node)])
+	_ok(reached >= 0.0 and reached <= 3.0,
+		"after the killing blow the giant ends up in the Douro, below the deck (%.2f s)" % reached)
+	_ok(reached < 0.0 or splash_z > 9.0,
+		"...over the side, clear of the deck edge (|z| %.1f)" % splash_z)
+	_ok(splashes[0] == 1 and splash_node, "...with exactly one monumental splash (%d)" % splashes[0])
+	_ok(corpse == null and not _visible_in_tree(boss),
+		"...and no body is left lying anywhere")
+	_ok(harmless, "nothing on the falling giant can hit or shove a hero")
+	_ok(int(GameManager.player_health[2]) == hp_before, "the partner in his path is unhurt")
+	# Play Again hands the bridge its giant back, standing, at his spawn.
+	await _to_menu()
+	await _start(2, 1)
+	await _settle(10)
+	boss = _boss()
+	_ok(boss != null and _visible_in_tree(boss) and absf(boss.global_position.y - 2.0) < 0.6
+		and absf(boss.global_position.z) < 5.5,
+		"a new run puts Adamastor back on the deck")
+
+
+func _visible_in_tree(node: Node3D) -> bool:
+	if not node.is_visible_in_tree():
+		return false
+	var model := node.get_node_or_null("Model") as Node3D
+	return model != null and model.is_visible_in_tree()
+
 
 ## Keep both heroes on their feet. The measurements above run for tens of
 ## seconds under a giant who is genuinely trying to kill them, and a knockdown
