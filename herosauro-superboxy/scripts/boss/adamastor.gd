@@ -107,12 +107,12 @@ const RAIL_Z := 6.4
 const WALKWAY_Y := 2.13
 const SHIN_HEIGHT := 1.5
 ## The beats, in seconds of game time after the killing blow (the 0.16 s
-## hit-stop comes on top). Splash at 1.38 s, so its column is up before the
+## hit-stop comes on top). Splash at 1.28 s, so its column is up before the
 ## outro turns the page.
-const STAGGER_TIME := 0.40
+const STAGGER_TIME := 0.36
 const TEETER_TIME := 0.20
 const TIP_TIME := 0.18
-const FLIGHT_TIME := 0.60
+const FLIGHT_TIME := 0.54
 const SINK_TIME := 0.50
 ## Over the rail he is lying back at this angle; he lands a little past flat, a
 ## back-flop, which is the biggest splash there is.

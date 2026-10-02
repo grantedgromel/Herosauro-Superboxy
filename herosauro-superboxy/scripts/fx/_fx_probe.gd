@@ -134,6 +134,7 @@ func _run() -> void:
 	await _check_shards_settle()
 	await _check_shockwave()
 	await _check_rock_arc()
+	await _check_water_splash()
 	_drop_root()
 	await _check_across_a_fight()
 
@@ -697,6 +698,41 @@ func _collect(node: Node, out: Array[ImpactFX]) -> void:
 		out.append(node as ImpactFX)
 	for c in node.get_children():
 		_collect(c, out)
+
+
+# --- The giant's splash ---------------------------------------------------------
+
+## The finale's WaterSplash: seeded from where it lands (the same point throws the
+## same spray, twice), two draw calls whatever it is doing, it actually rises
+## above the deck, and it cleans itself up.
+func _check_water_splash() -> void:
+	var at := Vector3(10.0, -15.0, 16.0)
+	var a := WaterSplash.spawn(_root, at)
+	var b := WaterSplash.spawn(_root, at)
+	_ok(a != null and b != null and a.get_parent() == _root, "a splash lands in the spawn root")
+	if a == null or b == null:
+		return
+	await _advance(0.45)
+	var draws := a.find_children("*", "MultiMeshInstance3D", false, false)
+	_ok(draws.size() == 2 and a.find_children("*", "MeshInstance3D", false, false).is_empty(),
+		"the whole splash is two MultiMesh draw calls (%d)" % draws.size())
+	var same := a.spray_count() == b.spray_count() and a.spray_count() > 0
+	for i in a.spray_count():
+		if not a.spray_launch(i).is_equal_approx(b.spray_launch(i)):
+			same = false
+	var c := WaterSplash.spawn(_root, at + Vector3(3.0, 0.0, 0.0))
+	var differs := false
+	for i in c.spray_count():
+		if not c.spray_launch(i).is_equal_approx(a.spray_launch(i)):
+			differs = true
+	_ok(same and differs,
+		"the spray is seeded from where it lands: same point, same spray; elsewhere, other spray")
+	# The river is at -15 and the deck top at 2, so it must clear 17 m to be seen.
+	_ok(a.column_height() > 17.0,
+		"the column stands above the deck (%.1f m over the water)" % a.column_height())
+	await _advance(WaterSplash.LIFE + 0.2)
+	_ok(not is_instance_valid(a) and not is_instance_valid(b) and not is_instance_valid(c),
+		"the splash frees itself")
 
 
 # --- Harness ------------------------------------------------------------------
