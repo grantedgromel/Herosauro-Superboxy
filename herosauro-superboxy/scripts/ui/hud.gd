@@ -202,7 +202,7 @@ func _build_boss_banner() -> void:
 	var text_w := BOSS_PLATE.x - 28.0 - BOSS_AVATAR - 18.0
 
 	_boss_bar = StatBar.new()
-	_boss_bar.setup(StatBar.Variant.BOSS, float(GameManager.MAX_BOSS_HEALTH), UIStyle.BOSS_AMBER, 10)
+	_boss_bar.setup(StatBar.Variant.BOSS, float(GameManager.boss_max_health()), UIStyle.BOSS_AMBER, 10)
 	_boss_bar.phase_marker = GameManager.BOSS_PHASE2_RATIO
 	_place(_boss_bar, Control.PRESET_CENTER_TOP, Vector2(text_x, 14.0 + BOSS_PLATE.y - 14.0 - BOSS_BAR_H),
 		Vector2(text_w, BOSS_BAR_H))
@@ -673,7 +673,7 @@ func _on_game_started() -> void:
 	_rebuild_pause_hints()
 	for panel: HeroPanel in _heroes.values():
 		panel.reset()
-	_boss_bar.reset_to(float(GameManager.MAX_BOSS_HEALTH))
+	_boss_bar.reset_to(float(GameManager.boss_max_health()))
 	_boss_bar.set_fill_color(UIStyle.BOSS_AMBER)
 	_run_clock = 0.0
 	_start_pending = false
@@ -717,10 +717,10 @@ func _on_player_respawned(player_id: int) -> void:
 
 func _on_boss_damaged(amount: int, new_health: int) -> void:
 	_boss_bar.set_value(float(new_health), amount > 0)
-	_boss_hp.text = "%d / %d" % [new_health, GameManager.MAX_BOSS_HEALTH]
+	_boss_hp.text = "%d / %d" % [new_health, GameManager.boss_max_health()]
 	if amount <= 0:
 		return
-	if new_health > 0 and float(new_health) < float(GameManager.MAX_BOSS_HEALTH) * LOW_BEAT_RATIO:
+	if new_health > 0 and float(new_health) < float(GameManager.boss_max_health()) * LOW_BEAT_RATIO:
 		_beat_when("low")
 	_boss_face.hit_flash()
 	_spawn_damage_number(amount)

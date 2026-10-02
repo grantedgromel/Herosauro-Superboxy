@@ -140,7 +140,7 @@ func _check_tuning_ladder() -> void:
 	GameManager.set_difficulty(GameManager.Difficulty.HARD)
 	await _start(2, 1)
 	await _settle(4)
-	GameManager.damage_boss(int(GameManager.MAX_BOSS_HEALTH * 0.55), 1)
+	GameManager.damage_boss(int(GameManager.boss_max_health() * 0.55), 1)
 	await _settle(4)
 	var hot: Dictionary = _boss().tuning()
 	var sprint := 8.0 * 1.3
@@ -453,7 +453,7 @@ func _check_roar() -> void:
 	await _settle(30)
 
 	var before := int(GameManager.player_health[1])
-	GameManager.damage_boss(int(GameManager.MAX_BOSS_HEALTH * 0.55), 1)
+	GameManager.damage_boss(int(GameManager.boss_max_health() * 0.55), 1)
 	_ok(GameManager.boss_phase == 2, "crossing half health flips the phase")
 
 	for i in int(3.0 * TICK):

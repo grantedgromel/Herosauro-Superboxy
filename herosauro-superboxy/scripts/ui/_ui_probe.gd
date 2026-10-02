@@ -517,13 +517,13 @@ func _check_hud() -> void:
 	_ok(p2._bar._ghost > p2._bar._shown, "P2 bar left a chip trail behind the hit")
 
 	# Drive the boss under half to trip phase two.
-	while GameManager.boss_health > int(GameManager.MAX_BOSS_HEALTH * 0.45):
+	while GameManager.boss_health > int(GameManager.boss_max_health() * 0.45):
 		GameManager.damage_boss(25, 1)
 	await get_tree().process_frame
 	_ok(GameManager.boss_phase == 2, "boss reached phase two")
 	_ok(hud._phase_label.text == Loc.f("phase", [2]), "phase label updated (%s)" % hud._phase_label.text)
 	_ok(hud._boss_bar._rage_target > 0.5, "boss bar is cross-fading to rage")
-	_ok(hud._boss_hp.text == "%d / %d" % [GameManager.boss_health, GameManager.MAX_BOSS_HEALTH],
+	_ok(hud._boss_hp.text == "%d / %d" % [GameManager.boss_health, GameManager.boss_max_health()],
 		"boss readout tracks health")
 
 	# The kid HUD carries no score and no clock: the goal's stars are the number.
@@ -575,7 +575,7 @@ func _check_hud() -> void:
 	_near(p1._bar.value, 100.0, 0.01, "restart resets P1's bar")
 	_near(p2._bar.value, 100.0, 0.01, "restart resets P2's bar")
 	_ok(not p1._down_veil.visible, "restart clears the downed state")
-	_near(hud._boss_bar.value, float(GameManager.MAX_BOSS_HEALTH), 0.01, "restart resets boss bar")
+	_near(hud._boss_bar.value, float(GameManager.boss_max_health()), 0.01, "restart resets boss bar")
 	_ok(hud._phase_label.text == Loc.f("phase", [1]), "restart resets the phase label")
 	_ok(hud._fx._sustain_level == 0.0, "restart clears the danger vignette")
 	_ok(hud._pops.get_child_count() == 0, "restart clears floating numbers")

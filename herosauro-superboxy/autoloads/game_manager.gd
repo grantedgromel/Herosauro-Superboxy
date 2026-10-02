@@ -44,6 +44,11 @@ enum Difficulty { EASY, NORMAL, HARD }
 
 const MAX_PLAYER_HEALTH := 100
 const MAX_BOSS_HEALTH := 500
+## With Ajudas on, Adamastor has three times the health. The clumsy-child bot
+## (tools/kidbot) beat him in about 40 s at 500: kid damage and the companion
+## made the book's climactic fight over before the first story beat finished.
+## Longer, not harder: his damage and wind-ups are already kid-tuned.
+const ASSIST_BOSS_HEALTH_SCALE := 3
 const FALL_PENALTY := 20
 const BOSS_PHASE2_RATIO := 0.5
 const COMBO_TIMEOUT := 2.5
@@ -152,7 +157,7 @@ func start_game() -> void:
 	fight_time = 0.0
 	player_health = {1: MAX_PLAYER_HEALTH, 2: MAX_PLAYER_HEALTH}
 	player_score = {1: 0, 2: 0}
-	boss_health = MAX_BOSS_HEALTH
+	boss_health = boss_max_health()
 	boss_phase = 1
 	combo = {1: 0, 2: 0}
 	_combo_window = {1: 0.0, 2: 0.0}
@@ -307,7 +312,7 @@ func damage_boss(amount: int, source_player: int) -> void:
 	player_score[pid] = int(player_score[pid]) + points
 	add_score(points)
 
-	if boss_phase == 1 and float(boss_health) / float(MAX_BOSS_HEALTH) <= BOSS_PHASE2_RATIO:
+	if boss_phase == 1 and float(boss_health) / float(boss_max_health()) <= BOSS_PHASE2_RATIO:
 		boss_phase = 2
 		boss_phase_changed.emit(2)
 
@@ -394,6 +399,10 @@ func request_story_beat(beat_id: String) -> void:
 
 
 ## Multiplier PlayerBase applies to incoming damage.
+func boss_max_health() -> int:
+	return MAX_BOSS_HEALTH * (ASSIST_BOSS_HEALTH_SCALE if assists else 1)
+
+
 func hero_damage_scale() -> float:
 	return ASSIST_DAMAGE_SCALE if assists else 1.0
 

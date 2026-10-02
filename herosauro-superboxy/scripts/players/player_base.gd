@@ -345,6 +345,10 @@ func _ready() -> void:
 	# you is a partner who can kill you by accident, and "my friend shoved me into
 	# the Douro" is a co-op story nobody enjoys twice.
 	collision_mask = PhysicsLayers.WORLD | PhysicsLayers.BOSS | PhysicsLayers.BLOCKERS
+	# Only static WORLD ground carries a hero. The stadium dragon's body is a
+	# moving AnimatableBody on BLOCKERS, and a hero riding it came out of
+	# move_and_slide as NaN in about 3 of 8 kidbot runs (Jolt, platform velocity).
+	platform_floor_layers = PhysicsLayers.WORLD
 
 	motion_mode = CharacterBody3D.MOTION_MODE_GROUNDED
 	up_direction = Vector3.UP
