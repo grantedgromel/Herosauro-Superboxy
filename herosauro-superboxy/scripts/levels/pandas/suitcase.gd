@@ -13,7 +13,11 @@ const MagicFX := preload("res://scripts/levels/pandas/magic_fx.gd")
 
 enum State { HIDDEN, APPEARING, WAITING, FLYING, CARRIED }
 
-const PICK_RADIUS := 0.8
+## Big on purpose (kid rule 10): the balcony case sits at 1.8 m behind a
+## pilaster, and a child pressing toward it from the ground stands 1.6-1.8 m
+## away with the capsule top 0.7 m below it (kidbot pandas seed 3 was stuck
+## there 4 minutes at 0.8). 1.5 reaches it from the ground; a jump still works.
+const PICK_RADIUS := 1.5
 const FLY_TIME := 0.9
 const FLY_ARC := 2.6
 
