@@ -146,6 +146,12 @@ func is_speaking() -> bool:
 	return _speaking
 
 
+## True only while something can actually be heard (a recording or the
+## platform voice), not while the silent read-along estimate walks the words.
+func is_audible() -> bool:
+	return _speaking and (_mode == 1 or _mode == 2)
+
+
 func current_word() -> int:
 	return _word
 

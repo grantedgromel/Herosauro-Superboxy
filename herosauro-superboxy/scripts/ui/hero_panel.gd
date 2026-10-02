@@ -192,7 +192,10 @@ func setup(id: int, right_hand: bool) -> void:
 
 	_dial = AbilityDial.new()
 	_place(_dial, Vector2(dial_x, 10.0), Vector2(DIAL, DIAL))
-	_dial.setup("E", accent)
+	# The hero's own first power key (K for player one), so the dial and the
+	# start-of-level controls card (scripts/ui/hint) name the same key.
+	var caps := UIStyle.binding_caps(player_id, ["ability"], 1)
+	_dial.setup(caps[0] if not caps.is_empty() and caps[0].length() <= 2 else "E", accent)
 
 	_name = UIStyle.ink(UIStyle.actor_name(actor), UIStyle.Scale.SUBHEAD,
 		UIStyle.TEXT_PRIMARY, _lead_align())
