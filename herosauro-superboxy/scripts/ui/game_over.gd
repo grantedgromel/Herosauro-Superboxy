@@ -14,7 +14,7 @@ extends Control
 ##
 ## The outro runs while GameManager is in VICTORY; Continue calls go_to_menu.
 
-const POSE_WAIT := 2.0
+const POSE_WAIT := 2.6   # long enough to watch Adamastor's Douro splash land
 const RETRY_WAIT := 1.0
 
 var phase: String = ""            # "", "pose", "outro", "sticker", "retry"

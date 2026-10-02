@@ -86,7 +86,7 @@ scripts/
   toon_factory.gd     # PBR StandardMaterial3D factory, cached and shared
   camera_rig.gd       # third-person SpringArm orbit camera with collision
   players/            # CharacterBody3D hero, camera-relative movement, AnimationTree
-  boss/               # Adamastor + FSM, real hitboxes, physics corpse topple
+  boss/               # Adamastor + FSM, real hitboxes, falls back into the Douro with a splash
   props/              # Hitbox/Hurtbox components, rigid-body and breakable props
   world/              # bridge geometry, Porto skyline, city backdrop, lighting rig
   fx/ · abilities/ · ui/
