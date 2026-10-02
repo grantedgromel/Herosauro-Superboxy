@@ -341,7 +341,7 @@ func set_health(new_health: int, hit: bool) -> void:
 	_down_veil.visible = down
 	_face.set_dimmed(down)
 	if down:
-		_set_status(2, "DOWN", UIStyle.DANGER)
+		_set_status(2, Loc.t("status_bubble").to_upper(), UIStyle.INFO)
 	elif _status_kind == 2:
 		_set_status(0, "", UIStyle.GOLD)
 
@@ -485,7 +485,7 @@ func set_invulnerable(on: bool) -> void:
 	if _status_kind == 2:
 		return
 	if on and _status_kind != 1:
-		_set_status(1, "INVINCIBLE", UIStyle.GOLD)
+		_set_status(1, Loc.t("status_safe").to_upper(), UIStyle.GOLD)
 	elif not on and _status_kind == 1:
 		_set_status(0, "", UIStyle.GOLD)
 

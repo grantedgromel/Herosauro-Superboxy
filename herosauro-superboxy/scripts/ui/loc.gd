@@ -28,6 +28,9 @@ const S := {
 	"pick_hero": {"pt": "Escolhe o teu herói!", "en": "Pick your hero!"},
 	"helper_note": {"pt": "O outro irmão ajuda-te!", "en": "Your brother helps you!"},
 	"helper": {"pt": "Ajudante", "en": "Helper"},
+	# Hero panel status pills
+	"status_safe": {"pt": "Protegido", "en": "Safe"},
+	"status_bubble": {"pt": "Na bolha!", "en": "Bubble!"},
 	# Reader
 	"next": {"pt": "Seguinte", "en": "Next"},
 	"back": {"pt": "Voltar", "en": "Back"},
